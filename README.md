@@ -1,4 +1,4 @@
-# MTSUGradPath
+# MTSU GradPath
 
 **MTSUGradPath** is a Python application designed to help Middle Tennessee State University (MTSU) students create an optimized path to graduation. The application analyzes degree requirements, prerequisite chains, course offerings, and university policies to generate a personalized semester-by-semester academic plan. Students can also track their progress toward completing their degree and adjust their schedules as they complete coursework.
 
