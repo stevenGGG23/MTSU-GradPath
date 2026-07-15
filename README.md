@@ -8,21 +8,30 @@ This project is being developed as a group project for a Computer Science course
 
 ## Features
 
-- Generate a personalized path to graduation
-- Analyze course prerequisite chains
+- Generate a personalized semester-by-semester path to graduation
+- Analyze course prerequisite chains and detect conflicts
 - Track completed and remaining degree requirements
 - Optimize semester credit loads
-- Prevent prerequisite and scheduling conflicts
-- Monitor academic progress throughout a student's degree
-- Easy-to-use command-line interface
+- Graphical user interface built with tkinter
+- Visual dashboards powered by matplotlib:
+  - Credit-hour load per semester (bar chart)
+  - Degree progress toward graduation (progress chart)
+  - Prerequisite chain view
+- SQLite database for course catalog, prerequisites, and saved plans
+- Export generated plans to JSON
 
 ---
 
 ## Technologies Used
 
-- Python 3
-- Object-Oriented Programming (OOP)
-- Git & GitHub
+- **Python 3.10+** — core application language
+- **SQLite (sqlite3)** — storage for the course catalog, degree requirements, and student plans
+- **tkinter** — GUI framework (windows, dropdowns, listboxes, tabbed views)
+- **CustomTkinter** — modern themed widgets layered on tkinter
+- **matplotlib** — charts embedded in the GUI via the TkAgg backend
+- **JSON** — catalog seed data and plan export format
+- **unittest** — automated testing of the prerequisite resolver and plan generator
+- **Git & GitHub** — version control and collaboration
 
 ---
 
@@ -31,16 +40,23 @@ This project is being developed as a group project for a Computer Science course
 ```
 MTSUGradPath/
 │
-├── main.py
-├── student.py
-├── course.py
-├── planner.py
-├── scheduler.py
-├── requirements.py
+├── main.py                  # Application entry point
+├── gui.py                   # tkinter/CustomTkinter interface
+├── charts.py                # matplotlib visualizations (TkAgg embedding)
+├── database.py              # SQLite connection, schema, and queries
+├── student.py               # Student model (major, completed courses, progress)
+├── course.py                # Course model (credits, prerequisites, offerings)
+├── planner.py               # Degree requirement engine
+├── scheduler.py             # Semester plan generator and validator
+├── utils.py                 # Shared helpers
 ├── data/
-│   ├── courses.json
-│   └── degree_requirements.json
-├── utils.py
+│   ├── courses.json             # Catalog seed data
+│   ├── degree_requirements.json # Degree program seed data
+│   └── gradpath.db              # SQLite database (generated on first run)
+├── tests/
+│   ├── test_planner.py
+│   └── test_scheduler.py
+├── requirements.txt
 └── README.md
 ```
 
@@ -49,48 +65,50 @@ MTSUGradPath/
 ## Installation
 
 1. Clone the repository:
-
 ```bash
 git clone https://github.com/yourusername/MTSUGradPath.git
 ```
 
 2. Navigate to the project directory:
-
 ```bash
 cd MTSUGradPath
 ```
 
-3. Run the application:
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
+4. Run the application:
 ```bash
 python main.py
 ```
+
+On first run, the application seeds the SQLite database (`data/gradpath.db`) from the JSON catalog files.
 
 ---
 
 ## How It Works
 
-1. Enter your major and completed coursework.
+1. Select your major and enter completed coursework through the GUI.
 2. The application analyzes:
    - Degree requirements
-   - Course prerequisites
+   - Course prerequisite chains
    - University policies
    - Recommended credit loads
-3. A semester-by-semester graduation path is generated.
-4. As courses are completed, students can update their progress and generate an updated academic path.
+3. A semester-by-semester graduation path is generated and displayed, along with charts showing credit load per semester and overall degree progress.
+4. As courses are completed, students update their progress and generate an updated academic path. Plans and progress are saved to the SQLite database and can be exported to JSON.
 
 ---
 
 ## Future Enhancements
 
-- Graphical User Interface (GUI)
 - Support for multiple majors and minors
 - GPA tracking
 - Export schedules to PDF
-- Integration with MTSU course catalog data
+- Integration with live MTSU course catalog data
 - Elective recommendations
-- Automatic schedule conflict detection
-- Interactive prerequisite visualization
+- Interactive prerequisite graph visualization
 
 ---
 
