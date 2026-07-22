@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <div class="d-flex justify-content-between align-items-start mb-4 flex-column flex-md-row gap-3">
+    <div>
+      <h2 class="mb-2">Your recommended plan</h2>
+      <p class="text-muted mb-0">Suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
+    </div>
+    <div>
+      <a class="btn btn-outline-light me-2" href="/">Edit completed courses</a>
+      <a class="btn btn-primary" href="/sync">Sync Catalog</a>
+    </div>
+  </div>
+
+  {% if warnings %}
+  <div class="alert alert-danger prereq-warning mb-4">
+    <strong>⚠ Prerequisite warning{{ 's' if warnings|length != 1 }}:</strong> the plan below has {{ warnings|length }} issue{{ 's' if warnings|length != 1 }} that would not actually be allowed at registration.
+    <ul class="mb-0 mt-2">
+      {% for w in warnings %}
+      <li>
+        {% if w.type == 'same_term' %}
+        <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong> together with its prerequisite <strong>{{ w.prereq }}</strong> &mdash; these can't be taken in the same term.
+        {% else %}
+        <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if audit %}
+  <div class="progress-summary mb-4">
+    <div class="progress-ring-wrap">
+      <div class="progress-ring" style="--pct: {{ audit.percent }};">
+        <div class="progress-ring-inner">
+          <span class="progress-ring-value">{{ audit.percent | round(0, 'floor') | int }}%</span>
+          <span class="progress-ring-label">complete</span>
+        </div>
+      </div>
+    </div>
+    <div class="progress-summary-detail">
+      <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
+      <p class="text-muted mb-3">Toward the 120-hour B.S. Computer Science, Professional Concentration degree.</p>
+      <div class="category-bars">
+        {% for group in audit.groups %}
+        <div class="category-bar-row">
+          <div class="category-bar-label">
+            <span>{{ group.label }}</span>
+            <span class="text-muted">{{ group.completed_hours }} / {{ group.required_hours }} cr hrs</span>
+          </div>
+          <div class="progress category-bar">
+            {% set pct = (100 * group.completed_hours / group.required_hours) if group.required_hours else 0 %}
+            <div class="progress-bar" role="progressbar" style="width: {{ pct }}%;" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-4">
+    <h4 class="mb-3">Requirement details</h4>
+    <div class="accordion" id="auditAccordion">
+      {% for group in audit.groups %}
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="auditHeading{{ loop.index }}">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#auditCollapse{{ loop.index }}" aria-expanded="false" aria-controls="auditCollapse{{ loop.index }}">
+            {{ group.label }}
+            <span class="badge {{ 'bg-success' if group.completed_hours >= group.required_hours else 'bg-secondary' }} ms-3">{{ group.completed_hours }} / {{ group.required_hours }} cr hrs</span>
+          </button>
+        </h2>
+        <div id="auditCollapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="auditHeading{{ loop.index }}" data-bs-parent="#auditAccordion">
+          <div class="accordion-body">
+            {% for item in group.entries %}
+            <div class="audit-item {{ 'audit-item-done' if item.done }}">
+              <div class="audit-item-top">
+                <span class="audit-item-status">{{ '✓' if item.done else '○' }}</span>
+                <span class="audit-item-label">{{ item.label }}</span>
+                <span class="audit-item-hours">
+                  {% if item.partial_hours is defined %}{{ item.partial_hours }} / {% endif %}{{ item.hours }} cr hr{{ 's' if item.hours != 1 else '' }}
+                </span>
+              </div>
+              {% if item.suggestions %}
+              <div class="audit-item-suggestions">e.g. {{ item.suggestions | join(', ') }}</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if term_hours %}
+  <div class="mb-4">
+    <h4 class="mb-3">Credit hours per term</h4>
+    <div class="term-chart">
+      {% for term, hours in term_hours.items() %}
+      {% set season, year = term.split() %}
+      <div class="term-bar-col">
+        <div class="term-bar-track">
+          {% if hours %}
+          {% set bar_pct = (100 * hours / max_term_hours) if max_term_hours else 0 %}
+          <div class="term-bar" style="height: {{ bar_pct }}%;"></div>
+          {% endif %}
+        </div>
+        <div class="term-bar-value {{ 'term-bar-value-zero' if not hours }}">{{ hours }}</div>
+        <div class="term-bar-label">{{ season }}<br>{{ year }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="mb-4">
+    <h4 class="mb-3">Completed courses</h4>
+    {% if completed %}
+    <div class="d-flex flex-wrap gap-2">
+      {% for course in completed %}
+      <span class="badge bg-secondary">{{ course }}</span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted">No completed courses were added.</p>
+    {% endif %}
+  </div>
+
+  <div class="mb-4">
+    <h4 class="mb-3">Plan overview</h4>
+    <div class="term-grid">
+      {% for term, items in plan.items() %}
+      <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
+        <div class="term-card-header">
+          <span class="term-card-title">{{ term }}</span>
+          {% if term in term_hours %}<span class="badge bg-secondary">{{ term_hours[term] }} cr hrs</span>{% endif %}
+        </div>
+        <div class="plan-item-table">
+          {% for item in items %}
+          <div class="plan-item-row plan-item-{{ item.kind }}">
+            <span class="plan-item-tag">{{ 'CS' if item.kind == 'course' else ('GEN' if item.kind == 'requirement' else '—') }}</span>
+            <div class="plan-item-main">
+              {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
+              <span class="plan-item-title">{{ item.title }}</span>
+              {% if item.suggestion %}<span class="plan-item-suggestion">e.g. {{ item.suggestion }}</span>{% endif %}
+            </div>
+            {% if item.hours %}<span class="plan-item-hours">{{ item.hours }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

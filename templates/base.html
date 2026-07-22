@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MTSU Schedule Planner</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark navbar-top mb-4">
+    <div class="container">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+        <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="MTSU" class="navbar-logo">
+        MTSU Schedule Planner
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMenu">
+        <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+          <li class="nav-item">
+            <a class="nav-link active" aria-current="page" href="/">Home</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/prerequisites">Prerequisite Map</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">Pipeline</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/sync">Sync Catalog</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <header class="header text-center mb-4">
+      <h1>MTSU Schedule Planner</h1>
+      <p class="lead">Plan your next term or build a multi-term roadmap with live catalog data and simple course tracking.</p>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="flash-messages mb-4">
+        {% for category, message in messages %}
+        <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer mt-5 mb-4 text-center">
+    <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="" class="footer-logo mb-2">
+    <p class="mb-0">This planner does not register you for classes &mdash; use <a href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">PipelineMT</a> to enroll. Not an official registration tool.</p>
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

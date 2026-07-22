@@ -1,0 +1,22 @@
+<div class="requirement-row">
+  <div class="requirement-row-top">
+    <label for="hours_{{ generic_id }}" class="requirement-row-label">{{ label }}</label>
+    <div class="requirement-row-controls">
+      <input
+        type="number"
+        class="form-control form-control-sm requirement-hours-input"
+        id="hours_{{ generic_id }}"
+        name="hours_{{ generic_id }}"
+        min="0"
+        max="{{ hours }}"
+        step="0.5"
+        value="0">
+      <span class="requirement-hours-max">/ {{ hours }} cr hr{{ 's' if hours != 1 else '' }}</span>
+      <button type="button" class="btn btn-sm btn-outline-primary requirement-mark-complete" data-target="hours_{{ generic_id }}">Mark complete</button>
+    </div>
+  </div>
+  <div class="requirement-progress"><div class="requirement-fill"></div></div>
+  {% if suggestions %}
+  <div class="requirement-suggestions">e.g. {{ suggestions | join(', ') }}</div>
+  {% endif %}
+</div>

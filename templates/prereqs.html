@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <h2 class="mb-2">Prerequisite Map</h2>
+  <p class="text-muted">Dependency graph for the B.S. Computer Science, Professional Concentration required courses. An arrow from A to B means A is a prerequisite for B.</p>
+
+  <div class="prereq-legend mb-3">
+    <span class="legend-item"><span class="legend-swatch legend-core"></span>Computer Science Core</span>
+    <span class="legend-item"><span class="legend-swatch legend-conc"></span>Professional Concentration</span>
+    <span class="legend-item"><span class="legend-swatch legend-lang"></span>High-Level Language (any one)</span>
+    <span class="legend-item"><span class="legend-swatch legend-sup"></span>Supporting Course</span>
+    <span class="legend-item"><span class="legend-swatch legend-ext"></span>External Requirement</span>
+  </div>
+
+  <div class="prereq-graph-wrap">
+    <pre class="mermaid">{{ mermaid_source }}</pre>
+  </div>
+
+  <p class="form-text mt-3 mb-0">External requirements (dashed nodes) are prerequisites outside this program's tracked courses, such as a math placement course, and are not otherwise scheduled by the planner.</p>
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
+</script>
+{% endblock %}

@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <div class="row g-4">
+    <div class="col-12">
+      <h2 class="mb-3">Build your academic plan</h2>
+      <p class="text-muted">Work through each step, then generate a plan toward graduation.</p>
+      <form method="post" id="planner-form">
+
+        <div class="accordion" id="plannerAccordion">
+
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#stepCs" aria-expanded="true">
+                <span class="step-badge">1</span>&nbsp;Computer Science courses
+                <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
+              </button>
+            </h2>
+            <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
+              <div class="accordion-body">
+                <p class="form-text mt-0 mb-2">Check off every CSCI course you've already completed.</p>
+                {% if not cs_courses %}
+                <div class="alert alert-info mb-0">
+                  No catalog courses loaded yet. Click <strong>Sync Catalog</strong> to enable the checklist.
+                </div>
+                {% else %}
+                {% for level, level_courses in cs_courses | groupby('level') %}
+                <h6 class="cs-level-heading">{{ level }}</h6>
+                <div class="cs-course-grid">
+                  {% for course in level_courses %}
+                  <div class="form-check cs-course-check">
+                    <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
+                    <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
+                      <span class="cs-course-code">{{ course.code }}</span>
+                      <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
+                    </label>
+                  </div>
+                  {% endfor %}
+                </div>
+                {% endfor %}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepSearch" aria-expanded="false">
+                <span class="step-badge">2</span>&nbsp;Add other completed courses
+              </button>
+            </h2>
+            <div id="stepSearch" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+              <div class="accordion-body">
+                <p class="form-text mt-0 mb-2">For supporting courses like MATH 1910 or COMM 2200, or anything not in the checklist.</p>
+                <div class="input-group position-relative">
+                  <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off">
+                  <button type="button" class="btn btn-primary" id="add-course">Add</button>
+                  <div id="course_suggestions" class="autocomplete-list shadow-sm"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepRequirements" aria-expanded="false">
+                <span class="step-badge">3</span>&nbsp;Other degree requirements
+              </button>
+            </h2>
+            <div id="stepRequirements" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+              <div class="accordion-body">
+                <p class="form-text mt-0 mb-2">Non-CSCI requirements aren't tracked course-by-course &mdash; enter how many hours you've completed. Use "Mark complete" for a quick fill.</p>
+
+                <div class="requirement-group">
+                  <h6 class="requirement-group-title">Supporting courses</h6>
+                  {% for generic_id, label, hours, suggestions in supporting_generic %}
+                  {% include "_requirement_row.html" %}
+                  {% endfor %}
+                </div>
+
+                <div class="requirement-group">
+                  <h6 class="requirement-group-title">True Blue Core (general education)</h6>
+                  {% for generic_id, label, hours, suggestions in tbc_generic %}
+                  {% include "_requirement_row.html" %}
+                  {% endfor %}
+                </div>
+
+                <div class="requirement-group">
+                  <h6 class="requirement-group-title">Electives</h6>
+                  {% set generic_id = electives_generic_id %}
+                  {% set label = "Free electives" %}
+                  {% set hours = electives_hours %}
+                  {% set suggestions = ["Any elective course; at least 4 hrs must be upper-division"] %}
+                  {% include "_requirement_row.html" %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepTerms" aria-expanded="false">
+                <span class="step-badge">4</span>&nbsp;Target terms
+              </button>
+            </h2>
+            <div id="stepTerms" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+              <div class="accordion-body">
+                <div class="row gy-3">
+                  <div class="col-md-4">
+                    <label for="start_season" class="form-label">Starting term</label>
+                    <select class="form-select" id="start_season" name="start_season">
+                      {% for season in season_options %}
+                      <option value="{{ season }}" {{ 'selected' if season == default_season }}>{{ season }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-4">
+                    <label for="start_year" class="form-label">Starting year</label>
+                    <input type="number" class="form-control" id="start_year" name="start_year" value="{{ default_year }}" min="2020" max="2099">
+                  </div>
+                  <div class="col-md-4">
+                    <label for="target_semesters" class="form-label">Number of terms</label>
+                    <input type="number" class="form-control" id="target_semesters" name="target_semesters" value="4" min="1" max="12">
+                  </div>
+                  <div class="col-12">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="include_summer" name="include_summer">
+                      <label class="form-check-label" for="include_summer">Include summer term planning</label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="mb-4">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <label class="form-label mb-0">Selected completed courses</label>
+            <button type="button" class="btn btn-sm btn-outline-light" id="clear-courses">Clear all</button>
+          </div>
+          <div class="d-flex flex-wrap gap-2" id="selected-courses"></div>
+          <textarea name="completed_courses" id="completed_courses" class="d-none"></textarea>
+        </div>
+
+        <div class="mt-4">
+          <button class="btn btn-primary btn-lg" type="submit">Generate Plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+const addCourseButton = document.getElementById('add-course');
+const courseInput = document.getElementById('course_input');
+const selectedCourses = document.getElementById('selected-courses');
+const completedCoursesField = document.getElementById('completed_courses');
+const plannerForm = document.getElementById('planner-form');
+const clearCoursesButton = document.getElementById('clear-courses');
+const suggestionsBox = document.getElementById('course_suggestions');
+const courseOptions = {{ courses | tojson | safe }};
+const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
+const csSelectedCount = document.getElementById('cs-selected-count');
+
+function normalizeCourse(code) {
+  return code.trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function updateHiddenField() {
+  const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
+  completedCoursesField.value = values.join('\n');
+}
+
+function updateCsSelectedCount() {
+  const checked = document.querySelectorAll('.cs-course-checkbox:checked').length;
+  csSelectedCount.textContent = `${checked} selected`;
+}
+
+function syncCheckboxForCode(code, checked) {
+  const box = document.querySelector(`.cs-course-checkbox[data-code="${code}"]`);
+  if (box) {
+    box.checked = checked;
+    box.closest('.cs-course-check').classList.toggle('is-checked', checked);
+    updateCsSelectedCount();
+  }
+}
+
+function setSuggestions(matches) {
+  suggestionsBox.innerHTML = '';
+  if (!matches.length) {
+    suggestionsBox.style.display = 'none';
+    return;
+  }
+
+  suggestionsBox.style.display = 'block';
+  matches.slice(0, 50).forEach(match => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
+    item.textContent = match.label;
+    item.addEventListener('click', () => {
+      addCourse(match.code, match.label);
+      courseInput.value = '';
+      setSuggestions([]);
+      courseInput.focus();
+    });
+    suggestionsBox.appendChild(item);
+  });
+}
+
+function clearSuggestions() {
+  suggestionsBox.innerHTML = '';
+  suggestionsBox.style.display = 'none';
+}
+
+function addCourse(code, label = null) {
+  const normalized = normalizeCourse(code);
+  if (!normalized) return;
+  const existing = Array.from(selectedCourses.querySelectorAll('.badge')).some(badge => badge.dataset.course === normalized);
+  if (existing) {
+    courseInput.classList.add('is-invalid');
+    setTimeout(() => courseInput.classList.remove('is-invalid'), 900);
+    return;
+  }
+
+  const badge = document.createElement('span');
+  badge.className = 'badge bg-primary p-2 d-inline-flex align-items-center gap-2';
+  badge.dataset.course = normalized;
+  badge.textContent = label ? `${normalized} — ${label}` : normalized;
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn-close btn-close-white btn-sm ms-2';
+  remove.setAttribute('aria-label', 'Remove');
+  remove.addEventListener('click', () => {
+    badge.remove();
+    updateHiddenField();
+    syncCheckboxForCode(normalized, false);
+  });
+
+  badge.appendChild(remove);
+  selectedCourses.appendChild(badge);
+  updateHiddenField();
+  syncCheckboxForCode(normalized, true);
+}
+
+function removeCourse(code) {
+  const badge = selectedCourses.querySelector(`.badge[data-course="${code}"]`);
+  if (badge) {
+    badge.remove();
+    updateHiddenField();
+  }
+}
+
+function updateCourseSearch() {
+  const query = normalizeCourse(courseInput.value);
+  if (!query) {
+    clearSuggestions();
+    return;
+  }
+
+  const matches = courseOptions.filter(course =>
+    course.code.includes(query) || course.label.toUpperCase().includes(query)
+  );
+  setSuggestions(matches);
+}
+
+addCourseButton.addEventListener('click', () => {
+  addCourse(courseInput.value);
+  courseInput.value = '';
+  clearSuggestions();
+  courseInput.focus();
+});
+
+courseInput.addEventListener('input', updateCourseSearch);
+
+courseInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addCourse(courseInput.value);
+    courseInput.value = '';
+    clearSuggestions();
+  }
+});
+
+courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
+
+clearCoursesButton.addEventListener('click', () => {
+  selectedCourses.innerHTML = '';
+  updateHiddenField();
+  csCourseCheckboxes.forEach(box => {
+    box.checked = false;
+    box.closest('.cs-course-check').classList.remove('is-checked');
+  });
+  updateCsSelectedCount();
+});
+
+csCourseCheckboxes.forEach(box => {
+  box.addEventListener('change', () => {
+    const code = box.dataset.code;
+    box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
+    updateCsSelectedCount();
+    if (box.checked) {
+      addCourse(code, box.dataset.label);
+    } else {
+      removeCourse(code);
+    }
+  });
+});
+
+document.querySelectorAll('.requirement-mark-complete').forEach(button => {
+  button.addEventListener('click', () => {
+    const input = document.getElementById(button.dataset.target);
+    input.value = input.max;
+    input.dispatchEvent(new Event('input'));
+  });
+});
+
+document.querySelectorAll('.requirement-hours-input').forEach(input => {
+  const updateFill = () => {
+    const pct = input.max > 0 ? Math.min(100, 100 * input.value / input.max) : 0;
+    const row = input.closest('.requirement-row');
+    row.classList.toggle('requirement-row-complete', Number(input.value) >= Number(input.max));
+    const fill = row.querySelector('.requirement-fill');
+    if (fill) fill.style.width = `${pct}%`;
+  };
+  input.addEventListener('input', updateFill);
+  updateFill();
+});
+
+plannerForm.addEventListener('submit', () => {
+  updateHiddenField();
+});
+</script>
+{% endblock %}
