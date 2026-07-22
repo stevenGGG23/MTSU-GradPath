@@ -6,7 +6,7 @@ Originally proposed under the working title "MTSU Academic Path Planner." See Pr
 
 ---
 
-## Demo
+## Demo: mtsu-gradpath.onrender.com 
 
 | | |
 |---|---|
