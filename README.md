@@ -8,15 +8,10 @@ Originally proposed under the working title "MTSU Academic Path Planner." See Pr
 
 ## Demo
 
-Screenshots to be added.
-
-<!--
-![Home page: course selection and requirement entry](docs/screenshots/home.png)
-![Generated plan: progress summary and term grid](docs/screenshots/plan.png)
-![Prerequisite warning banner](docs/screenshots/warning.png)
--->
-
-Suggested pages to capture: the course-selection form (`/`), a generated plan showing the progress ring and term grid, and the prerequisite warning banner (visible when `validate_plan` reports a conflict). Place image files under `docs/screenshots/` and uncomment the corresponding line above.
+| | |
+|---|---|
+| ![Course selection form](static/demo-course-selection.png) | ![Plan overview and completion progress](static/demo-plan-overview.png) |
+| ![Term-by-term generated schedule](static/demo-plan-schedule.png) | ![Prerequisite dependency graph](static/demo-prerequisite-map.png) |
 
 ---
 
