@@ -25,6 +25,7 @@ Originally proposed under the working title "MTSU Academic Path Planner." See Pr
 | Storage | SQLite by default; PostgreSQL supported via `DATABASE_URL` |
 | Frontend | Server-rendered Jinja templates, Bootstrap 5, custom CSS |
 | Tests | `pytest`, 11 test cases covering scheduling, prerequisite validation, and course-offering-pattern constraints |
+| Live deployment | [mtsu-gradpath.onrender.com](https://mtsu-gradpath.onrender.com) (Render, free tier) |
 
 ---
 
@@ -160,6 +161,28 @@ Environment variables, read via `mtsugradpath/config.py` (values may be set dire
 | `MTSU_CATALOG_URL` | `https://catalog.mtsu.edu` | Base URL for the catalog widget API |
 | `MTSU_CATALOG_IDS` | `46` | Comma-separated catalog IDs to sync (46 is MTSU's undergraduate catalog) |
 | `MTSU_PROGRAM_PREFIX` | `CSCI` | Course prefix the sync and planner are scoped to |
+
+---
+
+## Deployment
+
+The application is hosted on [Render](https://render.com) as a Python 3 web service, live at **https://mtsu-gradpath.onrender.com**.
+
+| | |
+|---|---|
+| Repository | `stevenGGG23/MTSU-GradPath`, `main` branch, auto-deploys on every commit |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `gunicorn app:app --bind 0.0.0.0:$PORT` (also defined in `Procfile`) |
+| Instance | Free tier — spins down after inactivity, so the first request after idle can take up to a minute |
+
+Required environment variables (set under the service's Environment tab):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `SECRET_KEY` | Yes | Flask session signing key; the app fails to start without it (`app.py` reads it via `os.environ["SECRET_KEY"]`) |
+| `DATABASE_URL` | No | Points at a Render PostgreSQL instance for persistent storage. Without it, the app falls back to a local SQLite file, which does not persist across deploys/restarts on Render's ephemeral filesystem |
+
+To deploy your own instance, fork the repository, create a new Render Web Service pointed at it, set the build/start commands above, and add the `SECRET_KEY` environment variable before the first deploy.
 
 ---
 
