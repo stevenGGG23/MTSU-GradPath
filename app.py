@@ -1,3 +1,4 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, flash
 from mtsugradpath.config import PROGRAM_PREFIX
 from mtsugradpath.db import init_db, SessionLocal
@@ -23,7 +24,7 @@ from mtsugradpath.scraper import sync_courses
 from datetime import date
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "change-this-in-production"
+app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 
 with app.app_context():
     init_db()

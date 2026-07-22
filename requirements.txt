@@ -5,3 +5,4 @@ requests>=2.31
 beautifulsoup4>=4.13
 python-dotenv>=1.0
 pytest>=8.0
+gunicorn>=21.2
