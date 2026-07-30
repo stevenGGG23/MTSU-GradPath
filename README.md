@@ -236,6 +236,17 @@ The core objective is unchanged; the implementation approach evolved during deve
 
 ---
 
+## Acknowledgements
+
+- Middle Tennessee State University Undergraduate Catalog
+- Flask
+- SQLAlchemy
+- Bootstrap
+- Mermaid.js
+- Render
+
+---
+
 ## Team
 
 - Steven Gobran
