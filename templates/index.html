@@ -184,6 +184,30 @@ function updateHiddenField() {
   completedCoursesField.value = values.join('\n');
 }
 
+async function savedCompletedCourses() {
+  const completedCourses = Array.from(
+    selectedCourses.querySelectorAll('.badge')
+  ).map(badge => badge.dataset.course);
+
+  try {
+    const response = await fetch('/save-completed-courses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        completed_courses: completedCourses
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Unable to save completed courses');
+    }
+  } catch (error) {
+    console.error('Course save failed:', error);
+  }
+}
+
 function updateCsSelectedCount() {
   const checked = document.querySelectorAll('.cs-course-checkbox:checked').length;
   csSelectedCount.textContent = `${checked} selected`;
@@ -256,10 +280,11 @@ function addCourse(code, label = null) {
   remove.type = 'button';
   remove.className = 'btn-close btn-close-white btn-sm ms-2';
   remove.setAttribute('aria-label', 'Remove');
-  remove.addEventListener('click', () => {
+  remove.addEventListener('click', async () => {
     badge.remove();
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
+    await savedCompletedCourses();
   });
 
   badge.appendChild(remove);
@@ -268,11 +293,12 @@ function addCourse(code, label = null) {
   syncCheckboxForCode(normalized, true);
 }
 
-function removeCourse(code) {
+async function removeCourse(code) {
   const badge = selectedCourses.querySelector(`.badge[data-course="${code}"]`);
   if (badge) {
     badge.remove();
     updateHiddenField();
+    await savedCompletedCourses();
   }
 }
 
@@ -309,7 +335,7 @@ courseInput.addEventListener('keydown', (event) => {
 
 courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
-clearCoursesButton.addEventListener('click', () => {
+clearCoursesButton.addEventListener('click', async () => {
   selectedCourses.innerHTML = '';
   updateHiddenField();
   csCourseCheckboxes.forEach(box => {
@@ -317,17 +343,19 @@ clearCoursesButton.addEventListener('click', () => {
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
   updateCsSelectedCount();
+  await savedCompletedCourses();
 });
 
 csCourseCheckboxes.forEach(box => {
-  box.addEventListener('change', () => {
+  box.addEventListener('change', async () => {
     const code = box.dataset.code;
     box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
     updateCsSelectedCount();
     if (box.checked) {
       addCourse(code, box.dataset.label);
+      await savedCompletedCourses();
     } else {
-      removeCourse(code);
+      await removeCourse(code);
     }
   });
 });

@@ -225,6 +225,22 @@ def index():
         saved_state=saved_state,
     )
 
+@app.post("/save-completed-courses")
+def save_completed_courses():
+    data = request.get_json(silent=True) or {}
+    completed_courses = data.get("completed_courses", [])
+
+    completed_courses = sorted ({
+        str(code).strip().upper()
+        for code in completed_courses
+        if str(code).strip()
+    })
+
+    planner_state = session.get("planner_state", {})
+    panner_state["planner_state"] = planner_state
+    session.modified = True
+
+    return {"success": True}
 
 @app.route("/prerequisites")
 def prerequisites():
