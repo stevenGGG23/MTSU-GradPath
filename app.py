@@ -75,7 +75,7 @@ def index():
                 "code": f"{course.prefix} {course.number}",
                 "label": (
                     f"{course.prefix} {course.number}"
-                    f"- {course.title}"
+                    f" - {course.title}"
                 ),
                 "credits": course.credits or 0,
                 "level": f"{course.number[0]}000-Level",

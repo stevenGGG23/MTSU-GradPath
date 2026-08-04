@@ -2,12 +2,12 @@
 
 {% block content %}
 
-{% set saved_completed = saved_state.get('completed_courses%, []) %}
+{% set saved_completed = saved_state.get('completed_courses', []) %}
 {% set saved_hours = saved_state.get('generic_hours', {}) %}
 {% set saved_season = saved_state.get('start_season', default_season) %}
 {% set saved_year = saved_state.get('start_year', default_year) %}
 {% set saved_semesters = saved_state.get('target_semesters', 4) %}
-{% set saved_summer = saved_state.get('include_summer, false) %}
+{% set saved_summer = saved_state.get('include_summer', false) %}
 
 <div class="card">
   <div class="row g-4">
