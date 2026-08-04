@@ -184,7 +184,7 @@ function updateHiddenField() {
   completedCoursesField.value = values.join('\n');
 }
 
-async function savedCompletedCourses() {
+async function saveCompletedCourses() {
   const completedCourses = Array.from(
     selectedCourses.querySelectorAll('.badge')
   ).map(badge => badge.dataset.course);
@@ -235,11 +235,13 @@ function setSuggestions(matches) {
     item.type = 'button';
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
     item.textContent = match.label;
-    item.addEventListener('click', () => {
+    item.addEventListener('click', async () => {
       addCourse(match.code, match.label);
       courseInput.value = '';
       setSuggestions([]);
       courseInput.focus();
+
+      await saveCompletedCourses();
     });
     suggestionsBox.appendChild(item);
   });
@@ -285,8 +287,8 @@ function addCourse(code, label = null) {
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
     updateCsSelectedCount();
-    
-    await savedCompletedCourses();
+
+    await saveCompletedCourses();
   });
 
   badge.appendChild(remove);
@@ -321,21 +323,25 @@ function updateCourseSearch() {
   setSuggestions(matches);
 }
 
-addCourseButton.addEventListener('click', () => {
+addCourseButton.addEventListener('click', async () => {
   addCourse(courseInput.value);
   courseInput.value = '';
   clearSuggestions();
   courseInput.focus();
+
+  await saveCompletedCourses();
 });
 
 courseInput.addEventListener('input', updateCourseSearch);
 
-courseInput.addEventListener('keydown', (event) => {
+courseInput.addEventListener('keydown', async event => {
   if (event.key === 'Enter') {
     event.preventDefault();
     addCourse(courseInput.value);
     courseInput.value = '';
     clearSuggestions();
+
+    await saveCompletedCourses();
   }
 });
 
@@ -349,7 +355,7 @@ clearCoursesButton.addEventListener('click', async () => {
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
   updateCsSelectedCount();
-  await savedCompletedCourses();
+  await saveCompletedCourses();
 });
 
 csCourseCheckboxes.forEach(box => {
@@ -364,7 +370,7 @@ csCourseCheckboxes.forEach(box => {
     }
 
     updateCsSelectedCount();
-    await savedCompletedCourses();
+    await saveCompletedCourses();
   });
 });
 
