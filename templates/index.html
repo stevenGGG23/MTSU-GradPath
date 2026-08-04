@@ -357,6 +357,9 @@ csCourseCheckboxes.forEach(box => {
     } else {
       await removeCourse(code);
     }
+
+    updateCsSelectedCount();
+    await savedCompletedCourses();
   });
 });
 
