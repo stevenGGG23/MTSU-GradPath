@@ -284,6 +284,8 @@ function addCourse(code, label = null) {
     badge.remove();
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
+    updateCsSelectedCount();
+    
     await savedCompletedCourses();
   });
 
@@ -293,12 +295,16 @@ function addCourse(code, label = null) {
   syncCheckboxForCode(normalized, true);
 }
 
-async function removeCourse(code) {
-  const badge = selectedCourses.querySelector(`.badge[data-course="${code}"]`);
+function removeCourse(code) {
+  const normalized = normalizeCourse(code);
+
+  const badge = selectedCourses.querySelector(
+    `.badge[data-course="${normalized}"]`
+  );
+
   if (badge) {
     badge.remove();
     updateHiddenField();
-    await savedCompletedCourses();
   }
 }
 
