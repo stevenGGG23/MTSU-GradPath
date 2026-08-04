@@ -10,7 +10,7 @@
         min="0"
         max="{{ hours }}"
         step="0.5"
-        value="0">
+        value="{{ saved_hours.get(generic_id, 0) }}">
       <span class="requirement-hours-max">/ {{ hours }} cr hr{{ 's' if hours != 1 else '' }}</span>
       <button type="button" class="btn btn-sm btn-outline-primary requirement-mark-complete" data-target="hours_{{ generic_id }}">Mark complete</button>
     </div>

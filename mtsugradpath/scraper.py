@@ -195,6 +195,7 @@ def upsert_course(session, detail):
 
 def sync_courses():
     courses = []
+    
     for catalog_id in CATALOG_IDS:
         catalog_courses = fetch_all_courses(catalog_id)
         courses.extend(c for c in catalog_courses if brief_matches_program(c.get("title")))
