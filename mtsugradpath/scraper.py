@@ -7,7 +7,7 @@ from .config import BASE_CATALOG_URL, CATALOG_IDS, PROGRAM_PREFIX
 from .db import SessionLocal
 from .models import Course, CourseType, Prerequisite
 
-PAGE_SIZE = 20
+PAGE_SIZE = 200
 ROOT_URL = f"{BASE_CATALOG_URL}/"
 INIT_REFERER = "https://www.google.com/"
 
