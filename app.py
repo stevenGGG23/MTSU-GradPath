@@ -228,7 +228,7 @@ def index():
 @app.post("/save-completed-courses")
 def save_completed_courses():
     data = request.get_json(silent=True) or {}
-    completed_courses = data.get("completed_courses", [])
+    submitted_courses = data.get("completed_courses", [])
 
     completed_courses = sorted ({
         str(code).strip().upper()
@@ -237,10 +237,13 @@ def save_completed_courses():
     })
 
     planner_state = session.get("planner_state", {})
-    panner_state["planner_state"] = planner_state
+    panner_state["completed_courses"] = completed_courses
     session.modified = True
 
-    return {"success": True}
+    return {
+        "success": True,
+        "completed_courses": completed_courses,
+    }
 
 @app.route("/prerequisites")
 def prerequisites():
