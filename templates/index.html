@@ -353,9 +353,8 @@ csCourseCheckboxes.forEach(box => {
     updateCsSelectedCount();
     if (box.checked) {
       addCourse(code, box.dataset.label);
-      await savedCompletedCourses();
     } else {
-      await removeCourse(code);
+      removeCourse(code);
     }
 
     updateCsSelectedCount();
