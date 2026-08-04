@@ -1,7 +1,15 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash
 from mtsugradpath.config import PROGRAM_PREFIX
 from mtsugradpath.db import init_db, SessionLocal
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+)
 from mtsugradpath.degree import (
     SUPPORTING_COURSES,
     SUPPORTING_GENERIC,
@@ -55,9 +63,9 @@ def read_generic_hours(form):
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    with SessionLocal() as session:
+    with SessionLocal() as db_session:
         course_list = (
-            session.query(Course)
+            db_session.query(Course)
             .filter(Course.prefix == PROGRAM_PREFIX)
             .order_by(Course.prefix, Course.number)
             .all()
@@ -65,7 +73,10 @@ def index():
         cs_courses = [
             {
                 "code": f"{course.prefix} {course.number}",
-                "label": f"{course.prefix} {course.number} - {course.title}",
+                "label": (
+                    f"{course.prefix} {course.number}"
+                    f"- {course.title}"
+                ),
                 "credits": course.credits or 0,
                 "level": f"{course.number[0]}000-Level",
             }
@@ -75,22 +86,49 @@ def index():
         cs_courses.sort(key=lambda c: int(c["code"].split()[1]))
 
     courses = list(cs_courses)
+
     for code, hours, title in SUPPORTING_COURSES:
         courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
+        
     courses.sort(key=lambda c: c["code"])
 
     if request.method == "POST":
         completed_text = request.form.get("completed_courses", "")
+
         completed_courses = {
             code.strip().upper()
             for code in completed_text.splitlines()
             if code.strip()
         }
+
         generic_hours = read_generic_hours(request.form)
-        target_semesters = int(request.form.get("target_semesters", 4))
+
+        try:
+            target_semesters = int(
+                request.form.get("target_semesters", 4)
+            )
+        except ValueError:
+            target_semesters = 4
+
         include_summer = bool(request.form.get("include_summer"))
-        start_season = request.form.get("start_season") or default_start_season()
-        start_year = int(request.form.get("start_year") or date.today().year)
+
+        start_season = (
+            request.form.get("start_season") or default_start_season()
+        )
+
+        try:
+            start_year = int(request.form.get("start_year") or date.today().year)
+        except ValueError:
+            start_year = date.today().year
+
+        session["planner_state"] = {
+            "completed_courses": sorted(completed_courses),
+            "generic_hours": generic_hours,
+            "target_semesters": target_semesters,
+            "include_summer": include_summer,
+            "start_season": start_season,
+            "start_year": start_year,
+        }
 
         plan = generate_plan(
             completed_courses, generic_hours, target_semesters, include_summer,
@@ -171,6 +209,8 @@ def index():
             warnings=warnings_display,
         )
 
+    saved_state = session.get("planner_state", {})
+
     return render_template(
         "index.html",
         courses=courses,
@@ -182,6 +222,7 @@ def index():
         season_options=SEASON_CYCLE,
         default_season=default_start_season(),
         default_year=date.today().year,
+        saved_state=saved_state,
     )
 
 
