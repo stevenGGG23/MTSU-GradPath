@@ -2,6 +2,7 @@
 
 {% block content %}
 
+{% set saved_state = saved_state.get | default({}) %}
 {% set saved_completed = saved_state.get('completed_courses', []) %}
 {% set saved_hours = saved_state.get('generic_hours', {}) %}
 {% set saved_season = saved_state.get('start_season', default_season) %}
