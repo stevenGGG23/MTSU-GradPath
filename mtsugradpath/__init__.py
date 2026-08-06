@@ -5,6 +5,7 @@ from .models import Base, Course, CourseType, Prerequisite
 from .scraper import sync_courses
 from .planner import generate_plan
 
+# Defines the main features when importing from this package
 __all__ = [
     "DATABASE_URL",
     "BASE_CATALOG_URL",

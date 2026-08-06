@@ -9,6 +9,7 @@ doesn't need to be exact, just give an honest picture of what's left.
 TOTAL_PROGRAM_HOURS = 120
 UPPER_DIVISION_MIN = 3000
 
+# Requires CSCI courses
 CS_CORE_COURSES = [
     ("CSCI 1010", 1, "Computer Science Colloquium"),
     ("CSCI 1170", 4, "Computer Science I"),
@@ -20,26 +21,19 @@ CS_CORE_COURSES = [
     ("CSCI 4700", 3, "Software Engineering"),
 ]
 
+# Professional CSCI courses
 CONCENTRATION_REQUIRED_COURSES = [
     ("CSCI 3210", 3, "Theory of Programming Languages"),
     ("CSCI 4160", 3, "Compiler Design and Software Development"),
 ]
 
-# Covers the "CSCI high-level language" (3h) and "CSCI upper-division
-# electives" (9h) requirements together: any CSCI 3000+/4000+ course beyond
-# the specific ones above counts toward this bucket.
+# Covers the high-level and upper-division electives
 CONCENTRATION_ELECTIVE_HOURS = 12
 
-# Any ONE of these satisfies the high-level-language requirement; they're
-# alternatives, not stackable electives.
+# Regulates only one of these is needed
 HIGH_LEVEL_LANGUAGE_OPTIONS = ["CSCI 3033", "CSCI 3037", "CSCI 3038"]
 
-# Which terms each undergraduate CSCI course is actually offered in, per the
-# CS department's published scheduling patterns
-# (https://csc.mtsu.edu/course_sched_patterns/). Courses not listed here are
-# scheduled "on demand" per the department's own note and are treated as
-# available in any term. This only covers undergraduate courses, matching
-# this tool's scope.
+# List of semesters where regularly scheduled undergraduate CSCI courses are offered
 COURSE_OFFERING_SEASONS = {
     "CSCI 1010": {"Fall", "Spring"},
     "CSCI 1150": {"Fall", "Spring"},
@@ -65,25 +59,23 @@ COURSE_OFFERING_SEASONS = {
     "CSCI 4700": {"Fall", "Spring"},
 }
 
-# CSCI 4360 is offered only in odd-numbered-year Springs (e.g. Spring 2027,
-# Spring 2029), per the department's scheduling patterns page. Handled
-# separately from COURSE_OFFERING_SEASONS since it depends on the year, not
-# just the season.
+# CSCI courses offered during odd intervals in the year
 ODD_YEAR_SPRING_ONLY_COURSES = {"CSCI 4360"}
 
-
+# Function to check if a course is offered during a particular term
 def course_offered_in_term(code, season, year):
-    """Whether a CSCI course is offered in a given season/year, per the
-    department's published scheduling patterns. Courses with no published
-    pattern are scheduled on demand and treated as always available."""
+
     if code in ODD_YEAR_SPRING_ONLY_COURSES:
         return season == "Spring" and year % 2 == 1
+
     allowed_seasons = COURSE_OFFERING_SEASONS.get(code)
+
     if allowed_seasons is None:
         return True
+
     return season in allowed_seasons
 
-
+# Required supporting courses
 SUPPORTING_COURSES = [
     ("COMM 2200", 3, "Audience-Centered Communication"),
     ("MATH 1910", 4, "Calculus I"),
@@ -92,7 +84,7 @@ SUPPORTING_COURSES = [
     ("PHIL 3170", 3, "Ethics and Computing Technology"),
 ]
 
-# Generic (non-CSCI) requirement buckets: (id, label, hours, example course suggestions)
+# Required generic supporting courses tracked by credit hours
 SUPPORTING_GENERIC = [
     ("math_elective", "Math elective", 4, [
         "MATH 2050 - Probability and Statistics",
@@ -111,6 +103,7 @@ SUPPORTING_GENERIC = [
     ]),
 ]
 
+# True Blue Core requirements
 TBC_GENERIC = [
     ("tbc_written_comm", "Written Communication", 3, [
         "ENGL 1010 - Expository Writing",
@@ -136,23 +129,23 @@ TBC_GENERIC = [
 ELECTIVES_GENERIC_ID = "general_electives"
 ELECTIVES_SUGGESTIONS = ["Any elective course; at least 4 hrs must be upper-division"]
 
-
+# Function to return the total credit hours required for CSCI Core
 def core_required_hours():
     return sum(hours for _, hours, _ in CS_CORE_COURSES)
 
-
+# Function to return the total hours required for a concentration
 def concentration_required_hours():
     return sum(hours for _, hours, _ in CONCENTRATION_REQUIRED_COURSES) + CONCENTRATION_ELECTIVE_HOURS
 
-
+# Function to return the total hours required for supporting courses
 def supporting_required_hours():
     return sum(hours for _, hours, _ in SUPPORTING_COURSES) + sum(hours for _, _, hours, _ in SUPPORTING_GENERIC)
 
-
+# Function to return the total TBC requirement hours
 def tbc_required_hours():
     return sum(hours for _, _, hours, _ in TBC_GENERIC)
 
-
+# Function that calculates general elective hours that are needed to reach 120
 def elective_required_hours():
     used = (
         core_required_hours()
@@ -160,69 +153,85 @@ def elective_required_hours():
         + supporting_required_hours()
         + tbc_required_hours()
     )
+
     return max(TOTAL_PROGRAM_HOURS - used, 0)
 
-
+# Function to check for upper-division courses
 def is_upper_division_csci(code):
     parts = code.split()
+
     if len(parts) != 2 or parts[0] != "CSCI" or not parts[1].isdigit():
         return False
+
     return int(parts[1]) >= UPPER_DIVISION_MIN
 
-
+# Function to return a course's catalog hour or fallback value
 def _course_hours(code, catalog, fallback=3):
     info = catalog.get(code) if catalog else None
+
     if info and info.get("credits"):
         return info["credits"]
+
     return fallback
 
-
+# Function that keeps an entered hour value between 0 and the requirement max
 def clamp_hours(value, maximum):
     try:
         value = float(value)
     except (TypeError, ValueError):
         value = 0.0
+
     return max(0.0, min(value, maximum))
 
-
+# Function to display whole number floats as ints
 def _nice(number):
-    """Render whole-number floats as plain ints (18.0 -> 18)."""
     return int(number) if float(number).is_integer() else number
 
-
+# Function that returns every generic requirement used in audit
 def all_generic_items():
-    """Every generic (non-CSCI) requirement bucket as (id, label, hours, suggestions)."""
     return SUPPORTING_GENERIC + TBC_GENERIC + [
         (ELECTIVES_GENERIC_ID, "General elective", elective_required_hours(), ELECTIVES_SUGGESTIONS)
     ]
 
-
+# Function that returns generic requirements that have hours remaining
 def generic_remaining(generic_hours):
-    """How many hours are still needed for each generic bucket, given hours
-    already entered by the user. Only includes buckets with hours left."""
     generic_hours = generic_hours or {}
+
     remaining = {}
+
     for generic_id, label, hours, suggestions in all_generic_items():
-        entered = clamp_hours(generic_hours.get(generic_id), hours)
+        entered = clamp_hours(
+            generic_hours.get(generic_id), 
+            hours
+        )
+
         left = hours - entered
+
         if left > 0:
             remaining[generic_id] = {"label": label, "hours": left, "suggestions": suggestions}
+
     return remaining
 
-
+# Function that builds the complete degree audit from the completed hours
 def build_audit(completed_courses, generic_hours, catalog=None):
     completed_courses = {c.strip().upper() for c in completed_courses}
+
     generic_hours = generic_hours or {}
     catalog = catalog or {}
     groups = []
 
+    # Computer Science core section
     core_items = []
     core_hours_done = 0
+
     for code, hours, title in CS_CORE_COURSES:
         done = code in completed_courses
+
         if done:
             core_hours_done += hours
+
         core_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+
     groups.append({
         "key": "cs_core",
         "label": "Computer Science Core",
@@ -231,32 +240,44 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         "entries": core_items,
     })
 
+    # Required courses do not also count towards elective hours
     required_codes = {code for code, _, _ in CS_CORE_COURSES} | {
         code for code, _, _ in CONCENTRATION_REQUIRED_COURSES
     }
+
+    # Professional CSCI section
     conc_items = []
     conc_hours_done = 0
+
     for code, hours, title in CONCENTRATION_REQUIRED_COURSES:
         done = code in completed_courses
+
         if done:
             conc_hours_done += hours
+
         conc_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
 
+    # Completed upper-division CSCI courses outside the required list 
+    # are put towards the elective requirement
     elective_codes = sorted(
         code for code in completed_courses
         if is_upper_division_csci(code) and code not in required_codes
     )
+
     elective_hours_done = min(
         sum(_course_hours(code, catalog) for code in elective_codes),
         CONCENTRATION_ELECTIVE_HOURS,
     )
+
     conc_items.append({
         "label": f"CSCI upper-division electives ({len(elective_codes)} course(s) applied)",
         "hours": CONCENTRATION_ELECTIVE_HOURS,
         "done": elective_hours_done >= CONCENTRATION_ELECTIVE_HOURS,
         "partial_hours": elective_hours_done,
     })
+
     conc_hours_done += elective_hours_done
+
     groups.append({
         "key": "concentration",
         "label": "Professional Computer Science Concentration",
@@ -265,20 +286,33 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         "entries": conc_items,
     })
 
+    # Supporting course section
     sup_items = []
     sup_hours_done = 0
+
     for code, hours, title in SUPPORTING_COURSES:
         done = code in completed_courses
+
         if done:
             sup_hours_done += hours
+
         sup_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+
+    # Generic supporting requirements can be partially completed
     for generic_id, label, hours, suggestions in SUPPORTING_GENERIC:
         entered = clamp_hours(generic_hours.get(generic_id), hours)
+
         sup_hours_done += entered
+
         sup_items.append({
-            "label": label, "hours": hours, "done": entered >= hours,
-            "partial_hours": entered, "generic_id": generic_id, "suggestions": suggestions,
+            "label": label, 
+            "hours": hours, 
+            "done": entered >= hours,
+            "partial_hours": entered, 
+            "generic_id": generic_id, 
+            "suggestions": suggestions,
         })
+
     groups.append({
         "key": "supporting",
         "label": "Supporting Courses",
@@ -287,15 +321,24 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         "entries": sup_items,
     })
 
+    # True Blue Core section
     tbc_items = []
     tbc_hours_done = 0
+
     for generic_id, label, hours, suggestions in TBC_GENERIC:
         entered = clamp_hours(generic_hours.get(generic_id), hours)
+
         tbc_hours_done += entered
+
         tbc_items.append({
-            "label": label, "hours": hours, "done": entered >= hours,
-            "partial_hours": entered, "generic_id": generic_id, "suggestions": suggestions,
+            "label": label, 
+            "hours": hours, 
+            "done": entered >= hours,
+            "partial_hours": entered, 
+            "generic_id": generic_id, 
+            "suggestions": suggestions,
         })
+
     groups.append({
         "key": "tbc",
         "label": "True Blue Core (general education)",
@@ -304,8 +347,10 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         "entries": tbc_items,
     })
 
+    # Builds the general elective section using the remaining hours needed to reach 120
     elective_total = elective_required_hours()
     elective_entered = clamp_hours(generic_hours.get(ELECTIVES_GENERIC_ID), elective_total)
+
     groups.append({
         "key": "electives",
         "label": "General Electives",
@@ -321,6 +366,7 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         }],
     })
 
+    # Calculates the totals accross all degree audit courses
     total_required = sum(group["required_hours"] for group in groups)
     total_completed = min(sum(group["completed_hours"] for group in groups), total_required)
 
