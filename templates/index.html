@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 
 {% block content %}
+
+{% set saved_state = saved_state | default({}) %}
+{% set saved_completed = saved_state.get('completed_courses', []) %}
+{% set saved_hours = saved_state.get('generic_hours', {}) %}
+{% set saved_season = saved_state.get('start_season', default_season) %}
+{% set saved_year = saved_state.get('start_year', default_year) %}
+{% set saved_semesters = saved_state.get('target_semesters', 4) %}
+{% set saved_summer = saved_state.get('include_summer', false) %}
+
 <div class="card">
   <div class="row g-4">
     <div class="col-12">
@@ -111,21 +120,21 @@
                     <label for="start_season" class="form-label">Starting term</label>
                     <select class="form-select" id="start_season" name="start_season">
                       {% for season in season_options %}
-                      <option value="{{ season }}" {{ 'selected' if season == default_season }}>{{ season }}</option>
+                      <option value="{{ season }}" {{ 'selected' if season == saved_season }}>{{ season }}</option>
                       {% endfor %}
                     </select>
                   </div>
                   <div class="col-md-4">
                     <label for="start_year" class="form-label">Starting year</label>
-                    <input type="number" class="form-control" id="start_year" name="start_year" value="{{ default_year }}" min="2020" max="2099">
+                    <input type="number" class="form-control" id="start_year" name="start_year" value="{{ saved_year }}" min="2020" max="2099">
                   </div>
                   <div class="col-md-4">
                     <label for="target_semesters" class="form-label">Number of terms</label>
-                    <input type="number" class="form-control" id="target_semesters" name="target_semesters" value="4" min="1" max="12">
+                    <input type="number" class="form-control" id="target_semesters" name="target_semesters" value="{{ saved_semesters }}" min="1" max="12">
                   </div>
                   <div class="col-12">
                     <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="include_summer" name="include_summer">
+                      <input class="form-check-input" type="checkbox" id="include_summer" name="include_summer" {% if saved_summer %}checked{% endif %}>
                       <label class="form-check-label" for="include_summer">Include summer term planning</label>
                     </div>
                   </div>
@@ -164,6 +173,7 @@ const suggestionsBox = document.getElementById('course_suggestions');
 const courseOptions = {{ courses | tojson | safe }};
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
+const savedCompletedCourses = {{ saved_completed | tojson }};
 
 function normalizeCourse(code) {
   return code.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -172,6 +182,30 @@ function normalizeCourse(code) {
 function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
+}
+
+async function saveCompletedCourses() {
+  const completedCourses = Array.from(
+    selectedCourses.querySelectorAll('.badge')
+  ).map(badge => badge.dataset.course);
+
+  try {
+    const response = await fetch('/save-completed-courses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        completed_courses: completedCourses
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Unable to save completed courses');
+    }
+  } catch (error) {
+    console.error('Course save failed:', error);
+  }
 }
 
 function updateCsSelectedCount() {
@@ -201,11 +235,13 @@ function setSuggestions(matches) {
     item.type = 'button';
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
     item.textContent = match.label;
-    item.addEventListener('click', () => {
+    item.addEventListener('click', async () => {
       addCourse(match.code, match.label);
       courseInput.value = '';
       setSuggestions([]);
       courseInput.focus();
+
+      await saveCompletedCourses();
     });
     suggestionsBox.appendChild(item);
   });
@@ -229,16 +265,30 @@ function addCourse(code, label = null) {
   const badge = document.createElement('span');
   badge.className = 'badge bg-primary p-2 d-inline-flex align-items-center gap-2';
   badge.dataset.course = normalized;
-  badge.textContent = label ? `${normalized} — ${label}` : normalized;
+  
+  let displayLabel = label;
+
+  if (displayLabel && displayLabel.startsWith(normalized)) {
+    displayLabel = displayLabel
+      .substring(normalized.length)
+      .replace(/^\s*[-]\s*/, '');
+  }
+
+  badge.textContent = displayLabel
+    ? `${normalized} - ${displayLabel}`
+    : normalized;
 
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'btn-close btn-close-white btn-sm ms-2';
   remove.setAttribute('aria-label', 'Remove');
-  remove.addEventListener('click', () => {
+  remove.addEventListener('click', async () => {
     badge.remove();
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
+    updateCsSelectedCount();
+
+    await saveCompletedCourses();
   });
 
   badge.appendChild(remove);
@@ -248,7 +298,12 @@ function addCourse(code, label = null) {
 }
 
 function removeCourse(code) {
-  const badge = selectedCourses.querySelector(`.badge[data-course="${code}"]`);
+  const normalized = normalizeCourse(code);
+
+  const badge = selectedCourses.querySelector(
+    `.badge[data-course="${normalized}"]`
+  );
+
   if (badge) {
     badge.remove();
     updateHiddenField();
@@ -268,27 +323,31 @@ function updateCourseSearch() {
   setSuggestions(matches);
 }
 
-addCourseButton.addEventListener('click', () => {
+addCourseButton.addEventListener('click', async () => {
   addCourse(courseInput.value);
   courseInput.value = '';
   clearSuggestions();
   courseInput.focus();
+
+  await saveCompletedCourses();
 });
 
 courseInput.addEventListener('input', updateCourseSearch);
 
-courseInput.addEventListener('keydown', (event) => {
+courseInput.addEventListener('keydown', async event => {
   if (event.key === 'Enter') {
     event.preventDefault();
     addCourse(courseInput.value);
     courseInput.value = '';
     clearSuggestions();
+
+    await saveCompletedCourses();
   }
 });
 
 courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
-clearCoursesButton.addEventListener('click', () => {
+clearCoursesButton.addEventListener('click', async () => {
   selectedCourses.innerHTML = '';
   updateHiddenField();
   csCourseCheckboxes.forEach(box => {
@@ -296,10 +355,11 @@ clearCoursesButton.addEventListener('click', () => {
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
   updateCsSelectedCount();
+  await saveCompletedCourses();
 });
 
 csCourseCheckboxes.forEach(box => {
-  box.addEventListener('change', () => {
+  box.addEventListener('change', async () => {
     const code = box.dataset.code;
     box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
     updateCsSelectedCount();
@@ -308,6 +368,9 @@ csCourseCheckboxes.forEach(box => {
     } else {
       removeCourse(code);
     }
+
+    updateCsSelectedCount();
+    await saveCompletedCourses();
   });
 });
 
@@ -330,6 +393,20 @@ document.querySelectorAll('.requirement-hours-input').forEach(input => {
   input.addEventListener('input', updateFill);
   updateFill();
 });
+
+function getCourseLabel(code) {
+  const matchingCourse = courseOptions.find(
+    course => normalizeCourse(course.code) === normalizeCourse(code)
+  );
+
+  return matchingCourse ? matchingCourse.label : null;
+}
+
+savedCompletedCourses.forEach(code => {
+  addCourse(code, getCourseLabel(code));
+});
+
+updateCsSelectedCount();
 
 plannerForm.addEventListener('submit', () => {
   updateHiddenField();

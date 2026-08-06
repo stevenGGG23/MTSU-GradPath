@@ -7,7 +7,7 @@ from .config import BASE_CATALOG_URL, CATALOG_IDS, PROGRAM_PREFIX
 from .db import SessionLocal
 from .models import Course, CourseType, Prerequisite
 
-PAGE_SIZE = 20
+PAGE_SIZE = 200
 ROOT_URL = f"{BASE_CATALOG_URL}/"
 INIT_REFERER = "https://www.google.com/"
 
@@ -195,6 +195,7 @@ def upsert_course(session, detail):
 
 def sync_courses():
     courses = []
+    
     for catalog_id in CATALOG_IDS:
         catalog_courses = fetch_all_courses(catalog_id)
         courses.extend(c for c in catalog_courses if brief_matches_program(c.get("title")))

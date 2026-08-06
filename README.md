@@ -129,6 +129,17 @@ Hosted on [Render](https://render.com) (`stevenGGG23/MTSU-GradPath`, `main`, aut
 
 Originated from a course proposal (Statement of Scope, July 15, 2026) under group name "Future FANG." The objective — generate an optimal graduation path from completed coursework — is unchanged; the implementation diverged from the proposal in several ways: SQLite/SQLAlchemy replaced flat JSON files, catalog data is scraped automatically instead of hand-entered, the UI is a Flask web app instead of a desktop GUI, and charts are CSS-based instead of matplotlib. See git history for the full evolution.
 
+## Acknowledgements
+
+- Middle Tennessee State University Undergraduate Catalog
+- Flask
+- SQLAlchemy
+- Bootstrap
+- Mermaid.js
+- Render
+
+---
+
 ## Team
 
 Steven Gobran, Beshoy Azrak, Caleb Lykens, Mina Youssef Eshak
