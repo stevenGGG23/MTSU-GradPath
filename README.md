@@ -5,6 +5,11 @@ A degree-progress and term-planning tool for MTSU's B.S. Computer Science, Profe
 Live demo: **https://mtsu-gradpath.onrender.com**
 Video walkthrough: **[ADD LINK HERE]**
 
+| | |
+|---|---|
+| ![Course selection form](static/demo-course-selection.png) | ![Plan overview and completion progress](static/demo-plan-overview.png) |
+| ![Term-by-term generated schedule](static/demo-plan-schedule.png) | ![Prerequisite dependency graph](static/demo-prerequisite-map.png) |
+
 ---
 
 ## Installation
