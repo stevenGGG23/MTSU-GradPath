@@ -3,7 +3,7 @@
 A degree-progress and term-planning tool for MTSU's B.S. Computer Science, Professional Concentration. It scrapes MTSU's undergraduate course catalog, audits completed coursework against the degree's 120-hour requirement structure, and generates a term-by-term schedule that respects prerequisite ordering.
 
 Live demo: **https://mtsu-gradpath.onrender.com**
-Video walkthrough: **[ADD LINK HERE]**
+Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
 | | |
 |---|---|
