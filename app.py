@@ -10,6 +10,7 @@ from flask import (
     flash,
     session,
 )
+
 from mtsugradpath.degree import (
     SUPPORTING_COURSES,
     SUPPORTING_GENERIC,
@@ -18,6 +19,7 @@ from mtsugradpath.degree import (
     elective_required_hours,
     build_audit,
 )
+
 from mtsugradpath.models import Course
 from mtsugradpath.planner import (
     generate_plan,
@@ -28,39 +30,48 @@ from mtsugradpath.planner import (
     build_prereq_graph,
     render_prereq_mermaid,
 )
+
 from mtsugradpath.scraper import sync_courses
 from datetime import date
 
+# Create the Flask application and its databases
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 
 with app.app_context():
     init_db()
 
-
+# Function that formats credit hours with a display label
 def credit_label(hours):
     if not hours:
         return ""
+
     hours_value = int(hours) if float(hours).is_integer() else hours
     unit = "credit hour" if hours_value == 1 else "credit hours"
+
     return f"{hours_value} {unit}"
 
-
+# Function that formats credit hours into a shot hand display
 def credit_short(hours):
     if not hours:
         return ""
+
     hours_value = int(hours) if float(hours).is_integer() else hours
+
     return f"{hours_value} cr"
 
-
+# Function that reads the complete generic requirement hours from the submitted form
 def read_generic_hours(form):
     generic_hours = {}
+
     for generic_id, _, hours, _ in SUPPORTING_GENERIC + TBC_GENERIC:
         generic_hours[generic_id] = form.get(f"hours_{generic_id}", 0)
+
     generic_hours[ELECTIVES_GENERIC_ID] = form.get(f"hours_{ELECTIVES_GENERIC_ID}", 0)
+
     return generic_hours
 
-
+# Function that displays the planner form and processes the submitted degree plans
 @app.route("/", methods=["GET", "POST"])
 def index():
     with SessionLocal() as db_session:
@@ -70,6 +81,7 @@ def index():
             .order_by(Course.prefix, Course.number)
             .all()
         )
+
         cs_courses = [
             {
                 "code": f"{course.prefix} {course.number}",
@@ -83,18 +95,21 @@ def index():
             for course in course_list
             if course.prefix and course.number
         ]
+
         cs_courses.sort(key=lambda c: int(c["code"].split()[1]))
 
     courses = list(cs_courses)
 
     for code, hours, title in SUPPORTING_COURSES:
         courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
-        
+
+    # Combines CSCI courses with required supporting courses  
     courses.sort(key=lambda c: c["code"])
 
     if request.method == "POST":
         completed_text = request.form.get("completed_courses", "")
 
+        # Convert the submitted course list into course codes
         completed_courses = {
             code.strip().upper()
             for code in completed_text.splitlines()
@@ -121,6 +136,7 @@ def index():
         except ValueError:
             start_year = date.today().year
 
+        # Save the planner inpus to be restored
         session["planner_state"] = {
             "completed_courses": sorted(completed_courses),
             "generic_hours": generic_hours,
@@ -130,18 +146,29 @@ def index():
             "start_year": start_year,
         }
 
+        # Generates the plan, audits, and prerequisite warnings
         plan = generate_plan(
-            completed_courses, generic_hours, target_semesters, include_summer,
-            start_season=start_season, start_year=start_year,
+            completed_courses, 
+            generic_hours, 
+            target_semesters, 
+            include_summer,
+            start_season=start_season, 
+            start_year=start_year,
         )
+
         catalog = load_catalog_courses()
+
         audit = build_audit(completed_courses, generic_hours, catalog)
+
         prereq_warnings = validate_plan(plan, completed_courses, catalog)
 
+        # Maps the course codes for full display
         course_map = {course["code"]: course for course in courses}
 
+        # Nested function that returns the full course label for warnings
         def warning_label(code):
             course = course_map.get(code)
+
             return course["label"] if course else code
 
         warnings_display = [
@@ -154,15 +181,20 @@ def index():
             for w in prereq_warnings
         ]
 
+        # Nested function that formats a completed course on the results page
         def completed_label(code):
             course = course_map.get(code)
+
             if course:
                 hours = credit_label(course["credits"])
                 return f"{course['label']} — {hours}" if hours else course["label"]
+
             return code
 
+        # Nested function that converts planner items into values the template accepts
         def display_item(item):
             kind = item["kind"]
+
             if kind == "course":
                 title = item["label"].split(" - ", 1)[1] if " - " in item["label"] else ""
                 return {
@@ -171,6 +203,7 @@ def index():
                     "title": title,
                     "hours": credit_short(item["hours"]),
                 }
+
             if kind == "requirement":
                 return {
                     "kind": kind,
@@ -179,22 +212,29 @@ def index():
                     "hours": credit_short(item["hours"]),
                     "suggestion": item.get("suggestion"),
                 }
+
             return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
 
+        # Convert planner data into display structures
         completed_display = [completed_label(code) for code in sorted(completed_courses)]
+
         plan_display = {
             term: [display_item(item) for item in term_items]
             for term, term_items in plan.items()
         }
+
+        # Calculates the total number of planned hours for each semester
         term_hours_display = {
             term: sum(item.get("hours", 0) for item in term_items)
             for term, term_items in plan.items()
             if not term.startswith("Remaining")
         }
+
         term_hours_display = {
             term: (int(hours) if float(hours).is_integer() else hours)
             for term, hours in term_hours_display.items()
         }
+
         max_term_hours = max(term_hours_display.values()) if term_hours_display else 0
 
         return render_template(
@@ -209,6 +249,7 @@ def index():
             warnings=warnings_display,
         )
 
+    # Restores the user's previous planner selections
     saved_state = session.get("planner_state", {})
 
     return render_template(
@@ -225,19 +266,23 @@ def index():
         saved_state=saved_state,
     )
 
+# Function that saves the selected courses into a Flask session
 @app.post("/save-completed-courses")
 def save_completed_courses():
     data = request.get_json(silent=True) or {}
+
     submitted_courses = data.get("completed_courses", [])
 
+    # Translates the course codes before storing them
     completed_courses = sorted ({
         str(code).strip().upper()
-        for code in completed_courses
+        for code in submitted_courses
         if str(code).strip()
     })
 
     planner_state = session.get("planner_state", {})
     panner_state["completed_courses"] = completed_courses
+
     session.modified = True
 
     return {
@@ -245,14 +290,18 @@ def save_completed_courses():
         "completed_courses": completed_courses,
     }
 
+# Function that builds and displays the dependency graph
 @app.route("/prerequisites")
 def prerequisites():
     catalog = load_catalog_courses()
+
     nodes, edges = build_prereq_graph(catalog)
+    
     mermaid_source = render_prereq_mermaid(nodes, edges)
+
     return render_template("prereqs.html", mermaid_source=mermaid_source)
 
-
+# Function that syncs the local course database with the MTSU catalog
 @app.route("/sync")
 def sync():
     try:
@@ -260,8 +309,8 @@ def sync():
         flash(f"Catalog synced successfully — {count} CSCI courses updated.", "success")
     except Exception as exc:
         flash(f"Catalog sync failed: {exc}", "danger")
-    return redirect(url_for("index"))
 
+    return redirect(url_for("index"))
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
