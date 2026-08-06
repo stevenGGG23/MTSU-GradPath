@@ -9,3 +9,5 @@ data/*.db
 .vscode/
 .DS_Store
 .pytest_cache/
+venv/
+submission.zip
