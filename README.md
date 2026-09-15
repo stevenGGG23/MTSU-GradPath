@@ -147,7 +147,7 @@ Originated from a course proposal (Statement of Scope, July 15, 2026) under grou
 
 ## Team
 
-Steven Gobran, Beshoy Azrak, Caleb Lykens, Mina Youssef Eshak
+Steven Gobran, Beshoy Azrak, Caleb Lykens, Mina Eshak
 
 ## License
 
