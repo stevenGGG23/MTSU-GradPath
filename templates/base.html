@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark navbar-top mb-4">
+  <nav class="navbar navbar-expand-lg navbar-dark navbar-top mb-4" style="position:relative">
     <div class="container">
       <a class="navbar-brand d-flex align-items-center gap-2" href="/">
         <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="MTSU" class="navbar-logo">
@@ -20,22 +20,24 @@
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navMenu">
-        <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+        <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
           <li class="nav-item">
             <a class="nav-link active" aria-current="page" href="/">Home</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="/prerequisites">Prerequisite Map</a>
-          </li>
-          <li class="nav-item">
             <a class="nav-link" href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">Pipeline</a>
           </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/sync">Sync Catalog</a>
+          <li class="nav-item ms-lg-2">
+            <button class="btn btn-outline-light btn-sm" id="sync-btn" onclick="triggerSync()">
+              <span id="sync-btn-text">Sync Catalog</span>
+              <span id="sync-spinner" class="d-none ms-1" style="display:inline-block;width:1em;height:1em;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;"></span>
+            </button>
           </li>
         </ul>
       </div>
     </div>
+    <!-- Sync progress bar (hidden by default) -->
+    <div id="sync-progress-bar" class="sync-progress-bar d-none"></div>
   </nav>
 
   <main class="container">
@@ -64,6 +66,109 @@
     <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="" class="footer-logo mb-2">
     <p class="mb-0">This planner does not register you for classes &mdash; use <a href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">PipelineMT</a> to enroll. Not an official registration tool.</p>
   </footer>
+  <style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.sync-progress-bar {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #60a5fa, #3b82f6, #2563eb);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  transition: width 0.3s;
+  width: 100%;
+}
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+<script>
+let _syncPollInterval = null;
+
+function triggerSync() {
+  const btn = document.getElementById('sync-btn');
+  const spinner = document.getElementById('sync-spinner');
+  const btnText = document.getElementById('sync-btn-text');
+  const progressBar = document.getElementById('sync-progress-bar');
+
+  btn.disabled = true;
+  spinner.classList.remove('d-none');
+  btnText.textContent = 'Syncing\u2026';
+  progressBar.classList.remove('d-none');
+
+  fetch('/sync', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'already_running' || data.status === 'running') {
+        // Already running — just start polling
+      }
+      _syncPollInterval = setInterval(pollSyncStatus, 1500);
+    })
+    .catch(() => {
+      resetSyncBtn('Sync Catalog');
+      showSyncToast('Sync request failed. Try again.', 'danger');
+    });
+}
+
+function pollSyncStatus() {
+  fetch('/sync/status')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.running && data.done) {
+        clearInterval(_syncPollInterval);
+        resetSyncBtn('Sync Catalog');
+
+        const fresh = data.fresh || 0;
+        const cached = data.cached || 0;
+        const total = data.total || 0;
+        const hasErrors = data.errors && data.errors.length > 0;
+
+        let msg;
+        if (fresh > 0 && cached > 0) {
+          msg = `Catalog updated \u2014 ${fresh} courses freshly synced, ${cached} already up to date (${total} total across all majors).`;
+        } else if (fresh > 0) {
+          msg = `Catalog synced \u2014 ${fresh} courses updated across all majors.`;
+        } else {
+          msg = `All majors already up to date \u2014 ${total} courses loaded (CS, Biology, Math, Chemistry, Physics). Use force sync to re-fetch.`;
+        }
+        if (hasErrors) {
+          msg += ' Some majors had errors \u2014 existing data retained.';
+        }
+
+        showSyncToast(msg, hasErrors ? 'warning' : 'success');
+      }
+    })
+    .catch(() => {
+      clearInterval(_syncPollInterval);
+      resetSyncBtn('Sync Catalog');
+    });
+}
+
+function resetSyncBtn(label) {
+  const btn = document.getElementById('sync-btn');
+  const spinner = document.getElementById('sync-spinner');
+  const btnText = document.getElementById('sync-btn-text');
+  const progressBar = document.getElementById('sync-progress-bar');
+  btn.disabled = false;
+  spinner.classList.add('d-none');
+  btnText.textContent = label;
+  progressBar.classList.add('d-none');
+}
+
+function showSyncToast(message, type) {
+  const container = document.querySelector('.flash-messages') || (() => {
+    const c = document.createElement('div');
+    c.className = 'flash-messages mb-4';
+    document.querySelector('main.container').prepend(c);
+    return c;
+  })();
+  const alert = document.createElement('div');
+  alert.className = `alert alert-${type === 'warning' ? 'warning' : type === 'success' ? 'success' : 'danger'} alert-dismissible fade show`;
+  alert.role = 'alert';
+  alert.innerHTML = message + '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+  container.appendChild(alert);
+  // Auto-dismiss after 6s
+  setTimeout(() => { try { alert.querySelector('.btn-close').click(); } catch(e) {} }, 6000);
+}
+</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

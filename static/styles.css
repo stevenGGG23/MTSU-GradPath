@@ -708,3 +708,86 @@ footer a {
     padding: 1.25rem;
     overflow-x: auto;
 }
+
+/* ── Major selector ──────────────────────────────────────────────────────── */
+
+.major-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.major-card {
+    cursor: pointer;
+    user-select: none;
+}
+
+.major-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.major-card-inner {
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.75rem 1.1rem;
+    background: #f8fafc;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+    min-width: 180px;
+}
+
+.major-card input[type="radio"]:checked + .major-card-inner {
+    border-color: #2563eb;
+    background: #eff6ff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.major-card:hover:not(.major-card-soon) .major-card-inner {
+    border-color: #93c5fd;
+    background: #f0f7ff;
+}
+
+.major-card-soon {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.major-card-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #1e3a5f;
+    line-height: 1.3;
+}
+
+.major-card-conc {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 0.15rem;
+}
+
+.major-card-tag {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #7c3aed;
+    background: #ede9fe;
+    border-radius: 6px;
+    padding: 0.1rem 0.4rem;
+}
+
+/* ── Personal prerequisite legend (plan page) ───────────────────────────── */
+
+.personal-prereq-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.personal-mermaid {
+    min-height: 200px;
+}

@@ -5,11 +5,11 @@
   <div class="d-flex justify-content-between align-items-start mb-4 flex-column flex-md-row gap-3">
     <div>
       <h2 class="mb-2">Your recommended plan</h2>
-      <p class="text-muted mb-0">Suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
+      <p class="text-muted mb-0">{{ degree_name }} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
     </div>
     <div>
       <a class="btn btn-outline-light me-2" href="/">Edit completed courses</a>
-      <a class="btn btn-primary" href="/sync">Sync Catalog</a>
+      <button class="btn btn-primary" onclick="triggerSync()">Sync Catalog</button>
     </div>
   </div>
 
@@ -42,7 +42,7 @@
     </div>
     <div class="progress-summary-detail">
       <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
-      <p class="text-muted mb-3">Toward the 120-hour B.S. Computer Science, Professional Concentration degree.</p>
+      <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree.</p>
       <div class="category-bars">
         {% for group in audit.groups %}
         <div class="category-bar-row">
@@ -155,5 +155,26 @@
       {% endfor %}
     </div>
   </div>
+
+  {% if personal_mermaid %}
+  <div class="mb-2">
+    <h4 class="mb-1">Your prerequisite path</h4>
+    <p class="text-muted mb-3">Courses are shown based on your selections. Green = completed, blue = next up (first two terms), light blue = later in your plan, gray = supporting prerequisites.</p>
+    <div class="personal-prereq-legend mb-3">
+      <span class="legend-item"><span class="legend-swatch" style="background:#16a34a;"></span>Completed</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#2563eb;"></span>Next up</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#bfdbfe;border:1px solid #3b82f6;"></span>Planned</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#f1f5f9;border:1px dashed #cbd5e1;"></span>External prerequisite</span>
+    </div>
+    <div class="prereq-graph-wrap">
+      <pre class="mermaid personal-mermaid">{{ personal_mermaid }}</pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
+  </script>
+  {% endif %}
 </div>
 {% endblock %}

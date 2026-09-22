@@ -17,24 +17,45 @@
       <p class="text-muted">Work through each step, then generate a plan toward graduation.</p>
       <form method="post" id="planner-form">
 
+        <!-- Major selector — changing the radio reloads the page so the course
+             checklist, generic requirements, and headings update for that major -->
+        <div class="mb-4">
+          <h5 class="mb-2">Select your major</h5>
+          <div class="major-grid">
+            {% for key, deg in degree_list %}
+            <label class="major-card {% if not deg.available %}major-card-soon{% endif %}">
+              <input type="radio" name="major" value="{{ key }}"
+                     class="major-radio"
+                     {% if key == (saved_state.get('major') or 'cs') %}checked{% endif %}
+                     {% if not deg.available %}disabled{% endif %}>
+              <div class="major-card-inner">
+                <div class="major-card-name">{{ deg.name }}</div>
+                {% if deg.concentration %}<div class="major-card-conc">{{ deg.concentration }}</div>{% endif %}
+                {% if not deg.available %}<div class="major-card-tag">Coming soon</div>{% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
         <div class="accordion" id="plannerAccordion">
 
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#stepCs" aria-expanded="true">
-                <span class="step-badge">1</span>&nbsp;Computer Science courses
+                <span class="step-badge">1</span>&nbsp;{{ degree_cfg.name }} courses
                 <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
               </button>
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Check off every CSCI course you've already completed.</p>
-                {% if not cs_courses %}
+                <p class="form-text mt-0 mb-2">Check off every {{ degree_cfg.prefix }} course you've already completed.</p>
+                {% if not major_courses %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet. Click <strong>Sync Catalog</strong> to enable the checklist.
                 </div>
                 {% else %}
-                {% for level, level_courses in cs_courses | groupby('level') %}
+                {% for level, level_courses in major_courses | groupby('level') %}
                 <h6 class="cs-level-heading">{{ level }}</h6>
                 <div class="cs-course-grid">
                   {% for course in level_courses %}
@@ -410,6 +431,16 @@ updateCsSelectedCount();
 
 plannerForm.addEventListener('submit', () => {
   updateHiddenField();
+});
+
+// When the user picks a different major, reload the page so the course checklist,
+// generic requirement rows, and headings all update for that major.
+document.querySelectorAll('.major-radio').forEach(radio => {
+  radio.addEventListener('change', () => {
+    if (radio.checked) {
+      window.location.href = '/?major=' + encodeURIComponent(radio.value);
+    }
+  });
 });
 </script>
 {% endblock %}

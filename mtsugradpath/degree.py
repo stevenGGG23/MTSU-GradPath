@@ -213,7 +213,12 @@ def generic_remaining(generic_hours):
     return remaining
 
 # Function that builds the complete degree audit from the completed hours
-def build_audit(completed_courses, generic_hours, catalog=None):
+# Accepts an optional degree_cfg for multi-major support.
+def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None):
+    # When a degree_cfg is provided, use the generic multi-major implementation
+    if degree_cfg is not None:
+        return _build_audit_generic(completed_courses, generic_hours, catalog, degree_cfg)
+
     completed_courses = {c.strip().upper() for c in completed_courses}
 
     generic_hours = generic_hours or {}
@@ -257,7 +262,7 @@ def build_audit(completed_courses, generic_hours, catalog=None):
 
         conc_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
 
-    # Completed upper-division CSCI courses outside the required list 
+    # Completed upper-division CSCI courses outside the required list
     # are put towards the elective requirement
     elective_codes = sorted(
         code for code in completed_courses
@@ -305,11 +310,11 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         sup_hours_done += entered
 
         sup_items.append({
-            "label": label, 
-            "hours": hours, 
+            "label": label,
+            "hours": hours,
             "done": entered >= hours,
-            "partial_hours": entered, 
-            "generic_id": generic_id, 
+            "partial_hours": entered,
+            "generic_id": generic_id,
             "suggestions": suggestions,
         })
 
@@ -331,11 +336,11 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         tbc_hours_done += entered
 
         tbc_items.append({
-            "label": label, 
-            "hours": hours, 
+            "label": label,
+            "hours": hours,
             "done": entered >= hours,
-            "partial_hours": entered, 
-            "generic_id": generic_id, 
+            "partial_hours": entered,
+            "generic_id": generic_id,
             "suggestions": suggestions,
         })
 
@@ -384,3 +389,233 @@ def build_audit(completed_courses, generic_hours, catalog=None):
         "total_completed": _nice(total_completed),
         "percent": round(100 * total_completed / total_required, 1) if total_required else 0,
     }
+
+
+def _is_upper_division(code: str, prefix: str, min_num: int) -> bool:
+    """Check if a course code is upper-division for the given prefix."""
+    parts = code.split()
+    if len(parts) != 2 or parts[0] != prefix or not parts[1].isdigit():
+        return False
+    return int(parts[1]) >= min_num
+
+
+def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
+    """Generic build_audit implementation for any degree config."""
+    completed_courses = {c.strip().upper() for c in completed_courses}
+    generic_hours = generic_hours or {}
+    catalog = catalog or {}
+    groups = []
+
+    core_courses = cfg["core_courses"]
+    conc_courses = cfg["concentration_courses"]
+    conc_elective_hours = cfg.get("concentration_elective_hours", 0)
+    supporting_courses_list = cfg["supporting_courses"]
+    supporting_generic = cfg["supporting_generic"]
+    tbc_generic = cfg["tbc_generic"]
+    total_hours = cfg["total_hours"]
+    prefix = cfg["prefix"]
+    upper_div_min = cfg.get("upper_division_min", 3000)
+
+    # Core section
+    core_hours_done = 0
+    core_items = []
+    for code, hours, title in core_courses:
+        done = code in completed_courses
+        if done:
+            core_hours_done += hours
+        core_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+
+    core_required = sum(h for _, h, _ in core_courses)
+    groups.append({
+        "key": "core",
+        "label": f"{cfg['name']} Core",
+        "required_hours": core_required,
+        "completed_hours": core_hours_done,
+        "entries": core_items,
+    })
+
+    required_codes = {code for code, _, _ in core_courses} | {code for code, _, _ in conc_courses}
+
+    # Concentration / upper-division section
+    conc_items = []
+    conc_hours_done = 0
+    for code, hours, title in conc_courses:
+        done = code in completed_courses
+        if done:
+            conc_hours_done += hours
+        conc_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+
+    if conc_elective_hours > 0:
+        elective_codes = sorted(
+            code for code in completed_courses
+            if _is_upper_division(code, prefix, upper_div_min) and code not in required_codes
+        )
+        elective_hours_done = min(
+            sum((_course_hours(code, catalog)) for code in elective_codes),
+            conc_elective_hours,
+        )
+        conc_items.append({
+            "label": f"{prefix} upper-division electives ({len(elective_codes)} course(s) applied)",
+            "hours": conc_elective_hours,
+            "done": elective_hours_done >= conc_elective_hours,
+            "partial_hours": elective_hours_done,
+        })
+        conc_hours_done += elective_hours_done
+
+    conc_required = sum(h for _, h, _ in conc_courses) + conc_elective_hours
+    if conc_items:
+        label = "Concentration Requirements" if conc_courses else f"Upper-Division {prefix} Electives"
+        groups.append({
+            "key": "concentration",
+            "label": label,
+            "required_hours": conc_required,
+            "completed_hours": conc_hours_done,
+            "entries": conc_items,
+        })
+
+    # Supporting courses section
+    sup_items = []
+    sup_hours_done = 0
+    for code, hours, title in supporting_courses_list:
+        done = code in completed_courses
+        if done:
+            sup_hours_done += hours
+        sup_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+    for gid, label, hours, suggestions in supporting_generic:
+        entered = clamp_hours(generic_hours.get(gid, 0), hours)
+        sup_hours_done += entered
+        sup_items.append({
+            "label": label, "hours": hours, "done": entered >= hours,
+            "partial_hours": entered, "generic_id": gid, "suggestions": suggestions,
+        })
+    sup_required = sum(h for _, h, _ in supporting_courses_list) + sum(h for _, _, h, _ in supporting_generic)
+    groups.append({
+        "key": "supporting",
+        "label": "Supporting Courses",
+        "required_hours": sup_required,
+        "completed_hours": sup_hours_done,
+        "entries": sup_items,
+    })
+
+    # TBC / gen-ed section
+    tbc_items = []
+    tbc_hours_done = 0
+    for gid, label, hours, suggestions in tbc_generic:
+        entered = clamp_hours(generic_hours.get(gid, 0), hours)
+        tbc_hours_done += entered
+        tbc_items.append({
+            "label": label, "hours": hours, "done": entered >= hours,
+            "partial_hours": entered, "generic_id": gid, "suggestions": suggestions,
+        })
+    tbc_required = sum(h for _, _, h, _ in tbc_generic)
+    groups.append({
+        "key": "tbc",
+        "label": "True Blue Core (general education)",
+        "required_hours": tbc_required,
+        "completed_hours": tbc_hours_done,
+        "entries": tbc_items,
+    })
+
+    # General electives
+    fixed_hours = core_required + conc_required + sup_required + tbc_required
+    elective_total = max(total_hours - fixed_hours, 0)
+    elective_entered = clamp_hours(generic_hours.get(ELECTIVES_GENERIC_ID, 0), elective_total)
+    groups.append({
+        "key": "electives",
+        "label": "General Electives",
+        "required_hours": elective_total,
+        "completed_hours": elective_entered,
+        "entries": [{
+            "label": "Free electives",
+            "hours": elective_total,
+            "done": elective_entered >= elective_total,
+            "partial_hours": elective_entered,
+            "generic_id": ELECTIVES_GENERIC_ID,
+            "suggestions": ["Any elective course"],
+        }],
+    })
+
+    total_required = sum(g["required_hours"] for g in groups)
+    total_completed = min(sum(g["completed_hours"] for g in groups), total_required)
+
+    for group in groups:
+        group["required_hours"] = _nice(group["required_hours"])
+        group["completed_hours"] = _nice(group["completed_hours"])
+        for entry in group["entries"]:
+            entry["hours"] = _nice(entry["hours"])
+            if "partial_hours" in entry:
+                entry["partial_hours"] = _nice(entry["partial_hours"])
+
+    return {
+        "groups": groups,
+        "total_required": _nice(total_required),
+        "total_completed": _nice(total_completed),
+        "percent": round(100 * total_completed / total_required, 1) if total_required else 0,
+    }
+
+
+# ── Multi-major registry ───────────────────────────────────────────────────────
+# "available: True" = full planning logic built in.
+# "available: False" = on the roadmap; UI shows "Coming soon".
+
+DEGREE_REGISTRY = {
+    "cs": {
+        "key": "cs",
+        "name": "B.S. Computer Science",
+        "concentration": "Professional Concentration",
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "CSCI",
+        "available": True,
+        "note": "Full planning supported.",
+    },
+    "math": {
+        "key": "math",
+        "name": "B.S. Mathematics",
+        "concentration": None,
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "MATH",
+        "available": False,
+        "note": "Coming soon — degree requirements being added.",
+    },
+    "biology": {
+        "key": "biology",
+        "name": "B.S. Biology",
+        "concentration": None,
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "BIOL",
+        "available": False,
+        "note": "Coming soon — degree requirements being added.",
+    },
+    "chemistry": {
+        "key": "chemistry",
+        "name": "B.S. Chemistry",
+        "concentration": None,
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "CHEM",
+        "available": False,
+        "note": "Coming soon — degree requirements being added.",
+    },
+    "physics": {
+        "key": "physics",
+        "name": "B.S. Physics",
+        "concentration": None,
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "PHYS",
+        "available": False,
+        "note": "Coming soon — degree requirements being added.",
+    },
+    "engineering_tech": {
+        "key": "engineering_tech",
+        "name": "B.S. Engineering Technology",
+        "concentration": None,
+        "college": "College of Basic and Applied Sciences",
+        "prefix": "ET",
+        "available": False,
+        "note": "Coming soon — degree requirements being added.",
+    },
+}
+
+
+def get_degree_config(key):
+    """Return the degree config for *key*, defaulting to Computer Science."""
+    return DEGREE_REGISTRY.get(key) or DEGREE_REGISTRY["cs"]
