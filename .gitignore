@@ -5,7 +5,7 @@ __pycache__/
 .env
 .env.*
 instance/
-data/*.db
+data/
 .vscode/
 .DS_Store
 .pytest_cache/
