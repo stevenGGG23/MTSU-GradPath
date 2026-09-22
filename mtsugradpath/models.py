@@ -1,15 +1,33 @@
 from sqlalchemy import (
-    Boolean, 
-    Column, 
-    Float, 
-    ForeignKey, 
-    Integer, 
-    String, 
+    Boolean,
+    Column,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
     Text,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+class SyncStatus(Base):
+    """Single-row table tracking catalog sync progress.
+
+    Lives in the DB (not a process-local dict) so status is consistent when
+    more than one gunicorn worker is running -- whichever worker started the
+    sync writes here, and any worker can answer /sync/status.
+    """
+    __tablename__ = "sync_status"
+
+    id = Column(Integer, primary_key=True, default=1)
+    running = Column(Boolean, default=False)
+    total = Column(Integer, default=0)
+    fresh = Column(Integer, default=0)
+    cached = Column(Integer, default=0)
+    errors = Column(Text, default="")  # newline-joined error messages
+    done = Column(Boolean, default=False)
 
 class Course(Base):
     """Represents one course from the MTSU catalog."""

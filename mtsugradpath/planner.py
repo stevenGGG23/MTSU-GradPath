@@ -16,8 +16,92 @@ from .degree import (
     course_offered_in_term,
     clamp_hours,
 )
-from .degree_configs import CS_CONFIG, get_full_degree_config
+from .degree_configs import CS_CONFIG, DEGREE_CONFIGS, get_full_degree_config
 from .models import Course
+
+# Maps a course prefix (e.g. "MATH") to that major's own config, so a
+# cross-prefix requirement -- e.g. a Physics major's PHYS course needing a
+# MATH course -- can be checked against the offering pattern MATH's own
+# config declares, not (incorrectly) against the current major's.
+_PREFIX_TO_CONFIG = {c["prefix"]: c for c in DEGREE_CONFIGS.values()}
+
+
+# Function that checks whether *code* is offered in a given season/year,
+# using the offering pattern from the course's own major (not necessarily
+# degree_cfg, the major currently being planned) -- a supporting course like
+# MATH 1910 on a Physics plan is restricted by MATH's own config.
+def _offered_in_term(code: str, season: str, year: int, degree_cfg: dict) -> bool:
+    code_prefix = code.split()[0] if " " in code else None
+    home_cfg = (
+        degree_cfg if code_prefix == degree_cfg.get("prefix")
+        else _PREFIX_TO_CONFIG.get(code_prefix)
+    )
+    if home_cfg is None:
+        return True
+    if code in home_cfg.get("odd_year_spring_only", set()):
+        return season == "Spring" and year % 2 == 1
+    allowed = home_cfg.get("offering_seasons", {}).get(code)
+    if allowed is None:
+        return True
+    return season in allowed
+
+
+# Function that merges a course's declared prerequisites the same way for
+# both scheduling (generate_plan) and the independent check (validate_plan).
+#
+# Two different sources, two different trust levels:
+#  - catalog[code]["prereqs"] is regex-parsed from free-form catalog
+#    description text -- reliable for courses within the major's own prefix,
+#    but noisy outside it (e.g. CSCI 1170's description mentions placement
+#    courses MATH 1730/1810, which aren't real degree prerequisites), so
+#    it's restricted to *prefix*.
+#  - prereq_map is hand-curated by the team and always trusted in full,
+#    including legitimate cross-major entries (e.g. PHYS 2120 needing
+#    MATH 1910) -- never prefix-filtered.
+# prereq_override_map patches specific catalog quirks (e.g. a lab-section
+# code substituted for the lecture course) and replaces just the
+# catalog-derived component; it's still merged with prereq_map, never a full
+# replacement, so a legitimate prereq_map entry for the same course doesn't
+# get silently dropped just because an override also exists.
+def _effective_prereqs(
+    code: str, catalog: dict, prereq_map: dict, prereq_override_map: dict, prefix: str
+) -> Set[str]:
+    if code in prereq_override_map:
+        catalog_prereqs = set(prereq_override_map[code])
+    elif code in catalog:
+        catalog_prereqs = {p for p in catalog[code].get("prereqs", set()) if p.startswith(prefix)}
+    else:
+        catalog_prereqs = set()
+    return catalog_prereqs | prereq_map.get(code, set())
+
+
+# Function that returns a course's full prerequisite set regardless of which
+# major's course list it belongs to on the plan currently being built.
+#
+# A "supporting course" on one major's plan (e.g. PHYS 2120 on a Chemistry
+# plan) is a full major-required course on its *own* major's plan, and that
+# home config's prereq_map/prereq_override_map is the authoritative source
+# for its real prerequisites (e.g. PHYS 2120 needing MATH 1910) -- a
+# major's own supporting_prereq_map only encodes what that major's own team
+# bothered to declare, which isn't guaranteed complete (see CHEM_CONFIG's
+# supporting_prereq_map for PHYS 2120: only lists PHYS 2110). Catalog-scraped
+# text is intentionally not consulted here for a cross-prefix course: the
+# current major's catalog dict doesn't cover another prefix, and scraped
+# text is only reliable within a course's own major's catalog anyway.
+def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
+    code_prefix = code.split()[0] if " " in code else None
+    if code_prefix == cfg.get("prefix"):
+        return _effective_prereqs(
+            code, catalog, cfg.get("prereq_map", {}), cfg.get("prereq_override_map", {}), cfg["prefix"]
+        )
+    home_cfg = _PREFIX_TO_CONFIG.get(code_prefix)
+    if home_cfg is None:
+        return set()
+    required = set(home_cfg.get("prereq_map", {}).get(code, set()))
+    override = home_cfg.get("prereq_override_map", {}).get(code)
+    if override is not None:
+        required |= set(override)
+    return required
 
 # Required CSCI courses used when building the degree planner
 REQUIRED_COURSES = [code for code, _, _ in CS_CORE_COURSES] + [
@@ -354,8 +438,6 @@ def generate_plan(
     prereq_map = cfg.get("prereq_map", {})
     prereq_override_map = cfg.get("prereq_override_map", {})
     supporting_prereq_map = cfg.get("supporting_prereq_map", {})
-    offering_seasons_cfg = cfg.get("offering_seasons", {})
-    odd_year_spring = cfg.get("odd_year_spring_only", set())
 
     # Build a config_hours dict from all course lists so _course_item can fall back
     # to the catalog-defined hours when the DB entry has 0 credits (lecture/lab splits).
@@ -364,26 +446,17 @@ def generate_plan(
         config_hours[code] = hours
 
     def _offered(code, season, year):
-        if code in odd_year_spring:
-            return season == "Spring" and year % 2 == 1
-        allowed = offering_seasons_cfg.get(code)
-        if allowed is None:
-            return True
-        return season in allowed
+        return _offered_in_term(code, season, year, cfg)
 
     def _next_courses_cfg(completed, available):
         candidates = []
         for code in sorted_course_codes(available):
-            # prereq_override_map takes full precedence over catalog prereqs
-            if code in prereq_override_map:
-                prereqs = set(prereq_override_map[code])
-            elif code in catalog:
-                prereqs = catalog[code].get("prereqs", set())
-                prereqs = prereqs | prereq_map.get(code, set())
-            else:
-                prereqs = prereq_map.get(code, set())
-            required = {p for p in prereqs if p.startswith(prefix)}
-            if required.issubset(completed):
+            prereqs = _effective_prereqs(code, catalog, prereq_map, prereq_override_map, prefix)
+            # prereq_map entries are never prefix-filtered: a prerequisite
+            # from another major's course list (e.g. PHYS 2120 needing
+            # MATH 1910) must actually be
+            # completed, not just assumed handled elsewhere.
+            if prereqs.issubset(completed):
                 candidates.append(code)
         return candidates
 
@@ -452,12 +525,19 @@ def generate_plan(
 
         i = 0
 
-        # Add supporting courses whose prerequisites are satisfied
+        # Add supporting courses whose prerequisites are satisfied and which
+        # are actually offered this term (checked against the course's own
+        # major's config -- see _offered()). Prereqs come from the course's
+        # own home major (via _full_prereqs), not just this major's
+        # possibly-incomplete supporting_prereq_map entry for it -- e.g. a
+        # Chemistry student needs PHYS 2120's real PHYS 2110 *and* MATH 1910
+        # requirements, not just whichever one CHEM_CONFIG's team happened
+        # to write down.
         while i < len(supporting_remaining):
             code = supporting_remaining[i]
-            prereqs = supporting_prereq_map.get(code, set())
+            prereqs = _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
 
-            if not prereqs.issubset(current_completed):
+            if not prereqs.issubset(current_completed) or not _offered(code, term_season, term_year):
                 i += 1
                 continue
 
@@ -524,15 +604,11 @@ def validate_plan(
     warnings = []
 
     if degree_cfg is not None:
-        cfg_prefix = degree_cfg["prefix"]
-        cfg_prereq_map = degree_cfg.get("prereq_map", {})
-        cfg_prereq_override = degree_cfg.get("prereq_override_map", {})
         cfg_support_prereq = degree_cfg.get("supporting_prereq_map", {})
+        effective_cfg = degree_cfg
     else:
-        cfg_prefix = PROGRAM_PREFIX
-        cfg_prereq_map = PREREQUISITE_MAP
-        cfg_prereq_override = {}
         cfg_support_prereq = SUPPORTING_PREREQUISITE_MAP
+        effective_cfg = {"prefix": PROGRAM_PREFIX, "prereq_map": PREREQUISITE_MAP, "prereq_override_map": {}}
 
     verified_completed = {c.strip().upper() for c in completed_courses}
 
@@ -542,18 +618,18 @@ def validate_plan(
 
         this_term_codes = {item["code"] for item in items if item.get("kind") == "course"}
 
+        term_parts = term.split()
+        term_season, term_year = (term_parts[0], int(term_parts[1])) if len(term_parts) == 2 else (None, None)
+
         for code in sorted_course_codes(this_term_codes):
-            prereqs = set()
-
-            # prereq_override_map takes full precedence over catalog prereqs
-            if code in cfg_prereq_override:
-                prereqs |= {p for p in cfg_prereq_override[code] if p.startswith(cfg_prefix)}
-            elif code in catalog:
-                prereqs |= {p for p in catalog[code].get("prereqs", set()) if p.startswith(cfg_prefix)}
-                prereqs |= {p for p in cfg_prereq_map.get(code, set()) if p.startswith(cfg_prefix)}
-            else:
-                prereqs |= cfg_prereq_map.get(code, set())
-
+            # Prerequisite check: re-derives the full requirement set the
+            # same way generate_plan does -- including a supporting course's
+            # own home-major prereqs (_full_prereqs), not just whatever this
+            # major's supporting_prereq_map happens to declare for it --
+            # rather than trusting generate_plan's own bookkeeping. This is
+            # the independent check, so it has to compute its own answer,
+            # not just echo the scheduler's.
+            prereqs = _full_prereqs(code, effective_cfg, catalog)
             prereqs |= cfg_support_prereq.get(code, set())
 
             for prereq in sorted(prereqs):
@@ -566,6 +642,23 @@ def validate_plan(
                     "prereq": prereq,
                     "type": "same_term" if prereq in this_term_codes else "not_yet_completed",
                 })
+
+            # Offering-season check -- generate_plan has its own _offered()
+            # gate, but nothing previously re-verified that independently;
+            # a bug there would have produced a bad plan with zero warnings.
+            if term_season and term_year is not None:
+                is_offered = (
+                    _offered_in_term(code, term_season, term_year, degree_cfg)
+                    if degree_cfg is not None
+                    else course_offered_in_term(code, term_season, term_year)
+                )
+                if not is_offered:
+                    warnings.append({
+                        "course": code,
+                        "term": term,
+                        "prereq": None,
+                        "type": "not_offered",
+                    })
 
         verified_completed.update(this_term_codes)
 
@@ -652,7 +745,6 @@ def build_personal_prereq_graph(
     conc_courses = cfg["concentration_courses"]
     high_level_opts = cfg.get("high_level_options", [])
     supporting_courses_list = cfg["supporting_courses"]
-    prereq_map = cfg.get("prereq_map", {})
     supporting_prereq_map = cfg.get("supporting_prereq_map", {})
 
     completed = {c.strip().upper() for c in (completed_courses or [])}
@@ -697,10 +789,7 @@ def build_personal_prereq_graph(
 
     edges: List[tuple] = []
     for code in list(nodes.keys()):
-        prereqs: set = set()
-        if code in catalog:
-            prereqs |= catalog[code].get("prereqs", set())
-        prereqs |= prereq_map.get(code, set())
+        prereqs = _full_prereqs(code, cfg, catalog)
         prereqs |= supporting_prereq_map.get(code, set())
 
         for prereq in sorted(prereqs):

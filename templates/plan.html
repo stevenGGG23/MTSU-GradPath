@@ -21,6 +21,8 @@
       <li>
         {% if w.type == 'same_term' %}
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong> together with its prerequisite <strong>{{ w.prereq }}</strong> &mdash; these can't be taken in the same term.
+        {% elif w.type == 'not_offered' %}
+        <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but it isn't offered that term.
         {% else %}
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
         {% endif %}

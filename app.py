@@ -1,6 +1,6 @@
 import os
 import threading
-from mtsugradpath.config import PROGRAM_PREFIX
+from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
 from mtsugradpath.db import init_db, SessionLocal
 from flask import (
     Flask,
@@ -11,7 +11,10 @@ from flask import (
     flash,
     session,
     jsonify,
+    Response,
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from mtsugradpath.degree import (
     SUPPORTING_COURSES,
@@ -26,7 +29,7 @@ from mtsugradpath.degree import (
 
 from mtsugradpath.degree_configs import get_full_degree_config, DEGREE_CONFIGS
 
-from mtsugradpath.models import Course
+from mtsugradpath.models import Course, SyncStatus
 from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
@@ -48,10 +51,72 @@ app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400
 
+# Rate limiting, keyed per client IP. Storage is in-memory (the default) --
+# with multiple gunicorn workers each worker counts independently, so the
+# effective ceiling is roughly limit x worker count, not exact. That's fine
+# here: the goal is a backstop against a traffic spike or scripted abuse, not
+# precise per-client accounting, and adding Redis just for exact counts isn't
+# worth it at this scale.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["60 per minute", "1000 per hour"],
+    storage_uri="memory://",
+)
+
 with app.app_context():
     init_db()
 
-_sync_state = {"running": False, "total": 0, "errors": [], "done": False}
+
+# Sync progress lives in the DB (SyncStatus, single row id=1), not a process
+# global -- so /sync/status is consistent across gunicorn workers.
+def _get_sync_state():
+    with SessionLocal() as db_session:
+        row = db_session.get(SyncStatus, 1)
+        if row is None:
+            return {"running": False, "total": 0, "fresh": 0, "cached": 0, "errors": [], "done": False}
+        return {
+            "running": row.running,
+            "total": row.total,
+            "fresh": row.fresh,
+            "cached": row.cached,
+            "errors": row.errors.splitlines() if row.errors else [],
+            "done": row.done,
+        }
+
+
+def _set_sync_state(**fields):
+    with SessionLocal() as db_session:
+        row = db_session.get(SyncStatus, 1)
+        if row is None:
+            row = SyncStatus(id=1)
+            db_session.add(row)
+        for key, value in fields.items():
+            if key == "errors":
+                value = "\n".join(value)
+            setattr(row, key, value)
+        db_session.commit()
+
+
+def _admin_auth_ok():
+    """Checks HTTP Basic Auth against SYNC_ADMIN_USER/PASSWORD.
+
+    If those env vars aren't set (local dev), force-resync stays open.
+    """
+    if not (SYNC_ADMIN_USER and SYNC_ADMIN_PASSWORD):
+        return True
+    auth = request.authorization
+    return bool(
+        auth and auth.username == SYNC_ADMIN_USER and auth.password == SYNC_ADMIN_PASSWORD
+    )
+
+
+def _admin_auth_challenge():
+    return Response(
+        "Admin credentials required for a full catalog resync.",
+        401,
+        {"WWW-Authenticate": 'Basic realm="GradPath Admin"'},
+    )
 
 # Function that formats credit hours with a display label
 def credit_label(hours):
@@ -238,7 +303,7 @@ def index():
         warnings_display = [
             {
                 "course": warning_label(w["course"]),
-                "prereq": warning_label(w["prereq"]),
+                "prereq": warning_label(w["prereq"]) if w.get("prereq") else None,
                 "term": w["term"],
                 "type": w["type"],
             }
@@ -384,8 +449,7 @@ def prerequisites():
 
 # Background sync runner
 def _run_sync_background(force=False):
-    global _sync_state
-    _sync_state = {"running": True, "total": 0, "fresh": 0, "cached": 0, "errors": [], "done": False}
+    _set_sync_state(running=True, total=0, fresh=0, cached=0, errors=[], done=False)
     total = 0
     fresh = 0   # courses actually fetched from network
     cached = 0  # courses already in DB (no network call)
@@ -400,46 +464,57 @@ def _run_sync_background(force=False):
             else:
                 fresh += count
             total += abs(count)
-            _sync_state["total"] = total
+            _set_sync_state(total=total)
         except Exception as exc:
             errors.append(f"{prefix}: {str(exc)[:120]}")
-            _sync_state["errors"] = errors[:]
-    _sync_state = {
-        "running": False, "total": total,
-        "fresh": fresh, "cached": cached,
-        "errors": errors, "done": True,
-    }
+            _set_sync_state(errors=errors[:])
+    _set_sync_state(
+        running=False, total=total,
+        fresh=fresh, cached=cached,
+        errors=errors, done=True,
+    )
 
 
 @app.route("/sync", methods=["GET", "POST"])
+@limiter.limit("15 per minute")
 def sync():
-    global _sync_state
     force = request.args.get("force") == "1" or (
         request.is_json and request.get_json(silent=True, force=True) or {}
     ).get("force")
 
+    # Force-resync re-scrapes every major from MTSU's catalog even when the DB
+    # is already populated -- that's the expensive/abusable path, so it's the
+    # only one gated behind admin credentials. The plain "Sync Catalog" button
+    # below (POST, no force) stays open: sync_courses() already no-ops per
+    # major when courses are already loaded, so it's cheap to leave public.
     if request.method == "GET" and not request.args.get("force"):
-        # Legacy GET — start sync and redirect (backwards compat for old bookmarks)
-        if not _sync_state.get("running"):
+        # Legacy GET — start a force sync and redirect (backwards compat for old bookmarks)
+        if not _admin_auth_ok():
+            return _admin_auth_challenge()
+        if not _get_sync_state()["running"]:
             t = threading.Thread(target=_run_sync_background, kwargs={"force": True}, daemon=True)
             t.start()
         flash("Catalog sync started in the background. Check back in a moment.", "info")
         return redirect(url_for("index"))
 
-    # POST or GET with ?force=1 — async API
-    if _sync_state.get("running"):
-        return jsonify({"status": "running", "total": _sync_state["total"]})
+    if force and not _admin_auth_ok():
+        return _admin_auth_challenge()
 
-    _sync_state = {"running": False, "total": 0, "errors": [], "done": False}
+    # POST or GET with ?force=1 — async API
+    state = _get_sync_state()
+    if state["running"]:
+        return jsonify({"status": "running", "total": state["total"]})
+
+    _set_sync_state(running=False, total=0, fresh=0, cached=0, errors=[], done=False)
     t = threading.Thread(target=_run_sync_background, kwargs={"force": bool(force)}, daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
 
 @app.route("/sync/status")
+@limiter.limit("120 per minute")  # polled every ~1.5s by the JS while a sync is running
 def sync_status():
-    global _sync_state
-    return jsonify(_sync_state)
+    return jsonify(_get_sync_state())
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)

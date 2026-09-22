@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from html import unescape
 from pathlib import Path
@@ -19,6 +20,12 @@ from .db import SessionLocal
 from .models import Course, CourseType, Prerequisite
 
 PAGE_SIZE = 100  # Acalog widget API caps page-size at 100
+
+# Per-course detail fetches are plain network GETs (no DB access), so they're
+# safe to run concurrently. Kept modest -- fetch_json() already treats an AWS
+# WAF challenge (HTTP 202) as an error, and firing too many requests at once
+# raises the odds of tripping that, same as hammering it sequentially fast.
+DETAIL_FETCH_WORKERS = 5
 ROOT_URL = f"{BASE_CATALOG_URL}/"
 INIT_REFERER = "https://www.google.com/"
 
@@ -224,6 +231,34 @@ def extract_prerequisites(body_text):
     prereq = re.sub(r"\s+", " ", prereq)
 
     return [prereq]
+
+# Function that fetches full course detail JSON for a batch of course briefs
+# concurrently. Network-only (no DB session involved), so it's thread-safe;
+# the caller still does all DB writes sequentially on one session afterward.
+def _fetch_course_details(course_briefs):
+    def _fetch_one(course_brief):
+        detail_path = course_brief.get("url", "")
+        if not detail_path:
+            return course_brief, None
+
+        detail_url = construct_detail_url(detail_path)
+        if not detail_url:
+            return course_brief, None
+
+        try:
+            return course_brief, fetch_json(detail_url)
+        except Exception as exc:
+            print(f"Skipping course {detail_url}: {exc}")
+            return course_brief, None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=DETAIL_FETCH_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, brief) for brief in course_briefs]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    return results
+
 
 # Function that creates a new course record or updates an existing one
 def upsert_course(session, detail):
@@ -608,20 +643,19 @@ def sync_courses(prefix=None, force=False):
 
     synced = 0
 
+    # Detail fetches (one HTTP round trip per course) run concurrently since
+    # they're pure network I/O; the resulting DB writes below stay on one
+    # session/thread, since SQLAlchemy sessions aren't safe to share across threads.
+    detailed_courses = _fetch_course_details(courses)
+
     with SessionLocal() as session:
-        for course_brief in courses:
-            detail_path = course_brief.get('url', '')
-
-            if not detail_path:
+        for course_brief, detail in detailed_courses:
+            if detail is None:
                 continue
 
-            detail_url = construct_detail_url(detail_path)
-
-            if not detail_url:
-                continue
+            detail_url = construct_detail_url(course_brief.get("url", ""))
 
             try:
-                detail = fetch_json(detail_url)
                 course = upsert_course(session, detail)
 
                 for ct in detail.get("course_types", []):

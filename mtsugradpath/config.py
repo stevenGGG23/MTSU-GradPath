@@ -15,6 +15,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 BASE_CATALOG_URL = os.getenv("MTSU_CATALOG_URL", "https://catalog.mtsu.edu")
 PROGRAM_PREFIX = os.getenv("MTSU_PROGRAM_PREFIX", "CSCI")
 
+# SQLAlchemy connection pool sizing. Kept small by default since each gunicorn
+# worker gets its own pool (workers x (pool_size + max_overflow) must stay under
+# the DB's max connection limit -- Supabase's free-tier pooler caps this low).
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "3"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "2"))
+
+# Optional HTTP Basic Auth guard for the expensive force-resync path (/sync?force=1).
+# Unset in dev by default; set both in production so force-resync isn't public.
+SYNC_ADMIN_USER = os.getenv("SYNC_ADMIN_USER")
+SYNC_ADMIN_PASSWORD = os.getenv("SYNC_ADMIN_PASSWORD")
+
 # Catalog IDs to sync.  catoid=36 is the most complete undergrad catalog
 # accessible via the public widget API (catoids 44-49 require an auth token).
 # catoid=33 and 40/41/43 are graduate-only catalogs.

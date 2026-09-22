@@ -791,3 +791,64 @@ footer a {
 .personal-mermaid {
     min-height: 200px;
 }
+
+/* ── Mobile ───────────────────────────────────────────────────────────────
+   Bootstrap's grid/flex-wrap handles most reflow; these tighten the pieces
+   that were sized for desktop (oversized headings, wide min-widths that
+   force premature wrapping/cramping on phone-width screens). */
+@media (max-width: 576px) {
+    .container {
+        padding: 1.25rem 1rem;
+    }
+
+    .header h1 {
+        font-size: 2rem;
+    }
+
+    .header p {
+        font-size: 0.95rem;
+    }
+
+    .card {
+        padding: 1.25rem;
+        border-radius: 18px;
+    }
+
+    .major-card-inner {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .progress-summary {
+        gap: 1.25rem;
+        padding: 1.25rem;
+    }
+
+    .progress-ring {
+        width: 112px;
+        height: 112px;
+    }
+
+    .progress-ring-inner {
+        width: 84px;
+        height: 84px;
+    }
+
+    .progress-ring-value {
+        font-size: 1.3rem;
+    }
+
+    .term-card-header {
+        flex-wrap: wrap;
+        gap: 0.35rem;
+    }
+
+    .plan-item-row {
+        flex-wrap: wrap;
+        padding: 0.6rem 0.85rem;
+    }
+
+    .plan-item-hours {
+        margin-left: 2.65rem; /* aligns under plan-item-main, past the tag column */
+    }
+}
