@@ -134,6 +134,11 @@ function pollSyncStatus() {
         }
 
         showSyncToast(msg, hasErrors ? 'warning' : 'success');
+
+        // Reload after a short delay so the course checklist reflects the new data
+        if (fresh > 0) {
+          setTimeout(() => window.location.reload(), 2200);
+        }
       }
     })
     .catch(() => {
