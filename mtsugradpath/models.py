@@ -28,6 +28,13 @@ class SyncStatus(Base):
     cached = Column(Integer, default=0)
     errors = Column(Text, default="")  # newline-joined error messages
     done = Column(Boolean, default=False)
+    # Unix timestamp (time.time()) set when a sync starts. Lets /sync detect
+    # and recover from a lock left behind by a sync that never got to set
+    # running=False -- e.g. the worker thread running it was killed by a
+    # deploy or an out-of-memory restart mid-sync. Without this, that row
+    # stays running=True forever and every future "Sync Catalog" click just
+    # reports "still running" without ever starting a new sync.
+    started_at = Column(Float, nullable=True)
 
 class Course(Base):
     """Represents one course from the MTSU catalog."""

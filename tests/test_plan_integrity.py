@@ -135,7 +135,7 @@ def test_full_degree_plan_from_scratch_is_sound(major_key):
 
     plan = generate_plan(
         set(), {}, target_terms=14, include_summer=True,
-        start_season="Fall", start_year=2026, degree_cfg=cfg,
+        start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog,
     )
 
     violations = _check_plan(plan, set(), known_codes)
@@ -167,7 +167,7 @@ def test_random_partial_completion_is_sound(major_key):
         plan = generate_plan(
             completed, {}, target_terms=6, include_summer=True,
             start_season=rng.choice(["Fall", "Spring"]), start_year=2026 + trial % 3,
-            degree_cfg=cfg,
+            degree_cfg=cfg, catalog=catalog,
         )
 
         violations = _check_plan(plan, completed, known_codes)
@@ -194,7 +194,7 @@ def test_physics_never_schedules_phys_2120_before_math_1910():
 
     plan = generate_plan(
         completed, {}, target_terms=1, include_summer=False,
-        start_season="Fall", start_year=2026, degree_cfg=cfg,
+        start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog,
     )
 
     # Only actual term buckets count as "scheduled" -- a course correctly and
@@ -222,7 +222,7 @@ def test_chemistry_never_schedules_chem_3510_before_math_1920():
 
     plan = generate_plan(
         completed, {}, target_terms=1, include_summer=False,
-        start_season="Fall", start_year=2026, degree_cfg=cfg,
+        start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog,
     )
 
     # Only actual term buckets count as "scheduled" -- a course correctly and
@@ -265,9 +265,10 @@ def test_generate_plan_never_schedules_wrong_season_course_for_any_major():
     its own major's offering_seasons/odd_year_spring_only data disallows.
     """
     for major_key, cfg in DEGREE_CONFIGS.items():
+        catalog = load_catalog_courses(cfg["prefix"])
         plan = generate_plan(
             set(), {}, target_terms=16, include_summer=True,
-            start_season="Fall", start_year=2026, degree_cfg=cfg,
+            start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog,
         )
         for term, items in plan.items():
             if term.startswith("Remaining"):

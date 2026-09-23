@@ -127,7 +127,7 @@ function pollSyncStatus() {
         } else if (fresh > 0) {
           msg = `Catalog synced \u2014 ${fresh} courses updated across all majors.`;
         } else {
-          msg = `All majors already up to date \u2014 ${total} courses loaded (CS, Biology, Math, Chemistry, Physics). Use force sync to re-fetch.`;
+          msg = `All majors already up to date \u2014 ${total} courses loaded. Use force sync to re-fetch.`;
         }
         if (hasErrors) {
           msg += ' Some majors had errors \u2014 existing data retained.';

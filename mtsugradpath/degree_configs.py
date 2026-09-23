@@ -396,6 +396,180 @@ PHYS_CONFIG = {
     "available": True,
 }
 
+# ── Political Science (Political and Global Affairs) ──────────────────────────────
+# MTSU's current catalog no longer has a standalone "Political Science" major --
+# it was restructured into "Political and Global Affairs" (B.A./B.S.), with an
+# optional concentration in International Relations, Public Policy and
+# Management, or Pre-Law. This models the no-concentration B.S. track.
+#
+# Several requirement slots are catalog "pick one of N" choices (Methods,
+# Comparative/International Relations, Political Theory, Experiential
+# Component) rather than a single fixed course -- those are modeled as
+# supporting_generic hour buckets with the real options listed as suggestions,
+# the same way the STEM majors handle a science-sequence choice. The major
+# also requires two separate minors (15-18 hours each per the catalog); those
+# aren't trackable course-by-course here, so each is a nominal 15-hour bucket.
+PS_CONFIG = {
+    "key": "political_science",
+    "prefix": "PS",
+    "name": "B.S. Political and Global Affairs",
+    "concentration": None,
+    "core_courses": [
+        ("PS 1005", 3, "Introduction to American Politics"),
+        ("PS 1010", 3, "Introduction to Global Politics"),
+    ],
+    "concentration_courses": [],
+    "concentration_elective_hours": 15,
+    "high_level_options": [],
+    "supporting_courses": [
+        ("GEOG 2000", 3, "Introduction to Regional Geography"),
+        ("PGA 2000", 3, "Professional Development in Political and Global Affairs"),
+        ("PGA 4800", 3, "Senior Seminar"),
+    ],
+    "supporting_generic": [
+        ("pga_methods", "Methods requirement", 3, [
+            "PGA 2100 - Understanding Data and Research in Political and Global Affairs",
+            "PS 3001 - Research Methods in Political Science",
+            "PS 3360 - Law and Policy",
+        ]),
+        ("pga_comparative_ir", "Comparative/International Relations", 3, [
+            "PS 3210 - International Relations",
+            "PS 3220 - Comparative Politics",
+        ]),
+        ("pga_political_theory", "Political Theory", 3, [
+            "PS 4230 - Classical Political Theory",
+            "PS 4700 - American Political Thought",
+            "PS 4920 - Modern Political Theory",
+        ]),
+        ("pga_experiential", "Experiential component", 3, [
+            "PS 4290 - Public Service Internship",
+            "PS 4360 - Legislative Internship",
+            "PS 4280 - The Washington Experience",
+        ]),
+        ("pga_minor_1", "Minor #1 (required)", 15, [
+            "Any approved minor, e.g. History, Criminal Justice, Economics",
+        ]),
+        ("pga_minor_2", "Minor #2 (required, different from Minor #1)", 15, [
+            "A second, different approved minor",
+        ]),
+    ],
+    "tbc_generic": _TBC,
+    "total_hours": TOTAL_PROGRAM_HOURS,
+    "prereq_map": {},
+    # The catalog's "PS 1005 or PS 1010" style prereqs are simplified to a
+    # single required course, same convention as the STEM configs' own
+    # placement-style overrides -- otherwise catalog scraping would AND both
+    # codes together instead of treating them as alternatives.
+    "prereq_override_map": {
+        "PS 3001": {"PS 1005"},
+        "PS 3210": {"PS 1010"},
+        "PS 3220": {"PS 1010"},
+        "PS 4230": {"PS 1005"},
+        "PS 4700": {"PS 1005"},
+        "PS 4920": {"PS 1005"},
+        "PS 4930": {"PS 1005"},
+    },
+    # PGA 4800 is a senior capstone seminar; PGA isn't a tracked major prefix
+    # so its real "senior standing" prereq (not itself a course) is proxied by
+    # requiring both intro core courses be done first.
+    "supporting_prereq_map": {
+        "PGA 4800": {"PS 1005", "PS 1010"},
+    },
+    "offering_seasons": {},
+    "odd_year_spring_only": set(),
+    "upper_division_prefix": "PS",
+    "upper_division_min": 3000,
+    "available": True,
+}
+
+# ── Aerospace, Professional Pilot Concentration ────────────────────────────────────
+# The catalog's "Professional Pilot Concentration (47 hours)" section lists 30
+# AERO courses, but several belong to other concentrations sharing the same
+# course pool (Maintenance Management's AERO 3362, Air Traffic Control's AERO
+# 3630, the optional Flight Instructor add-on AERO 4201-4210) or are
+# alternative single-credit flight labs -- the 17 courses below plus a 1-hour
+# elective flight lab (via the normal elective-pool mechanism) sum to exactly
+# 47 hours and match the real prerequisite chain from the catalog.
+AERO_CONFIG = {
+    "key": "aerospace",
+    "prefix": "AERO",
+    "name": "B.S. Aerospace",
+    "concentration": "Professional Pilot Concentration",
+    "core_courses": [
+        ("AERO 1010", 3, "Introduction to Aerospace"),
+        ("AERO 1020", 3, "Theory of Flight"),
+        ("AERO 3020", 3, "Aerospace Materials"),
+        ("AERO 3030", 3, "Propulsion Fundamentals"),
+        ("AERO 4040", 1, "Professional Aviation Pathways"),
+    ],
+    "concentration_courses": [
+        ("AERO 1230", 3, "Aviation Laws and Regulations"),
+        ("AERO 2010", 3, "Aviation Weather"),
+        ("AERO 2230", 3, "Professional Pilot I"),
+        ("AERO 2201", 2, "Professional Pilot Flight Lab I"),
+        ("AERO 3170", 3, "Aviation Safety"),
+        ("AERO 3210", 3, "Professional Pilot II"),
+        ("AERO 3203", 2, "Professional Pilot Flight Lab II"),
+        ("AERO 3215", 3, "Professional Pilot III"),
+        ("AERO 3204", 2, "Professional Pilot Flight Lab III"),
+        ("AERO 3240", 3, "Professional Pilot IV"),
+        ("AERO 3261", 1, "Professional Pilot Flight Lab IV"),
+        ("AERO 3230", 3, "Crew Resource Management"),
+        ("AERO 3440", 3, "Fundamentals of Aerodynamics"),
+        ("AERO 4250", 3, "Professional Pilot V"),
+        ("AERO 4310", 3, "Aerospace Vehicle Systems"),
+        ("AERO 4440", 3, "Aircraft Performance"),
+        ("AERO 3080", 3, "Aviation Weather II"),
+    ],
+    "concentration_elective_hours": 1,
+    "high_level_options": [],
+    "supporting_courses": [
+        ("MATH 1710", 3, "College Algebra"),
+        ("MATH 1810", 3, "Applied Calculus I"),
+        ("CHEM 1010", 4, "Introductory General Chemistry I"),
+        ("PHYS 2010", 4, "Non-Calculus-Based Physics I"),
+        ("BCED 3510", 3, "Business Communication"),
+        ("COMM 2560", 3, "Intercultural Communication"),
+        ("GS 2010", 3, "Introduction to Cross-Cultural Experiences"),
+        ("PHIL 3150", 3, "Ethics"),
+    ],
+    "supporting_generic": [],
+    "tbc_generic": _TBC,
+    "total_hours": TOTAL_PROGRAM_HOURS,
+    "prereq_map": {
+        "AERO 3020": {"AERO 1010", "AERO 1020", "MATH 1810", "PHYS 2010"},
+        "AERO 3030": {"AERO 1010", "AERO 1020"},
+        "AERO 4040": {"AERO 1010", "AERO 1020", "AERO 3020", "AERO 3030"},
+        "AERO 2201": {"AERO 2230"},
+        "AERO 3210": {"AERO 2230", "AERO 2201"},
+        "AERO 3203": {"AERO 3210"},
+        "AERO 3215": {"AERO 2010", "AERO 3203"},
+        "AERO 3204": {"AERO 3203", "AERO 3215"},
+        "AERO 3230": {"AERO 2230"},
+        "AERO 3240": {"AERO 3204"},
+        "AERO 3261": {"AERO 3204", "AERO 3215"},
+        "AERO 4250": {"AERO 3240"},
+        "AERO 4310": {"AERO 1010", "AERO 1020"},
+        "AERO 4440": {"AERO 3440"},
+        "AERO 3440": {"MATH 1810", "PHYS 2010"},
+        "AERO 3080": {"AERO 2010"},
+        "AERO 3170": {"AERO 1020"},
+    },
+    # Real prereqs like "Private Pilot Certificate" or "Instrument Rating"
+    # aren't course codes -- proxied by the AERO course sequence that actually
+    # earns them (e.g. AERO 2230 + its flight lab before AERO 3210).
+    "prereq_override_map": {},
+    "supporting_prereq_map": {
+        "MATH 1810": {"MATH 1710"},
+        "PHYS 2010": {"MATH 1710"},
+    },
+    "offering_seasons": {},
+    "odd_year_spring_only": set(),
+    "upper_division_prefix": "AERO",
+    "upper_division_min": 3000,
+    "available": True,
+}
+
 # ── Registry ──────────────────────────────────────────────────────────────────────
 DEGREE_CONFIGS = {
     "cs": CS_CONFIG,
@@ -403,6 +577,8 @@ DEGREE_CONFIGS = {
     "math": MATH_CONFIG,
     "chemistry": CHEM_CONFIG,
     "physics": PHYS_CONFIG,
+    "political_science": PS_CONFIG,
+    "aerospace": AERO_CONFIG,
 }
 
 

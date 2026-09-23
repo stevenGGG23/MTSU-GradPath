@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
 from mtsugradpath.db import init_db, SessionLocal
 from flask import (
@@ -9,7 +10,6 @@ from flask import (
     redirect,
     url_for,
     flash,
-    session,
     jsonify,
     Response,
 )
@@ -49,7 +49,6 @@ from datetime import date
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["PERMANENT_SESSION_LIFETIME"] = 86400
 
 # Rate limiting, keyed per client IP. Storage is in-memory (the default) --
 # with multiple gunicorn workers each worker counts independently, so the
@@ -68,13 +67,30 @@ with app.app_context():
     init_db()
 
 
+# A full resync of every major takes a few minutes at most (see the timed
+# manual run in dev: ~40s for a single mid-size major). Anything still
+# "running" past this is an orphaned lock, not a real in-progress sync -- most
+# likely the worker thread running it was killed mid-sync (deploy, OOM
+# restart) before it could set running=False, and since a daemon thread dies
+# silently with its process, nothing else would ever clear the flag.
+STALE_SYNC_SECONDS = 20 * 60
+
+
+def _sync_is_stale(state):
+    started_at = state.get("started_at")
+    return started_at is None or (time.time() - started_at) > STALE_SYNC_SECONDS
+
+
 # Sync progress lives in the DB (SyncStatus, single row id=1), not a process
 # global -- so /sync/status is consistent across gunicorn workers.
 def _get_sync_state():
     with SessionLocal() as db_session:
         row = db_session.get(SyncStatus, 1)
         if row is None:
-            return {"running": False, "total": 0, "fresh": 0, "cached": 0, "errors": [], "done": False}
+            return {
+                "running": False, "total": 0, "fresh": 0, "cached": 0,
+                "errors": [], "done": False, "started_at": None,
+            }
         return {
             "running": row.running,
             "total": row.total,
@@ -82,6 +98,7 @@ def _get_sync_state():
             "cached": row.cached,
             "errors": row.errors.splitlines() if row.errors else [],
             "done": row.done,
+            "started_at": row.started_at,
         }
 
 
@@ -158,21 +175,14 @@ def read_generic_hours(form, degree_cfg=None):
 # Function that displays the planner form and processes the submitted degree plans
 @app.route("/", methods=["GET", "POST"])
 def index():
-    # Restores the user's previous planner selections
-    saved_state = session.get("planner_state", {})
-
-    # ?major= query param lets the major-selector radio reload the page with the right courses.
-    # It also updates the session so the choice persists on next visit.
-    if request.args.get("major"):
-        qs_major = request.args["major"]
-        saved_state = dict(saved_state)
-        saved_state["major"] = qs_major
-        session["planner_state"] = saved_state
-        session.modified = True
+    # Selections are intentionally NOT persisted across visits -- every fresh
+    # load of the planner starts blank. The only thing carried across a
+    # reload is the major, and only via the ?major= query param itself (used
+    # by the major-selector radio's same-visit reload), never stored server-side.
+    saved_state = {"major": request.args.get("major", "cs")}
 
     # Determine which major to display courses for on GET
-    saved_major = saved_state.get("major", "cs")
-    degree_cfg_for_display = get_full_degree_config(saved_major)
+    degree_cfg_for_display = get_full_degree_config(saved_state["major"])
     display_prefix = degree_cfg_for_display["prefix"]
 
     with SessionLocal() as db_session:
@@ -241,16 +251,10 @@ def index():
         except ValueError:
             start_year = date.today().year
 
-        # Save the planner inputs to be restored
-        session["planner_state"] = {
-            "completed_courses": sorted(completed_courses),
-            "generic_hours": generic_hours,
-            "target_semesters": target_semesters,
-            "include_summer": include_summer,
-            "start_season": start_season,
-            "start_year": start_year,
-            "major": selected_major,
-        }
+        # Loaded once and reused below -- generate_plan() used to reload the
+        # catalog itself internally, so every plan generation cost two DB
+        # round trips instead of one.
+        catalog = load_catalog_courses(degree_cfg["prefix"])
 
         # Generates the plan, audits, and prerequisite warnings
         plan = generate_plan(
@@ -261,9 +265,8 @@ def index():
             start_season=start_season,
             start_year=start_year,
             degree_cfg=degree_cfg,
+            catalog=catalog,
         )
-
-        catalog = load_catalog_courses(degree_cfg["prefix"])
 
         audit = build_audit(completed_courses, generic_hours, catalog, degree_cfg=degree_cfg)
 
@@ -412,30 +415,6 @@ def index():
         degree_list=degree_list,
     )
 
-# Function that saves the selected courses into a Flask session
-@app.post("/save-completed-courses")
-def save_completed_courses():
-    data = request.get_json(silent=True) or {}
-
-    submitted_courses = data.get("completed_courses", [])
-
-    # Translates the course codes before storing them
-    completed_courses = sorted ({
-        str(code).strip().upper()
-        for code in submitted_courses
-        if str(code).strip()
-    })
-
-    planner_state = session.get("planner_state", {})
-    planner_state["completed_courses"] = completed_courses
-
-    session.modified = True
-
-    return {
-        "success": True,
-        "completed_courses": completed_courses,
-    }
-
 # Function that builds and displays the dependency graph
 @app.route("/prerequisites")
 def prerequisites():
@@ -449,30 +428,38 @@ def prerequisites():
 
 # Background sync runner
 def _run_sync_background(force=False):
-    _set_sync_state(running=True, total=0, fresh=0, cached=0, errors=[], done=False)
+    _set_sync_state(
+        running=True, total=0, fresh=0, cached=0, errors=[], done=False,
+        started_at=time.time(),
+    )
     total = 0
     fresh = 0   # courses actually fetched from network
     cached = 0  # courses already in DB (no network call)
     errors = []
-    for key, cfg in DEGREE_CONFIGS.items():
-        prefix = cfg["prefix"]
-        try:
-            count = sync_courses(prefix=prefix, force=force)
-            if count < 0:
-                # Negative = already loaded, no network call made
-                cached += abs(count)
-            else:
-                fresh += count
-            total += abs(count)
-            _set_sync_state(total=total)
-        except Exception as exc:
-            errors.append(f"{prefix}: {str(exc)[:120]}")
-            _set_sync_state(errors=errors[:])
-    _set_sync_state(
-        running=False, total=total,
-        fresh=fresh, cached=cached,
-        errors=errors, done=True,
-    )
+    try:
+        for key, cfg in DEGREE_CONFIGS.items():
+            prefix = cfg["prefix"]
+            try:
+                count = sync_courses(prefix=prefix, force=force)
+                if count < 0:
+                    # Negative = already loaded, no network call made
+                    cached += abs(count)
+                else:
+                    fresh += count
+                total += abs(count)
+                _set_sync_state(total=total)
+            except Exception as exc:
+                errors.append(f"{prefix}: {str(exc)[:120]}")
+                _set_sync_state(errors=errors[:])
+    finally:
+        # Always clears the running flag, even if something above raised
+        # outside the per-major try/except -- otherwise the lock never
+        # clears and every future sync request just reports "still running".
+        _set_sync_state(
+            running=False, total=total,
+            fresh=fresh, cached=cached,
+            errors=errors, done=True,
+        )
 
 
 @app.route("/sync", methods=["GET", "POST"])
@@ -491,7 +478,8 @@ def sync():
         # Legacy GET — start a force sync and redirect (backwards compat for old bookmarks)
         if not _admin_auth_ok():
             return _admin_auth_challenge()
-        if not _get_sync_state()["running"]:
+        legacy_state = _get_sync_state()
+        if not legacy_state["running"] or _sync_is_stale(legacy_state):
             t = threading.Thread(target=_run_sync_background, kwargs={"force": True}, daemon=True)
             t.start()
         flash("Catalog sync started in the background. Check back in a moment.", "info")
@@ -502,7 +490,7 @@ def sync():
 
     # POST or GET with ?force=1 — async API
     state = _get_sync_state()
-    if state["running"]:
+    if state["running"] and not _sync_is_stale(state):
         return jsonify({"status": "running", "total": state["total"]})
 
     _set_sync_state(running=False, total=0, fresh=0, cached=0, errors=[], done=False)

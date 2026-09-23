@@ -3,7 +3,6 @@
 {% block content %}
 
 {% set saved_state = saved_state | default({}) %}
-{% set saved_completed = saved_state.get('completed_courses', []) %}
 {% set saved_hours = saved_state.get('generic_hours', {}) %}
 {% set saved_season = saved_state.get('start_season', default_season) %}
 {% set saved_year = saved_state.get('start_year', default_year) %}
@@ -194,7 +193,50 @@ const suggestionsBox = document.getElementById('course_suggestions');
 const courseOptions = {{ courses | tojson | safe }};
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
-const savedCompletedCourses = {{ saved_completed | tojson }};
+
+// Selections live in sessionStorage, which is scoped to this browser tab: they
+// survive switching majors and going to the plan page and back, but a new tab
+// or a reopened link starts blank. Nothing is stored server-side.
+const STORAGE_KEY = 'gradpath-planner';
+const currentMajor = {{ saved_state.major | tojson }};
+let restoring = false;
+
+function loadSaved() {
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveState() {
+  if (restoring || redirecting) return;
+  const hours = {};
+  document.querySelectorAll('.requirement-hours-input').forEach(input => {
+    hours[input.name] = input.value;
+  });
+  const state = {
+    major: currentMajor,
+    courses: Array.from(selectedCourses.querySelectorAll('.badge')).map(b => b.dataset.course),
+    hours: { ...(loadSaved().hours || {}), ...hours },
+    start_season: document.getElementById('start_season').value,
+    start_year: document.getElementById('start_year').value,
+    target_semesters: document.getElementById('target_semesters').value,
+    include_summer: document.getElementById('include_summer').checked,
+  };
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {}
+}
+
+// Returning to "/" (e.g. "Edit completed courses" on the plan page) carries no
+// ?major=, so jump back to the major this tab was last using.
+const savedAtLoad = loadSaved();
+const redirecting = !new URLSearchParams(window.location.search).has('major')
+  && savedAtLoad.major && savedAtLoad.major !== currentMajor;
+if (redirecting) {
+  window.location.replace('/?major=' + encodeURIComponent(savedAtLoad.major));
+}
 
 function normalizeCourse(code) {
   return code.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -203,30 +245,7 @@ function normalizeCourse(code) {
 function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
-}
-
-async function saveCompletedCourses() {
-  const completedCourses = Array.from(
-    selectedCourses.querySelectorAll('.badge')
-  ).map(badge => badge.dataset.course);
-
-  try {
-    const response = await fetch('/save-completed-courses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        completed_courses: completedCourses
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error('Unable to save completed courses');
-    }
-  } catch (error) {
-    console.error('Course save failed:', error);
-  }
+  saveState();
 }
 
 function updateCsSelectedCount() {
@@ -256,13 +275,11 @@ function setSuggestions(matches) {
     item.type = 'button';
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
     item.textContent = match.label;
-    item.addEventListener('click', async () => {
+    item.addEventListener('click', () => {
       addCourse(match.code, match.label);
       courseInput.value = '';
       setSuggestions([]);
       courseInput.focus();
-
-      await saveCompletedCourses();
     });
     suggestionsBox.appendChild(item);
   });
@@ -303,13 +320,11 @@ function addCourse(code, label = null) {
   remove.type = 'button';
   remove.className = 'btn-close btn-close-white btn-sm ms-2';
   remove.setAttribute('aria-label', 'Remove');
-  remove.addEventListener('click', async () => {
+  remove.addEventListener('click', () => {
     badge.remove();
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
     updateCsSelectedCount();
-
-    await saveCompletedCourses();
   });
 
   badge.appendChild(remove);
@@ -344,31 +359,27 @@ function updateCourseSearch() {
   setSuggestions(matches);
 }
 
-addCourseButton.addEventListener('click', async () => {
+addCourseButton.addEventListener('click', () => {
   addCourse(courseInput.value);
   courseInput.value = '';
   clearSuggestions();
   courseInput.focus();
-
-  await saveCompletedCourses();
 });
 
 courseInput.addEventListener('input', updateCourseSearch);
 
-courseInput.addEventListener('keydown', async event => {
+courseInput.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
     event.preventDefault();
     addCourse(courseInput.value);
     courseInput.value = '';
     clearSuggestions();
-
-    await saveCompletedCourses();
   }
 });
 
 courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
-clearCoursesButton.addEventListener('click', async () => {
+clearCoursesButton.addEventListener('click', () => {
   selectedCourses.innerHTML = '';
   updateHiddenField();
   csCourseCheckboxes.forEach(box => {
@@ -376,11 +387,10 @@ clearCoursesButton.addEventListener('click', async () => {
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
   updateCsSelectedCount();
-  await saveCompletedCourses();
 });
 
 csCourseCheckboxes.forEach(box => {
-  box.addEventListener('change', async () => {
+  box.addEventListener('change', () => {
     const code = box.dataset.code;
     box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
     updateCsSelectedCount();
@@ -391,7 +401,6 @@ csCourseCheckboxes.forEach(box => {
     }
 
     updateCsSelectedCount();
-    await saveCompletedCourses();
   });
 });
 
@@ -415,19 +424,37 @@ document.querySelectorAll('.requirement-hours-input').forEach(input => {
   updateFill();
 });
 
-function getCourseLabel(code) {
-  const matchingCourse = courseOptions.find(
-    course => normalizeCourse(course.code) === normalizeCourse(code)
-  );
+function restoreState() {
+  const saved = loadSaved();
+  restoring = true;
 
-  return matchingCourse ? matchingCourse.label : null;
+  (saved.courses || []).forEach(code => {
+    const match = courseOptions.find(c => c.code === code);
+    addCourse(code, match ? match.label : null);
+  });
+
+  document.querySelectorAll('.requirement-hours-input').forEach(input => {
+    const value = (saved.hours || {})[input.name];
+    if (value !== undefined) {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    }
+  });
+
+  if (saved.start_season) document.getElementById('start_season').value = saved.start_season;
+  if (saved.start_year) document.getElementById('start_year').value = saved.start_year;
+  if (saved.target_semesters) document.getElementById('target_semesters').value = saved.target_semesters;
+  if (saved.include_summer !== undefined) document.getElementById('include_summer').checked = saved.include_summer;
+
+  restoring = false;
+  saveState();
 }
 
-savedCompletedCourses.forEach(code => {
-  addCourse(code, getCourseLabel(code));
-});
-
+restoreState();
 updateCsSelectedCount();
+
+plannerForm.addEventListener('input', saveState);
+plannerForm.addEventListener('change', saveState);
 
 plannerForm.addEventListener('submit', () => {
   updateHiddenField();

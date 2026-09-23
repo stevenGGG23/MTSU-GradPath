@@ -413,6 +413,7 @@ def generate_plan(
     start_season: str = None,
     start_year: int = None,
     degree_cfg: dict = None,
+    catalog: Dict[str, Dict[str, object]] = None,
 ) -> Dict[str, List[Dict[str, object]]]:
 
     cfg = degree_cfg or CS_CONFIG
@@ -427,7 +428,11 @@ def generate_plan(
     if not start_year:
         start_year = date.today().year
 
-    catalog = load_catalog_courses(prefix)
+    # Callers that already loaded the catalog (e.g. the web app, which also
+    # needs it for the audit/warnings) can pass it in to skip a second,
+    # redundant DB round trip -- otherwise it's loaded here as before.
+    if catalog is None:
+        catalog = load_catalog_courses(prefix)
 
     core_courses = cfg["core_courses"]
     conc_courses = cfg["concentration_courses"]

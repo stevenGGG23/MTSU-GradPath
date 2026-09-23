@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from .config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW
 
@@ -28,3 +28,17 @@ def init_db():
     from .models import Base
 
     Base.metadata.create_all(bind=engine)
+    _ensure_sync_status_started_at_column()
+
+
+# create_all() only creates missing tables, it never alters an existing one --
+# so a production DB whose sync_status table predates the started_at column
+# needs it added by hand. Not using Alembic for a single-column, single-table
+# app like this, so this is a plain "add column if missing" instead: the
+# ALTER fails harmlessly (already exists) on every startup after the first.
+def _ensure_sync_status_started_at_column():
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sync_status ADD COLUMN started_at FLOAT"))
+    except Exception:
+        pass

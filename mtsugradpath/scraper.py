@@ -183,7 +183,15 @@ def brief_matches_program(title, prefix=PROGRAM_PREFIX):
     if not title:
         return False
 
-    return title.replace(" ", " ").strip().upper().startswith(prefix.upper())
+    # Matches the leading course-prefix token exactly (up to the first
+    # digit), not just a raw string prefix -- a plain startswith() would
+    # also match unrelated departments whose code happens to start with the
+    # same letters, e.g. prefix="PS" (Political Science) incorrectly
+    # matching "PSY 1410 - General Psychology" or "PSCI ...".
+    normalized = title.replace(" ", " ").strip().upper()
+    match = re.match(r"^([A-Z]{2,5})\s*\d", normalized)
+
+    return bool(match) and match.group(1) == prefix.upper()
 
 # Function that separates a course's title prefix, number, and name
 def parse_title(title):
