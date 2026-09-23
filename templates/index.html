@@ -48,7 +48,7 @@
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Check off every {{ degree_cfg.prefix }} course you've already completed.</p>
+                <p class="form-text mt-0 mb-2">Check off every {{ ([degree_cfg.prefix] + degree_cfg.get('extra_prefixes', [])) | join('/') }} course you've already completed.</p>
                 {% if not major_courses %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet. Click <strong>Sync Catalog</strong> to enable the checklist.

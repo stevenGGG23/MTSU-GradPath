@@ -604,14 +604,14 @@ DEGREE_REGISTRY = {
         "available": False,
         "note": "Coming soon — degree requirements being added.",
     },
-    "engineering_tech": {
-        "key": "engineering_tech",
-        "name": "B.S. Engineering Technology",
-        "concentration": None,
+    "construction_mgmt": {
+        "key": "construction_mgmt",
+        "name": "B.S. Construction Management",
+        "concentration": "Commercial Construction Management Concentration",
         "college": "College of Basic and Applied Sciences",
-        "prefix": "ET",
-        "available": False,
-        "note": "Coming soon — degree requirements being added.",
+        "prefix": "CMT",
+        "available": True,
+        "note": "Full planning supported.",
     },
 }
 

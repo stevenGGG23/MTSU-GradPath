@@ -27,7 +27,7 @@ from mtsugradpath.degree import (
     get_degree_config,
 )
 
-from mtsugradpath.degree_configs import get_full_degree_config, DEGREE_CONFIGS
+from mtsugradpath.degree_configs import get_full_degree_config, major_prefixes, DEGREE_CONFIGS
 
 from mtsugradpath.models import Course, SyncStatus
 from mtsugradpath.planner import (
@@ -183,12 +183,12 @@ def index():
 
     # Determine which major to display courses for on GET
     degree_cfg_for_display = get_full_degree_config(saved_state["major"])
-    display_prefix = degree_cfg_for_display["prefix"]
+    display_prefixes = major_prefixes(degree_cfg_for_display)
 
     with SessionLocal() as db_session:
         course_list = (
             db_session.query(Course)
-            .filter(Course.prefix == display_prefix)
+            .filter(Course.prefix.in_(display_prefixes))
             .order_by(Course.prefix, Course.number)
             .all()
         )
@@ -281,7 +281,7 @@ def index():
         with SessionLocal() as db_session2:
             post_course_list = (
                 db_session2.query(Course)
-                .filter(Course.prefix == degree_cfg["prefix"])
+                .filter(Course.prefix.in_(major_prefixes(degree_cfg)))
                 .order_by(Course.prefix, Course.number)
                 .all()
             )
@@ -437,8 +437,8 @@ def _run_sync_background(force=False):
     cached = 0  # courses already in DB (no network call)
     errors = []
     try:
-        for key, cfg in DEGREE_CONFIGS.items():
-            prefix = cfg["prefix"]
+        prefixes = [p for cfg in DEGREE_CONFIGS.values() for p in major_prefixes(cfg)]
+        for prefix in prefixes:
             try:
                 count = sync_courses(prefix=prefix, force=force)
                 if count < 0:

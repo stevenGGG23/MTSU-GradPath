@@ -2,6 +2,7 @@
 
 Each config dict has:
   key, prefix, name
+  extra_prefixes:         optional [prefix, ...] – other prefixes the major's own courses use
   core_courses:           [(code, hours, title), ...]
   concentration_courses:  [(code, hours, title), ...]
   concentration_elective_hours: int
@@ -570,6 +571,107 @@ AERO_CONFIG = {
     "available": True,
 }
 
+# ── Construction Management, Commercial Construction Management Concentration ──
+# Built from catalog 36 ("Construction Management, Commercial Construction
+# Management Concentration, B.S."). The major draws on two prefixes: CMT
+# (Construction Management) and CCM (School of Concrete and Construction
+# Management, shared with the Concrete Industry Management major), so CCM is
+# listed in extra_prefixes to be synced, shown in the checklist, and have its
+# prerequisites resolved through this config.
+#
+# Catalog quirks handled here:
+#  - The core's "CCM 4010 or BLAW 3400" law choice is a supporting_generic
+#    bucket, the same way Political and Global Affairs handles pick-one slots.
+#  - CMT 3300 (internship) is variable 1-9 hours; the core requires 3.
+#  - GEOL 1041 is a 0-hour lab taken with GEOL 1040, so it isn't listed.
+#  - Several catalog prereqs still name CCM 2050 (Plan Reading), which has
+#    been replaced by CCM 2060 (Construction Plan Reading) -- prereq_map
+#    uses CCM 2060 instead.
+#  - "Junior standing" / "Permission of department" prereqs aren't course
+#    codes -- proxied by the course that precedes them on the academic map.
+# Hours: core 39 + concentration 18 + supporting 17 + TBC 41 = 115, leaving
+# 5 hours of general electives, matching the catalog's 5-12.
+CM_CONFIG = {
+    "key": "construction_mgmt",
+    "prefix": "CMT",
+    "extra_prefixes": ["CCM"],
+    "name": "B.S. Construction Management",
+    "concentration": "Commercial Construction Management Concentration",
+    "core_courses": [
+        ("CCM 1010", 1, "Introduction to the Concrete and Construction Industry"),
+        ("CCM 1500", 3, "Land Surveying"),
+        ("CCM 1501", 1, "Land Surveying Lab"),
+        ("CCM 2060", 3, "Construction Plan Reading"),
+        ("CCM 2200", 3, "Project Estimating"),
+        ("CMT 2100", 3, "Construction Means and Methods"),
+        ("CMT 2320", 3, "Architectural Computer-Aided Drafting and Design"),
+        ("CMT 3100", 3, "Mechanical and Electrical Systems"),
+        ("CMT 3210", 3, "Construction Codes and Regulation"),
+        ("CMT 3300", 3, "Construction Management Internship"),
+        ("CMT 3800", 3, "Soil Mechanics for Construction"),
+        ("CMT 3801", 1, "Soil Mechanics for Construction Lab"),
+        ("CMT 4120", 3, "Scheduling"),
+        ("CMT 4160", 3, "Construction Safety and Health Management"),
+    ],
+    "concentration_courses": [
+        ("CCM 2550", 3, "Engineering Mechanics for Construction"),
+        ("CMT 3000", 3, "Commercial Construction and Materials"),
+        ("CMT 4140", 3, "Construction Management Principles"),
+        ("CMT 4200", 3, "Commercial Cost Estimating and Bidding"),
+        ("CMT 4280", 3, "Commercial Construction Capstone"),
+        ("CMT 4320", 3, "Software Applications for Virtual Design and Construction"),
+    ],
+    "concentration_elective_hours": 0,
+    "high_level_options": [],
+    "supporting_courses": [
+        ("MATH 1730", 4, "Pre-Calculus"),
+        ("GEOL 1040", 4, "Physical Geology (with GEOL 1041 lab)"),
+        ("ACTG 3000", 3, "Survey of Accounting for General Business"),
+        ("FIN 3000", 3, "Survey of Finance"),
+        ("MKT 3820", 3, "Principles of Marketing"),
+    ],
+    "supporting_generic": [
+        ("cm_law", "Construction law requirement", 3, [
+            "CCM 4010 - Concrete and Construction Law",
+            "BLAW 3400 - Legal Environment of Business",
+        ]),
+    ],
+    "tbc_generic": _TBC,
+    "total_hours": TOTAL_PROGRAM_HOURS,
+    "prereq_map": {
+        "CCM 2200": {"CCM 2060"},
+        "CCM 2550": {"CMT 2100"},
+        "CMT 2100": {"CCM 1010", "CCM 2060"},
+        "CMT 2320": {"CCM 2060"},
+        "CMT 3100": {"CMT 2100"},
+        "CMT 3300": {"CMT 2100"},  # permission of department
+        "CMT 3800": {"CMT 2100"},
+        "CMT 3801": {"CMT 2100"},
+        "CMT 4120": {"CCM 2200"},
+        "CMT 4140": {"CMT 2100"},  # junior or senior standing
+        "CMT 4160": {"CCM 1010", "CCM 2060"},
+        "CMT 4200": {"CCM 2060", "CCM 2200"},
+        "CMT 4280": {"CMT 4140", "CMT 4200"},  # capstone, permission of department
+        "CMT 4320": {"CMT 2320"},
+    },
+    # Catalog text for CMT 3801 reads "Prerequisite: CMT 2100; corequisite:
+    # CMT 3800", which the scraper parses as both being prerequisites -- the
+    # lab is taken alongside CMT 3800, not after it.
+    "prereq_override_map": {
+        "CMT 3801": {"CMT 2100"},
+    },
+    "supporting_prereq_map": {
+        "ACTG 3000": {"MATH 1730"},  # TBC Quantitative Literacy, sophomore standing
+        "FIN 3000": {"CMT 2100"},    # junior standing
+        "MKT 3820": {"CMT 2100"},    # junior standing
+    },
+    "offering_seasons": {},
+    "odd_year_spring_only": set(),
+    "upper_division_prefix": "CMT",
+    "upper_division_min": 3000,
+    "available": True,
+}
+
 # ── Registry ──────────────────────────────────────────────────────────────────────
 DEGREE_CONFIGS = {
     "cs": CS_CONFIG,
@@ -579,7 +681,13 @@ DEGREE_CONFIGS = {
     "physics": PHYS_CONFIG,
     "political_science": PS_CONFIG,
     "aerospace": AERO_CONFIG,
+    "construction_mgmt": CM_CONFIG,
 }
+
+
+def major_prefixes(cfg: dict) -> list:
+    """Every course prefix a major's own courses use, main prefix first."""
+    return [cfg["prefix"], *cfg.get("extra_prefixes", [])]
 
 
 def get_full_degree_config(key: str) -> dict:

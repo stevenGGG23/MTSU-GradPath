@@ -16,14 +16,15 @@ from .degree import (
     course_offered_in_term,
     clamp_hours,
 )
-from .degree_configs import CS_CONFIG, DEGREE_CONFIGS, get_full_degree_config
+from .degree_configs import CS_CONFIG, DEGREE_CONFIGS, get_full_degree_config, major_prefixes
 from .models import Course
 
 # Maps a course prefix (e.g. "MATH") to that major's own config, so a
 # cross-prefix requirement -- e.g. a Physics major's PHYS course needing a
 # MATH course -- can be checked against the offering pattern MATH's own
-# config declares, not (incorrectly) against the current major's.
-_PREFIX_TO_CONFIG = {c["prefix"]: c for c in DEGREE_CONFIGS.values()}
+# config declares, not (incorrectly) against the current major's. A major's
+# extra_prefixes (e.g. Construction Management's CCM courses) map to it too.
+_PREFIX_TO_CONFIG = {p: c for c in DEGREE_CONFIGS.values() for p in major_prefixes(c)}
 
 
 # Function that checks whether *code* is offered in a given season/year,

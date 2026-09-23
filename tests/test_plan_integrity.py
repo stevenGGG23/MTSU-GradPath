@@ -12,14 +12,14 @@ import random
 
 import pytest
 
-from mtsugradpath.degree_configs import DEGREE_CONFIGS
+from mtsugradpath.degree_configs import DEGREE_CONFIGS, major_prefixes
 from mtsugradpath.planner import generate_plan, validate_plan, load_catalog_courses
 
 MAJOR_KEYS = list(DEGREE_CONFIGS.keys())
 
 # Config lookup by prefix, built independently of planner.py's own
 # _PREFIX_TO_CONFIG, for the same reason noted above.
-_CFG_BY_PREFIX = {cfg["prefix"]: cfg for cfg in DEGREE_CONFIGS.values()}
+_CFG_BY_PREFIX = {p: cfg for cfg in DEGREE_CONFIGS.values() for p in major_prefixes(cfg)}
 
 
 def _known_codes(cfg):
