@@ -134,7 +134,23 @@
     </div>
   </div>
   {% endif %}
-
+<!-- Look for your course rendering loop in plan.html and update the badge/styling -->
+{% for item in term_items %}
+    <div class="card mb-2 shadow-sm border-0">
+        <div class="card-body p-2 d-flex justify-content-between align-items-center">
+            <div>
+                <strong>{{ item.code }}</strong> - {{ item.title }}
+            </div>
+            
+            <!-- Highlight minor courses visually -->
+            {% if minor_audit and item.code in minor_audit.required_entries|map(attribute='label')|join(',') %}
+                <span class="badge bg-info-subtle text-info rounded-pill border border-info">{{ item.hours }} cr (Minor)</span>
+            {% else %}
+                <span class="badge bg-light text-secondary rounded-pill border">{{ item.hours }} cr</span>
+            {% endif %}
+        </div>
+    </div>
+{% endfor %}
   {% if term_hours %}
   <div class="mb-4">
     <h4 class="mb-3">Credit hours per term</h4>
