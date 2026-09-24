@@ -195,7 +195,7 @@ def test_plan_page_shows_math_minor_progress():
     })
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
-    assert "category-bar-row-minor" in html
+    assert "extra-progress-minor" in html
     assert "Mathematics Minor" in html
     assert "4 / 18 cr hrs" in html
     assert "plan-item-minor" in html
@@ -205,7 +205,7 @@ def test_plan_without_minor_is_unchanged():
     resp = app.test_client().post("/", data={"major": "cs", "target_semesters": "4"})
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
-    assert "category-bar-row-minor" not in html
+    assert "extra-progress-minor" not in html
     assert "plan-item-minor" not in html
 
 
@@ -214,4 +214,4 @@ def test_unknown_or_same_subject_minor_is_ignored():
     for data in ({"major": "cs", "minor": "basket-weaving"}, {"major": "math", "minor": "math"}):
         resp = client.post("/", data={**data, "target_semesters": "4"})
         assert resp.status_code == 200
-        assert "category-bar-row-minor" not in resp.get_data(as_text=True)
+        assert "extra-progress-minor" not in resp.get_data(as_text=True)

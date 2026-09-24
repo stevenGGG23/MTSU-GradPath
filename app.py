@@ -501,6 +501,7 @@ def index():
             second_audit=second_audit,
             minor_audits=minor_audits,
             hide_sync=True,
+            generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
         )
 
     # Build degree list from DEGREE_CONFIGS (all have available=True now)

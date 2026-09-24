@@ -279,6 +279,7 @@ def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None)
         "hours": CONCENTRATION_ELECTIVE_HOURS,
         "done": elective_hours_done >= CONCENTRATION_ELECTIVE_HOURS,
         "partial_hours": elective_hours_done,
+        "applied": elective_codes,
     })
 
     conc_hours_done += elective_hours_done
@@ -459,6 +460,7 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
             "hours": conc_elective_hours,
             "done": elective_hours_done >= conc_elective_hours,
             "partial_hours": elective_hours_done,
+            "applied": elective_codes,
         })
         conc_hours_done += elective_hours_done
 

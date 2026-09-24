@@ -45,7 +45,7 @@ main,
 }
 
 .container {
-    max-width: 1100px;
+    max-width: 1320px;
     margin: 0 auto;
     padding: 2rem 1.5rem;
 }
@@ -709,157 +709,126 @@ footer a {
     overflow-x: auto;
 }
 
-/* ── Program picker (major / second major / minors) ─────────────────────
-   One row per kind: chips for what's picked plus a single searchable
-   dropdown, so the panel stays the same size whether the catalog has eight
-   programs or several hundred. */
+/* ── Program fields (major / second major / minors) ─────────────────────
+   Each is a search bar that keeps showing the current pick, so the panel
+   stays the same size whether the catalog has eight programs or several
+   hundred. Major and minor sit side by side on wide screens. */
 
 .program-panel {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.5rem;
     border: 1px solid #e2e8f0;
     border-radius: 16px;
     background: #f8fafc;
-    padding: 1rem 1.25rem;
+    padding: 1rem 1.25rem 1.1rem;
 }
 
-.program-panel-title {
-    margin: 0 0 0.5rem;
-}
-
-.program-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem 1rem;
-    padding: 0.6rem 0;
-}
-
-.program-row + .program-row {
-    border-top: 1px solid #e2e8f0;
-}
-
-.program-row-label {
-    flex: 0 0 150px;
-    padding-top: 0.4rem;
-    font-size: 0.9rem;
+.program-label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    color: #0f172a;
+    color: #334155;
 }
 
 .program-optional {
-    display: block;
-    font-size: 0.75rem;
     font-weight: 400;
     color: #64748b;
 }
 
-.program-row-body {
+.program-subfield {
+    margin-top: 0.75rem;
+}
+
+.combo-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.combo-row + .combo-row {
+    margin-top: 0.5rem;
+}
+
+.combo {
+    position: relative;
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.program-picker {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
+.combo-input.form-control {
+    padding-right: 2.25rem;
+    border-radius: 10px;
+    border-color: #cbd5e1;
+    background-color: #ffffff;
+    /* chevron so it reads as a dropdown */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 12px 10px;
+    text-overflow: ellipsis;
 }
 
-.program-chip-list {
-    display: contents;
-}
-
-.program-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    max-width: 100%;
-    padding: 0.35rem 0.75rem;
-    border: 1.5px solid #2563eb;
-    border-radius: 999px;
-    background: #eff6ff;
-    line-height: 1.25;
-}
-
-.program-chip.d-none {
-    display: none !important;
-}
-
-.program-chip-name {
-    font-size: 0.88rem;
+.combo.has-value .combo-input {
     font-weight: 600;
     color: #1e3a5f;
 }
 
-.program-chip-sub {
-    font-size: 0.75rem;
-    color: #64748b;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.combo-input:focus {
+    font-weight: 400 !important;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.program-chip-second {
-    border-color: #7c3aed;
-    background: #f5f3ff;
-}
-
-.program-chip-minor {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.program-chip-minor .program-chip-name {
-    color: #134e4a;
-}
-
-.program-chip-remove {
+.combo-clear {
+    position: absolute;
+    top: 50%;
+    right: 2rem;
+    transform: translateY(-50%);
     border: none;
     background: transparent;
-    color: #64748b;
+    color: #94a3b8;
     font-size: 1.1rem;
     line-height: 1;
-    padding: 0 0.1rem;
-    margin-right: -0.25rem;
-    border-radius: 50%;
+    padding: 0.1rem 0.3rem;
 }
 
-.program-chip-remove:hover,
-.program-chip-remove:focus-visible {
+.combo-clear:hover {
     color: #0f172a;
-    background: rgba(15, 23, 42, 0.08);
 }
 
-.program-add {
-    border: 1px dashed #94a3b8;
-    border-radius: 999px;
-    background: transparent;
+.combo-btn {
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #ffffff;
     color: #2563eb;
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 0.35rem 0.85rem;
+    font-size: 1.2rem;
+    line-height: 1;
 }
 
-.program-add:hover,
-.program-add:focus-visible {
+.combo-btn:hover:not(:disabled),
+.combo-btn:focus-visible {
     border-color: #2563eb;
     background: #eff6ff;
 }
 
-.program-add.d-none,
-.program-search.d-none {
-    display: none !important;
+.combo-btn:disabled {
+    color: #cbd5e1;
+    cursor: not-allowed;
 }
 
-.program-search {
-    position: relative;
-    flex: 1 1 280px;
-    max-width: 460px;
+.combo-btn-remove {
+    color: #64748b;
 }
 
-.program-search .form-control-sm {
-    border-radius: 10px;
-    padding: 0.45rem 0.75rem;
-    border-color: #93c5fd;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+.combo-btn-remove:hover {
+    color: #b91c1c !important;
+    border-color: #fca5a5 !important;
+    background: #fef2f2 !important;
 }
 
 .program-menu {
@@ -889,6 +858,11 @@ footer a {
 
 .program-option.is-active {
     background: #eff6ff;
+}
+
+.program-option.is-selected .program-option-name::after {
+    content: " \2713";
+    color: #2563eb;
 }
 
 .program-option.is-disabled {
@@ -954,14 +928,7 @@ footer a {
     background: #7c3aed;
 }
 
-.category-bar-row-second {
-    padding-top: 0.6rem;
-    border-top: 1px dashed #cbd5e1;
-}
 
-.category-bar-row-second .progress-bar {
-    background: #7c3aed;
-}
 
 .autocomplete-empty {
     padding: 0.6rem 1rem;
@@ -973,14 +940,7 @@ footer a {
     background: #0d9488;
 }
 
-.category-bar-row-minor {
-    padding-top: 0.6rem;
-    border-top: 1px dashed #cbd5e1;
-}
 
-.category-bar-row-minor .progress-bar {
-    background: #0d9488;
-}
 
 /* ── Personal prerequisite legend (plan page) ───────────────────────────── */
 
@@ -1016,23 +976,8 @@ footer a {
         border-radius: 18px;
     }
 
-    .program-row {
-        flex-direction: column;
-    }
-
-    .program-row-label {
-        flex-basis: auto;
-        padding-top: 0;
-    }
-
-    .program-optional {
-        display: inline;
-        margin-left: 0.25rem;
-    }
-
-    .program-search {
-        flex-basis: 100%;
-        max-width: none;
+    .program-panel {
+        grid-template-columns: 1fr;
     }
 
     .progress-summary {
@@ -1066,5 +1011,378 @@ footer a {
 
     .plan-item-hours {
         margin-left: 2.65rem; /* aligns under plan-item-main, past the tag column */
+    }
+}
+
+/* ── Planner layout: form on the left, sticky course summary on the right ── */
+
+.planner-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.side-card {
+    position: sticky;
+    top: 1.25rem;
+    padding: 1.5rem;
+    border-radius: 20px;
+}
+
+.side-card #selected-courses {
+    max-height: 55vh;
+    overflow-y: auto;
+    align-content: flex-start;
+}
+
+.side-card #selected-courses:empty::before {
+    content: "Check off courses on the left, or search for them in step 2.";
+    font-size: 0.85rem;
+    color: #64748b;
+}
+
+.side-count {
+    display: inline-block;
+    min-width: 1.6rem;
+    margin-left: 0.25rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 0.8rem;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.side-clear {
+    padding: 0;
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+
+@media (max-width: 991.98px) {
+    .planner-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .side-card {
+        position: static;
+    }
+}
+
+/* ── Plan page: second major / minors progress, tracked apart from the 120 ── */
+
+.extra-progress-title {
+    margin-bottom: 0.25rem;
+}
+
+.extra-progress-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.extra-progress-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #0d9488;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.extra-progress-card.extra-progress-second {
+    border-left-color: #7c3aed;
+}
+
+.extra-progress-card .progress-ring {
+    --ring-color: #0d9488;
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;
+    box-shadow: none;
+}
+
+.extra-progress-second .progress-ring {
+    --ring-color: #7c3aed;
+}
+
+.extra-progress-card .progress-ring-inner {
+    width: 54px;
+    height: 54px;
+}
+
+.extra-progress-card .progress-ring-value {
+    font-size: 0.95rem;
+}
+
+.extra-progress-name {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.extra-progress-hours {
+    font-size: 0.85rem;
+    color: #475569;
+}
+
+.extra-progress-desc {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 0.15rem;
+}
+
+/* ── "Remaining after N terms": full width, first few items, then expand ── */
+
+.term-card-remaining {
+    grid-column: 1 / -1;
+}
+
+.term-card-remaining .plan-item-table {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.term-card-remaining.is-collapsed .plan-item-extra {
+    display: none;
+}
+
+.remaining-toggle {
+    display: block;
+    width: 100%;
+    padding: 0.6rem;
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    background: transparent;
+    color: #2563eb;
+    font-size: 0.88rem;
+    font-weight: 500;
+}
+
+.remaining-toggle:hover {
+    background: #eff6ff;
+}
+
+.audit-item-applied {
+    margin-left: 1.6rem;
+    margin-top: 0.15rem;
+    font-size: 0.78rem;
+    color: #475569;
+}
+
+/* ── GPA tools: a quiet tab on the right edge, opens an offcanvas panel ── */
+
+.gpa-tab {
+    position: fixed;
+    right: 0;
+    top: 50%;
+    z-index: 1030;
+    transform: translateY(-50%);
+    writing-mode: vertical-rl;
+    padding: 0.7rem 0.3rem;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    background: rgba(7, 25, 47, 0.55);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    transition: background 0.15s, color 0.15s;
+}
+
+.gpa-tab:hover,
+.gpa-tab:focus-visible {
+    background: #07192f;
+    color: #ffffff;
+}
+
+.gpa-panel {
+    --bs-offcanvas-width: 400px;
+    color: #0f172a;
+}
+
+.gpa-hint {
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-bottom: 0.75rem;
+}
+
+.gpa-label {
+    margin-bottom: 0.2rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.gpa-tabs .nav-link {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+.gpa-row-head,
+.gpa-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 52px 64px 72px 20px;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.gpa-row-head {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.25rem;
+}
+
+.gpa-row + .gpa-row {
+    margin-top: 0.35rem;
+}
+
+.gpa-row .form-select-sm {
+    padding-right: 1.4rem;
+    background-position: right 0.35rem center;
+}
+
+.gpa-remove {
+    font-size: 0.6rem;
+}
+
+.gpa-add {
+    padding: 0.4rem 0;
+    text-decoration: none;
+}
+
+.gpa-result {
+    margin-top: 0.5rem;
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    background: #f1f5f9;
+    font-size: 0.85rem;
+    color: #334155;
+}
+
+.gpa-big {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #0b1733;
+    line-height: 1.2;
+}
+
+.gpa-big span {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.gpa-up {
+    color: #15803d;
+}
+
+.gpa-down {
+    color: #b91c1c;
+}
+
+.gpa-big.gpa-up,
+.gpa-big.gpa-down {
+    font-size: 1.25rem;
+}
+
+.gpa-footnote {
+    margin-top: 1.25rem;
+    font-size: 0.72rem;
+    color: #94a3b8;
+}
+
+/* ── Print / "Download PDF": the full plan, every section expanded ── */
+
+.print-only {
+    display: none;
+}
+
+@media print {
+    @page {
+        margin: 0.6in;
+    }
+
+    body {
+        background: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    body::before,
+    .navbar,
+    .header,
+    .footer,
+    .gpa-tab,
+    .gpa-panel,
+    .plan-actions,
+    .remaining-toggle,
+    .flash-messages,
+    .accordion-button::after {
+        display: none !important;
+    }
+
+    .container {
+        max-width: none;
+        padding: 0;
+    }
+
+    .card {
+        box-shadow: none;
+        border: none;
+        padding: 0;
+        background: #ffffff;
+    }
+
+    .print-only {
+        display: block;
+    }
+
+    .print-header {
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #0b1733;
+    }
+
+    .print-header span {
+        display: block;
+        font-size: 0.8rem;
+        color: #475569;
+    }
+
+    .accordion-collapse.collapse {
+        display: block !important;
+        height: auto !important;
+    }
+
+    .term-card-remaining.is-collapsed .plan-item-extra {
+        display: flex !important;
+    }
+
+    .progress-ring,
+    .progress-summary {
+        box-shadow: none;
+    }
+
+    .progress-summary,
+    .extra-progress-card,
+    .term-card,
+    .accordion-item,
+    .prereq-graph-wrap {
+        break-inside: avoid;
+    }
+
+    .term-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .term-card-remaining .plan-item-table {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

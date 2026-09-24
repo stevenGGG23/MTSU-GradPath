@@ -176,6 +176,7 @@ def build_minor_audit(minor_cfg, completed_courses, catalog=None):
         "hours": minor_cfg["elective_hours"],
         "done": elective_done >= minor_cfg["elective_hours"],
         "partial_hours": _nice(elective_done),
+        "applied": elective_codes,
         "suggestions": minor_cfg["elective_suggestions"],
     })
 
