@@ -25,6 +25,7 @@ from mtsugradpath.degree import (
     elective_required_hours,
     build_audit,
     get_degree_config,
+    AVAILABLE_MINORS,  # <-- ADD THIS LINE
 )
 
 from mtsugradpath.degree_configs import get_full_degree_config, major_prefixes, DEGREE_CONFIGS
