@@ -36,7 +36,24 @@
             {% endfor %}
           </div>
         </div>
-
+<!-- Add this inside the main form in index.html, near the Major selection -->
+<div class="card shadow-sm mb-4 border-0 rounded-4">
+    <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Optional Minor</h5>
+        <label for="selected_minor" class="form-label text-muted small fw-semibold">Enhance your degree with a minor track</label>
+        <select class="form-select rounded-3 bg-light" name="selected_minor" id="selected_minor">
+            <option value="">-- No Minor Selected --</option>
+            {% if minors %}
+                {% for key, minor in minors.items() %}
+                    <option value="{{ key }}">{{ minor.name }} ({{ minor.total_credits_required }} hrs)</option>
+                {% endfor %}
+            {% endif %}
+        </select>
+        <div class="form-text mt-2 small text-muted">
+            Selecting a minor will automatically inject its required courses and electives into your generated schedule.
+        </div>
+    </div>
+</div>
         <div class="accordion" id="plannerAccordion">
 
           <div class="accordion-item">
