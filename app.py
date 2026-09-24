@@ -36,6 +36,13 @@ from mtsugradpath.minors import (
     build_minor_audit,
     MINOR_ELECTIVE_ID_PREFIX,
 )
+from mtsugradpath.double_major import (
+    SECOND_MAJOR_ELECTIVE_ID_PREFIX,
+    second_major_allowed,
+    apply_second_major_to_config,
+    build_second_major_audit,
+    config_course_codes,
+)
 
 from mtsugradpath.models import Course, SyncStatus
 from mtsugradpath.planner import (
@@ -180,6 +187,13 @@ def read_generic_hours(form, degree_cfg=None):
     return generic_hours
 
 
+# Function that returns the second major's config, or None when none is chosen
+# or it can't be paired with the primary (same program or same subject)
+def _second_major_cfg(primary_cfg, key):
+    second_cfg = DEGREE_CONFIGS.get(key or "")
+    return second_cfg if second_major_allowed(primary_cfg, second_cfg) else None
+
+
 # Function that displays the planner form and processes the submitted degree plans
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -187,11 +201,25 @@ def index():
     # load of the planner starts blank. The only thing carried across a
     # reload is the major, and only via the ?major= query param itself (used
     # by the major-selector radio's same-visit reload), never stored server-side.
-    saved_state = {"major": request.args.get("major", "cs")}
+    saved_state = {
+        "major": request.args.get("major", "cs"),
+        "second_major": request.args.get("second_major", ""),
+    }
 
-    # Determine which major to display courses for on GET
+    # Determine which major(s) to display courses for on GET
     degree_cfg_for_display = get_full_degree_config(saved_state["major"])
-    display_prefixes = major_prefixes(degree_cfg_for_display)
+    second_cfg_for_display = _second_major_cfg(degree_cfg_for_display, saved_state["second_major"])
+    saved_state["second_major"] = second_cfg_for_display["key"] if second_cfg_for_display else ""
+    primary_prefixes = major_prefixes(degree_cfg_for_display)
+    display_prefixes = list(primary_prefixes)
+    if second_cfg_for_display:
+        display_prefixes += major_prefixes(second_cfg_for_display)
+
+    # The second major's courses and electives folded in, so the requirement
+    # rows and free-elective hours on the form match what will be planned
+    form_cfg = degree_cfg_for_display
+    if second_cfg_for_display:
+        form_cfg, _ = apply_second_major_to_config(degree_cfg_for_display, second_cfg_for_display, set())
 
     with SessionLocal() as db_session:
         course_list = (
@@ -210,17 +238,22 @@ def index():
                 ),
                 "credits": course.credits or 0,
                 "level": f"{course.number[0]}000-Level",
+                # 0 = primary major, 1 = second major (checklist sections)
+                "group": 0 if course.prefix in primary_prefixes else 1,
             }
             for course in course_list
             if course.prefix and course.number
         ]
 
-        major_courses.sort(key=lambda c: int(c["code"].split()[1]))
+        major_courses.sort(key=lambda c: (c["group"], c["level"], c["code"]))
 
     courses = list(major_courses)
 
-    for code, hours, title in degree_cfg_for_display["supporting_courses"]:
-        courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
+    known_codes = {c["code"] for c in courses}
+    for code, hours, title in form_cfg["supporting_courses"]:
+        if code not in known_codes:
+            courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
+            known_codes.add(code)
 
     # Minors are available to any major, so their subject's courses are added
     # to the course search -- e.g. a CS student with a Math minor can add
@@ -258,16 +291,23 @@ def index():
             if code.strip()
         }
 
-        # Read selected major and get the full degree config
+        # Read selected major(s) and get the full degree configs
         selected_major = request.form.get("major", "cs")
         degree_cfg = get_full_degree_config(selected_major)
+        second_cfg = _second_major_cfg(degree_cfg, request.form.get("second_major"))
+        all_major_prefixes = major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
 
-        generic_hours = read_generic_hours(request.form, degree_cfg)
-
-        # Optional minor -- ignored if it's the major's own subject
-        minor_cfg = get_minor_config(request.form.get("minor"))
-        if minor_cfg and not minor_allowed_for_major(minor_cfg, major_prefixes(degree_cfg)):
-            minor_cfg = None
+        # Optional minors -- unknown ones, repeats, and ones in either major's
+        # own subject are dropped
+        minor_cfgs = []
+        for key in request.form.getlist("minor"):
+            minor_cfg = get_minor_config(key)
+            if (
+                minor_cfg
+                and minor_cfg not in minor_cfgs
+                and minor_allowed_for_major(minor_cfg, all_major_prefixes)
+            ):
+                minor_cfgs.append(minor_cfg)
 
         try:
             target_semesters = int(
@@ -292,28 +332,44 @@ def index():
         # round trips instead of one.
         catalog = load_catalog_courses(degree_cfg["prefix"])
 
-        # With a minor, the plan is built from a copy of the major's config
-        # with the minor's courses and electives folded in; the major's own
-        # audit still uses the unmodified config.
+        # With a second major or minors, the plan is built from a copy of the
+        # major's config with their courses and electives folded in; the
+        # major's own audit still uses the unmodified config.
         planning_cfg = degree_cfg
-        planning_generic_hours = generic_hours
-        minor_audit = None
-        if minor_cfg:
+        planning_generic_hours = {}
+        second_audit = None
+        if second_cfg:
+            # The second major's scraped courses sit in the same catalog so
+            # their titles, credits and prerequisites are known to the planner
+            catalog = {**load_catalog_courses(second_cfg["prefix"]), **catalog}
+            planning_cfg, second_generic_hours = apply_second_major_to_config(
+                degree_cfg, second_cfg, completed_courses, catalog
+            )
+            planning_generic_hours.update(second_generic_hours)
+
+        generic_hours = read_generic_hours(request.form, planning_cfg)
+
+        if second_cfg:
+            second_audit = build_second_major_audit(second_cfg, completed_courses, generic_hours, catalog)
+
+        minor_audits = []
+        for minor_cfg in minor_cfgs:
             minor_catalog = load_catalog_courses(minor_cfg["prefix"])
             planning_cfg, minor_generic_hours = apply_minor_to_config(
-                degree_cfg, minor_cfg, completed_courses, minor_catalog
+                planning_cfg, minor_cfg, completed_courses, minor_catalog
             )
-            planning_generic_hours = {**generic_hours, **minor_generic_hours}
-            minor_audit = build_minor_audit(minor_cfg, completed_courses, minor_catalog)
+            planning_generic_hours.update(minor_generic_hours)
+            minor_audits.append(build_minor_audit(minor_cfg, completed_courses, minor_catalog))
 
-        # Courses that are on the plan only because of the minor; ones the
-        # major already requires (e.g. MATH 1920 for CS) keep their normal tag.
-        major_codes = {
-            code
-            for key in ("core_courses", "concentration_courses", "supporting_courses")
-            for code, _, _ in degree_cfg[key]
-        }
-        minor_only_codes = (minor_audit["course_codes"] - major_codes) if minor_audit else set()
+        # Auto-computed elective progress wins over the (absent) form fields
+        planning_generic_hours = {**generic_hours, **planning_generic_hours}
+
+        # Courses that are on the plan only because of the second major or a
+        # minor; ones the major already requires (e.g. MATH 1920 for CS) keep
+        # their normal tag.
+        major_codes = config_course_codes(degree_cfg)
+        second_only_codes = (second_audit["course_codes"] - major_codes) if second_audit else set()
+        minor_only_codes = set().union(*(m["course_codes"] for m in minor_audits)) - major_codes - second_only_codes
 
         # Generates the plan, audits, and prerequisite warnings
         plan = generate_plan(
@@ -340,7 +396,7 @@ def index():
         with SessionLocal() as db_session2:
             post_course_list = (
                 db_session2.query(Course)
-                .filter(Course.prefix.in_(major_prefixes(degree_cfg)))
+                .filter(Course.prefix.in_(all_major_prefixes))
                 .order_by(Course.prefix, Course.number)
                 .all()
             )
@@ -392,6 +448,7 @@ def index():
                     "title": title,
                     "hours": credit_short(item["hours"]),
                     "minor": item["code"] in minor_only_codes,
+                    "second": item["code"] in second_only_codes,
                 }
 
             if kind == "requirement":
@@ -402,6 +459,7 @@ def index():
                     "hours": credit_short(item["hours"]),
                     "suggestion": item.get("suggestion"),
                     "minor": item.get("id", "").startswith(MINOR_ELECTIVE_ID_PREFIX),
+                    "second": item.get("id", "").startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX),
                 }
 
             return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
@@ -440,7 +498,9 @@ def index():
             warnings=warnings_display,
             personal_mermaid=personal_mermaid,
             degree_name=degree_cfg["name"],
-            minor_audit=minor_audit,
+            second_audit=second_audit,
+            minor_audits=minor_audits,
+            hide_sync=True,
         )
 
     # Build degree list from DEGREE_CONFIGS (all have available=True now)
@@ -449,24 +509,43 @@ def index():
     for key, reg_cfg in DEGREE_REGISTRY.items():
         if key not in DEGREE_CONFIGS:
             degree_list.append((key, reg_cfg))
+    majors = [
+        {
+            "key": key,
+            "name": deg["name"],
+            "concentration": deg.get("concentration") or "",
+            "prefix": deg["prefix"],
+            "available": deg.get("available", False),
+        }
+        for key, deg in degree_list
+    ]
 
-    # Compute elective hours for the current major's config
-    cfg_generic = degree_cfg_for_display["supporting_generic"] + degree_cfg_for_display["tbc_generic"]
+    # Compute elective hours for the current major's config (with any second
+    # major's requirements taking their share of the free electives)
+    cfg_generic = form_cfg["supporting_generic"] + form_cfg["tbc_generic"]
     fixed_hours = (
-        sum(h for _, h, _ in degree_cfg_for_display["core_courses"])
-        + sum(h for _, h, _ in degree_cfg_for_display["concentration_courses"])
-        + degree_cfg_for_display.get("concentration_elective_hours", 0)
-        + sum(h for _, h, _ in degree_cfg_for_display["supporting_courses"])
+        sum(h for _, h, _ in form_cfg["core_courses"])
+        + sum(h for _, h, _ in form_cfg["concentration_courses"])
+        + form_cfg.get("concentration_elective_hours", 0)
+        + sum(h for _, h, _ in form_cfg["supporting_courses"])
         + sum(h for _, _, h, _ in cfg_generic)
     )
-    display_elective_hours = max(degree_cfg_for_display["total_hours"] - fixed_hours, 0)
+    display_elective_hours = max(form_cfg["total_hours"] - fixed_hours, 0)
+
+    # Second-major electives are tracked from completed courses, not typed in
+    manual_supporting_generic = [
+        row for row in form_cfg["supporting_generic"]
+        if not row[0].startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX)
+    ]
 
     return render_template(
         "index.html",
         courses=courses,
         major_courses=major_courses,
         degree_cfg=degree_cfg_for_display,
-        supporting_generic=degree_cfg_for_display["supporting_generic"],
+        second_cfg=second_cfg_for_display,
+        checklist_prefixes=display_prefixes,
+        supporting_generic=manual_supporting_generic,
         tbc_generic=degree_cfg_for_display["tbc_generic"],
         electives_generic_id=ELECTIVES_GENERIC_ID,
         electives_hours=display_elective_hours,
@@ -474,7 +553,7 @@ def index():
         default_season=default_start_season(),
         default_year=date.today().year,
         saved_state=saved_state,
-        degree_list=degree_list,
+        majors=majors,
         minors=[
             {"key": key, "name": m["name"], "hours": m["total_hours"], "description": m["description"]}
             for key, m in MINOR_CONFIGS.items()

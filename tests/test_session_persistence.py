@@ -12,10 +12,7 @@ from app import app
 
 
 def _checked_major(html: str) -> str:
-    match = re.search(
-        r'<input type="radio" name="major" value="([^"]+)"\s+class="major-radio"\s+checked',
-        html,
-    )
+    match = re.search(r'<input type="hidden" name="major" id="major_field" value="([^"]+)"', html)
     return match.group(1) if match else None
 
 

@@ -16,65 +16,91 @@
       <p class="text-muted">Work through each step, then generate a plan toward graduation.</p>
       <form method="post" id="planner-form">
 
-        <!-- Major selector — changing the radio reloads the page so the course
-             checklist, generic requirements, and headings update for that major -->
-        <div class="mb-4">
-          <h5 class="mb-2">Select your major</h5>
-          <div class="major-grid">
-            {% for key, deg in degree_list %}
-            <label class="major-card {% if not deg.available %}major-card-soon{% endif %}">
-              <input type="radio" name="major" value="{{ key }}"
-                     class="major-radio"
-                     {% if key == (saved_state.get('major') or 'cs') %}checked{% endif %}
-                     {% if not deg.available %}disabled{% endif %}>
-              <div class="major-card-inner">
-                <div class="major-card-name">{{ deg.name }}</div>
-                {% if deg.concentration %}<div class="major-card-conc">{{ deg.concentration }}</div>{% endif %}
-                {% if not deg.available %}<div class="major-card-tag">Coming soon</div>{% endif %}
+        <!-- Program picker: major, optional second major, optional minors.
+             Each row shows the picks as chips plus one searchable dropdown, so
+             it stays compact however many programs the catalog grows to.
+             Changing either major reloads the page so the course checklist,
+             requirement rows, and headings update; minors don't need to. -->
+        <div class="program-panel mb-4">
+          <h5 class="program-panel-title">Your program</h5>
+
+          <div class="program-row">
+            <div class="program-row-label">Major</div>
+            <div class="program-row-body">
+              <div class="program-picker" id="major_picker" data-kind="major">
+                <span class="program-chip program-chip-major" data-chip>
+                  <span class="program-chip-name">{{ degree_cfg.name }}</span>
+                  {% if degree_cfg.concentration %}<span class="program-chip-sub">{{ degree_cfg.concentration }}</span>{% endif %}
+                </span>
+                <button type="button" class="program-add" data-open>Change</button>
+                <div class="program-search d-none" data-search>
+                  <input type="text" class="form-control form-control-sm" placeholder="Search majors, e.g. Biology or CSCI" autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search majors">
+                  <div class="program-menu" role="listbox"></div>
+                </div>
               </div>
-            </label>
-            {% endfor %}
-          </div>
-        </div>
-        <!-- Optional minor: a single search field; picking one swaps it for a chip -->
-        {% if minors %}
-        <div class="minor-picker mb-4">
-          <label for="minor_input" class="minor-picker-label">Minor <span class="minor-picker-optional">(optional)</span></label>
-          <div class="minor-picker-body">
-            <div class="position-relative" id="minor_search">
-              <input id="minor_input" class="form-control form-control-sm" placeholder="Search minors, e.g. Mathematics" autocomplete="off">
-              <div id="minor_suggestions" class="autocomplete-list shadow-sm"></div>
-            </div>
-            <div class="minor-chip d-none" id="minor_chip">
-              <div class="minor-chip-text">
-                <span class="minor-chip-name" id="minor_chip_name"></span>
-                <span class="minor-chip-desc" id="minor_chip_desc"></span>
-              </div>
-              <button type="button" class="btn-close btn-sm" id="minor_remove" aria-label="Remove minor"></button>
+              <input type="hidden" name="major" id="major_field" value="{{ saved_state.major }}">
             </div>
           </div>
-          <input type="hidden" name="minor" id="minor_field" value="">
+
+          <div class="program-row">
+            <div class="program-row-label">Second major <span class="program-optional">optional</span></div>
+            <div class="program-row-body">
+              <div class="program-picker" id="second_picker" data-kind="second">
+                {% if second_cfg %}
+                <span class="program-chip program-chip-second" data-chip>
+                  <span class="program-chip-name">{{ second_cfg.name }}</span>
+                  {% if second_cfg.concentration %}<span class="program-chip-sub">{{ second_cfg.concentration }}</span>{% endif %}
+                  <button type="button" class="program-chip-remove" id="second_remove" aria-label="Remove second major">&times;</button>
+                </span>
+                {% endif %}
+                <button type="button" class="program-add{{ ' d-none' if second_cfg }}" data-open>+ Add a second major</button>
+                <div class="program-search d-none" data-search>
+                  <input type="text" class="form-control form-control-sm" placeholder="Search majors" autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search second majors">
+                  <div class="program-menu" role="listbox"></div>
+                </div>
+              </div>
+              <input type="hidden" name="second_major" id="second_major_field" value="{{ saved_state.second_major }}">
+            </div>
+          </div>
+
+          {% if minors %}
+          <div class="minor-picker program-row">
+            <div class="program-row-label">Minors <span class="program-optional">optional</span></div>
+            <div class="program-row-body">
+              <div class="program-picker" id="minor_picker" data-kind="minor">
+                <span id="minor_chips" class="program-chip-list"></span>
+                <button type="button" class="program-add" data-open>+ Add a minor</button>
+                <div class="program-search d-none" data-search>
+                  <input type="text" id="minor_input" class="form-control form-control-sm" placeholder="Search minors, e.g. Mathematics" autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search minors">
+                  <div class="program-menu" role="listbox"></div>
+                </div>
+              </div>
+              <div id="minor_fields"></div>
+            </div>
+          </div>
+          {% endif %}
         </div>
-        {% endif %}
 
         <div class="accordion" id="plannerAccordion">
 
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#stepCs" aria-expanded="true">
-                <span class="step-badge">1</span>&nbsp;{{ degree_cfg.name }} courses
+                <span class="step-badge">1</span>&nbsp;{{ degree_cfg.name }}{% if second_cfg %} &amp; {{ second_cfg.name }}{% endif %} courses
                 <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
               </button>
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Check off every {{ ([degree_cfg.prefix] + degree_cfg.get('extra_prefixes', [])) | join('/') }} course you've already completed.</p>
+                <p class="form-text mt-0 mb-2">Check off every {{ checklist_prefixes | join('/') }} course you've already completed.</p>
                 {% if not major_courses %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet. Click <strong>Sync Catalog</strong> to enable the checklist.
                 </div>
                 {% else %}
-                {% for level, level_courses in major_courses | groupby('level') %}
+                {% for group_index, group_courses in major_courses | groupby('group') %}
+                {% if second_cfg %}<h5 class="cs-major-heading">{{ second_cfg.name if group_index else degree_cfg.name }}</h5>{% endif %}
+                {% for level, level_courses in group_courses | groupby('level') %}
                 <h6 class="cs-level-heading">{{ level }}</h6>
                 <div class="cs-course-grid">
                   {% for course in level_courses %}
@@ -87,6 +113,7 @@
                   </div>
                   {% endfor %}
                 </div>
+                {% endfor %}
                 {% endfor %}
                 {% endif %}
               </div>
@@ -213,16 +240,16 @@ const suggestionsBox = document.getElementById('course_suggestions');
 const courseOptions = {{ courses | tojson | safe }};
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
+const majorOptions = {{ majors | tojson | safe }};
 const minorOptions = {{ minors | tojson | safe }};
-const minorField = document.getElementById('minor_field');
-const minorInput = document.getElementById('minor_input');
-const minorSuggestions = document.getElementById('minor_suggestions');
+let selectedMinors = [];
 
 // Selections live in sessionStorage, which is scoped to this browser tab: they
 // survive switching majors and going to the plan page and back, but a new tab
 // or a reopened link starts blank. Nothing is stored server-side.
 const STORAGE_KEY = 'gradpath-planner';
 const currentMajor = {{ saved_state.major | tojson }};
+const currentSecond = {{ saved_state.second_major | tojson }};
 let restoring = false;
 
 function loadSaved() {
@@ -241,26 +268,34 @@ function saveState() {
   });
   const state = {
     major: currentMajor,
+    second_major: currentSecond,
     courses: Array.from(selectedCourses.querySelectorAll('.badge')).map(b => b.dataset.course),
     hours: { ...(loadSaved().hours || {}), ...hours },
     start_season: document.getElementById('start_season').value,
     start_year: document.getElementById('start_year').value,
     target_semesters: document.getElementById('target_semesters').value,
     include_summer: document.getElementById('include_summer').checked,
-    minor: minorField ? minorField.value : '',
+    minors: selectedMinors.slice(),
   };
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {}
 }
 
+function programUrl(major, second) {
+  const params = new URLSearchParams({ major });
+  if (second) params.set('second_major', second);
+  return '/?' + params.toString();
+}
+
 // Returning to "/" (e.g. "Edit completed courses" on the plan page) carries no
-// ?major=, so jump back to the major this tab was last using.
+// ?major=, so jump back to the major(s) this tab was last using.
 const savedAtLoad = loadSaved();
 const redirecting = !new URLSearchParams(window.location.search).has('major')
-  && savedAtLoad.major && savedAtLoad.major !== currentMajor;
+  && savedAtLoad.major
+  && (savedAtLoad.major !== currentMajor || (savedAtLoad.second_major || '') !== currentSecond);
 if (redirecting) {
-  window.location.replace('/?major=' + encodeURIComponent(savedAtLoad.major));
+  window.location.replace(programUrl(savedAtLoad.major, savedAtLoad.second_major || ''));
 }
 
 function normalizeCourse(code) {
@@ -449,62 +484,232 @@ document.querySelectorAll('.requirement-hours-input').forEach(input => {
   updateFill();
 });
 
-// ── Minor search ──
-// A minor saved for a different major may not be offered here (e.g. a Math
-// minor for a Math major), so setMinor() ignores keys not in minorOptions.
-function setMinor(key) {
-  if (!minorField) return;
-  const minor = minorOptions.find(m => m.key === key);
-  minorField.value = minor ? minor.key : '';
-  document.getElementById('minor_search').classList.toggle('d-none', !!minor);
-  document.getElementById('minor_chip').classList.toggle('d-none', !minor);
-  if (minor) {
-    document.getElementById('minor_chip_name').textContent = `${minor.name} · ${minor.hours} cr hrs`;
-    document.getElementById('minor_chip_desc').textContent = minor.description;
+// ── Program picker ──
+// One searchable dropdown per row (major, second major, minors). Every typed
+// word has to appear in the name, concentration, or course prefix, so
+// "bio", "CSCI", or "pilot" all narrow a long list quickly; names that start
+// with the query sort first. Arrow keys + Enter pick, Escape closes.
+const MENU_LIMIT = 50;
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function highlight(text, words) {
+  let html = escapeHtml(text);
+  words.forEach(word => {
+    const safe = escapeHtml(word).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (safe) html = html.replace(new RegExp(`(${safe})(?![^<]*>)`, 'ig'), '<mark>$1</mark>');
+  });
+  return html;
+}
+
+function searchOptions(options, query) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const scored = [];
+  options.forEach(option => {
+    const name = option.name.toLowerCase();
+    const haystack = `${name} ${(option.concentration || '').toLowerCase()} ${(option.prefix || '').toLowerCase()}`;
+    if (!words.every(word => haystack.includes(word))) return;
+    const q = words.join(' ');
+    let score = 3;
+    if (!q) score = 0;
+    else if (name.startsWith(q) || name.replace(/^[a-z.]+\s+/, '').startsWith(q)) score = 0;
+    else if (new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(name)) score = 1;
+    else if ((option.prefix || '').toLowerCase().startsWith(q)) score = 2;
+    scored.push({ option, score });
+  });
+  scored.sort((a, b) => a.score - b.score || a.option.name.localeCompare(b.option.name));
+  return { words, results: scored.map(s => s.option) };
+}
+
+function createPicker(root, { options, exclude = () => [], onPick, emptyText, hideChipsWhileOpen = false }) {
+  const openButton = root.querySelector('[data-open]');
+  const search = root.querySelector('[data-search]');
+  const input = search.querySelector('input');
+  const menu = search.querySelector('.program-menu');
+  let results = [];
+  let active = 0;
+
+  function render() {
+    const excluded = new Set(exclude());
+    const found = searchOptions(options.filter(o => !excluded.has(o.key)), input.value);
+    results = found.results;
+    active = Math.min(active, Math.max(results.length - 1, 0));
+    while (active < results.length - 1 && results[active].available === false) active++;
+    menu.innerHTML = '';
+
+    if (!results.length) {
+      const empty = document.createElement('div');
+      empty.className = 'program-menu-empty';
+      empty.textContent = emptyText;
+      menu.appendChild(empty);
+    }
+
+    results.slice(0, MENU_LIMIT).forEach((option, index) => {
+      const item = document.createElement('div');
+      const disabled = option.available === false;
+      item.className = 'program-option' + (index === active ? ' is-active' : '') + (disabled ? ' is-disabled' : '');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', index === active ? 'true' : 'false');
+      item.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      const meta = option.hours ? `${option.hours} cr hrs` : option.prefix;
+      item.innerHTML = `
+        <div class="program-option-text">
+          <div class="program-option-name">${highlight(option.name, found.words)}</div>
+          ${option.concentration || option.description
+            ? `<div class="program-option-sub">${highlight(option.concentration || option.description, found.words)}</div>` : ''}
+        </div>
+        <span class="program-option-meta">${disabled ? 'Coming soon' : escapeHtml(meta || '')}</span>`;
+      // mousedown keeps focus in the input so blur doesn't close the menu first
+      item.addEventListener('mousedown', event => event.preventDefault());
+      item.addEventListener('click', () => pick(index));
+      item.addEventListener('mousemove', () => {
+        if (active !== index) { active = index; highlightActive(); }
+      });
+      menu.appendChild(item);
+    });
+
+    if (results.length > MENU_LIMIT) {
+      const more = document.createElement('div');
+      more.className = 'program-menu-more';
+      more.textContent = `Showing ${MENU_LIMIT} of ${results.length} — keep typing to narrow it down`;
+      menu.appendChild(more);
+    }
   }
+
+  function highlightActive() {
+    menu.querySelectorAll('.program-option').forEach((item, index) => {
+      item.classList.toggle('is-active', index === active);
+      item.setAttribute('aria-selected', index === active ? 'true' : 'false');
+      if (index === active) item.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function open() {
+    openButton.classList.add('d-none');
+    if (hideChipsWhileOpen) root.querySelectorAll('[data-chip]').forEach(chip => chip.classList.add('d-none'));
+    search.classList.remove('d-none');
+    input.setAttribute('aria-expanded', 'true');
+    input.value = '';
+    active = 0;
+    render();
+    input.focus();
+  }
+
+  function close() {
+    search.classList.add('d-none');
+    input.setAttribute('aria-expanded', 'false');
+    openButton.classList.remove('d-none');
+    if (hideChipsWhileOpen) root.querySelectorAll('[data-chip]').forEach(chip => chip.classList.remove('d-none'));
+    if (root.dataset.full === 'true') openButton.classList.add('d-none');
+  }
+
+  function pick(index) {
+    const option = results[index];
+    if (!option || option.available === false) return;
+    close();
+    onPick(option);
+  }
+
+  openButton.addEventListener('click', open);
+  input.addEventListener('input', () => { active = 0; render(); });
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  input.addEventListener('keydown', event => {
+    const visible = Math.min(results.length, MENU_LIMIT);
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      active = Math.min(active + 1, visible - 1);
+      highlightActive();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      active = Math.max(active - 1, 0);
+      highlightActive();
+    } else if (event.key === 'Enter') {
+      // Enter picks the highlighted match instead of submitting the whole form
+      event.preventDefault();
+      pick(active);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      input.blur();
+    }
+  });
+
+  return { open, close };
+}
+
+// Changing a major reloads the page so the checklist and requirement rows
+// match; picking the current second major as the major swaps it out.
+createPicker(document.getElementById('major_picker'), {
+  options: majorOptions,
+  exclude: () => [currentMajor],
+  emptyText: 'No majors match that search.',
+  hideChipsWhileOpen: true,
+  onPick: option => {
+    window.location.href = programUrl(option.key, option.key === currentSecond ? '' : currentSecond);
+  },
+});
+
+createPicker(document.getElementById('second_picker'), {
+  // Can't double major in the same subject as the first major
+  options: majorOptions.filter(o => o.prefix !== (majorOptions.find(m => m.key === currentMajor) || {}).prefix),
+  exclude: () => [currentMajor, currentSecond],
+  emptyText: 'No other majors match that search.',
+  onPick: option => { window.location.href = programUrl(currentMajor, option.key); },
+});
+
+const secondRemove = document.getElementById('second_remove');
+if (secondRemove) {
+  secondRemove.addEventListener('click', () => { window.location.href = programUrl(currentMajor, ''); });
+}
+
+// ── Minors ──
+// Any number of minors; each one is a chip plus a hidden "minor" field. A
+// minor saved for a different major may not be offered here (e.g. a Math
+// minor for a Math major), so setMinors() drops keys not in minorOptions.
+const minorPickerRoot = document.getElementById('minor_picker');
+
+function setMinors(keys) {
+  selectedMinors = [...new Set(keys)].filter(key => minorOptions.some(m => m.key === key));
+  if (!minorPickerRoot) return;
+  const chips = document.getElementById('minor_chips');
+  const fields = document.getElementById('minor_fields');
+  chips.innerHTML = '';
+  fields.innerHTML = '';
+  selectedMinors.forEach(key => {
+    const minor = minorOptions.find(m => m.key === key);
+    const chip = document.createElement('span');
+    chip.className = 'program-chip program-chip-minor';
+    chip.title = minor.description;
+    chip.innerHTML = `<span class="program-chip-name">${escapeHtml(minor.name)}</span>
+      <span class="program-chip-sub">${minor.hours} cr hrs</span>
+      <button type="button" class="program-chip-remove" aria-label="Remove ${escapeHtml(minor.name)}">&times;</button>`;
+    chip.querySelector('button').addEventListener('click', () => {
+      setMinors(selectedMinors.filter(k => k !== key));
+    });
+    chips.appendChild(chip);
+
+    const field = document.createElement('input');
+    field.type = 'hidden';
+    field.name = 'minor';
+    field.value = key;
+    fields.appendChild(field);
+  });
+  // Every minor is already picked -- nothing left to add
+  const full = selectedMinors.length >= minorOptions.length;
+  minorPickerRoot.dataset.full = full ? 'true' : 'false';
+  minorPickerRoot.querySelector('[data-open]').classList.toggle('d-none', full);
   saveState();
 }
 
-function showMinorSuggestions() {
-  const query = minorInput.value.trim().toLowerCase();
-  const matches = minorOptions.filter(m => m.name.toLowerCase().includes(query));
-  minorSuggestions.innerHTML = '';
-  if (!matches.length) {
-    const empty = document.createElement('div');
-    empty.className = 'autocomplete-empty';
-    empty.textContent = 'No minors match that search yet.';
-    minorSuggestions.appendChild(empty);
-  }
-  matches.forEach(minor => {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
-    item.textContent = `${minor.name} (${minor.hours} cr hrs)`;
-    item.addEventListener('click', () => {
-      minorInput.value = '';
-      minorSuggestions.style.display = 'none';
-      setMinor(minor.key);
-    });
-    minorSuggestions.appendChild(item);
-  });
-  minorSuggestions.style.display = 'block';
-}
-
-if (minorInput) {
-  minorInput.addEventListener('focus', showMinorSuggestions);
-  minorInput.addEventListener('input', showMinorSuggestions);
-  minorInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter') {
-      // Enter picks the first match instead of submitting the whole form
-      event.preventDefault();
-      const first = minorSuggestions.querySelector('.autocomplete-item');
-      if (first) first.click();
-    }
-  });
-  minorInput.addEventListener('blur', () => setTimeout(() => { minorSuggestions.style.display = 'none'; }, 150));
-  document.getElementById('minor_remove').addEventListener('click', () => {
-    setMinor('');
-    minorInput.focus();
+if (minorPickerRoot) {
+  createPicker(minorPickerRoot, {
+    options: minorOptions,
+    exclude: () => selectedMinors,
+    emptyText: 'No minors match that search yet.',
+    onPick: option => setMinors([...selectedMinors, option.key]),
   });
 }
 
@@ -529,7 +734,8 @@ function restoreState() {
   if (saved.start_year) document.getElementById('start_year').value = saved.start_year;
   if (saved.target_semesters) document.getElementById('target_semesters').value = saved.target_semesters;
   if (saved.include_summer !== undefined) document.getElementById('include_summer').checked = saved.include_summer;
-  if (saved.minor) setMinor(saved.minor);
+  // Older saved state held a single "minor" string
+  setMinors(saved.minors || (saved.minor ? [saved.minor] : []));
 
   restoring = false;
   saveState();
@@ -545,14 +751,5 @@ plannerForm.addEventListener('submit', () => {
   updateHiddenField();
 });
 
-// When the user picks a different major, reload the page so the course checklist,
-// generic requirement rows, and headings all update for that major.
-document.querySelectorAll('.major-radio').forEach(radio => {
-  radio.addEventListener('change', () => {
-    if (radio.checked) {
-      window.location.href = '/?major=' + encodeURIComponent(radio.value);
-    }
-  });
-});
 </script>
 {% endblock %}

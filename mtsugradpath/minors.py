@@ -59,7 +59,8 @@ def get_minor_config(key):
 
 
 def minor_allowed_for_major(minor_cfg, major_prefixes):
-    """A student can't minor in their own major's subject."""
+    """A student can't minor in their own major's subject (with a double
+    major, pass both majors' prefixes)."""
     return minor_cfg["prefix"] not in major_prefixes
 
 
@@ -139,7 +140,8 @@ def apply_minor_to_config(degree_cfg, minor_cfg, completed_courses, catalog=None
     generic_extra = {}
     minor_generic = []
     for index, hours in enumerate(chunks, start=1):
-        generic_id = f"{MINOR_ELECTIVE_ID_PREFIX}{index}"
+        # Keyed by minor so several minors' electives don't share an id
+        generic_id = f"{MINOR_ELECTIVE_ID_PREFIX}{minor_cfg['key']}_{index}"
         minor_generic.append((
             generic_id,
             f"{minor_cfg['name']} elective",
