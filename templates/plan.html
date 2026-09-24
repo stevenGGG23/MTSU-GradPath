@@ -1,15 +1,22 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="card">
+{% set remaining_preview = 6 %}
+<div class="card plan-card">
+  <!-- Only shown in the PDF / printout -->
+  <div class="print-only print-header">
+    <strong>MTSU GradPath &mdash; degree plan</strong>
+    <span>Generated {{ generated_on }} &middot; An unofficial planning estimate, not a Degree Works audit.</span>
+  </div>
   <div class="d-flex justify-content-between align-items-start mb-4 flex-column flex-md-row gap-3">
     <div>
       <h2 class="mb-2">Your recommended plan</h2>
       {% set extras = ([second_audit.label] if second_audit else []) + (minor_audits | map(attribute='label') | list) %}
       <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
     </div>
-    <div>
+    <div class="d-flex gap-2 plan-actions">
       <a class="btn btn-outline-light text-nowrap" href="/">Edit completed courses</a>
+      <button type="button" class="btn btn-primary text-nowrap" id="download-pdf">Download PDF</button>
     </div>
   </div>
 
@@ -44,7 +51,7 @@
     </div>
     <div class="progress-summary-detail">
       <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
-      <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree{% if second_audit %}, plus {{ second_audit.required_hours }} cr hrs for the {{ second_audit.label }}{% endif %}{% if minor_audits %}, plus {{ minor_audits | map(attribute='label') | join(' and ') }} (counted within your free electives){% endif %}.</p>
+      <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree.</p>
       <div class="category-bars">
         {% for group in audit.groups %}
         <div class="category-bar-row">
@@ -58,31 +65,33 @@
           </div>
         </div>
         {% endfor %}
-        {% if second_audit %}
-        <div class="category-bar-row category-bar-row-second">
-          <div class="category-bar-label">
-            <span>{{ second_audit.label }}</span>
-            <span class="text-muted">{{ second_audit.completed_hours }} / {{ second_audit.required_hours }} cr hrs</span>
-          </div>
-          <div class="progress category-bar">
-            <div class="progress-bar" role="progressbar" style="width: {{ second_audit.percent }}%;" aria-valuenow="{{ second_audit.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
-          </div>
-        </div>
-        {% endif %}
-        {% for minor_audit in minor_audits %}
-        <div class="category-bar-row category-bar-row-minor">
-          <div class="category-bar-label">
-            <span>{{ minor_audit.label }}</span>
-            <span class="text-muted">{{ minor_audit.completed_hours }} / {{ minor_audit.required_hours }} cr hrs</span>
-          </div>
-          <div class="progress category-bar">
-            <div class="progress-bar" role="progressbar" style="width: {{ minor_audit.percent }}%;" aria-valuenow="{{ minor_audit.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
-          </div>
-        </div>
-        {% endfor %}
       </div>
     </div>
   </div>
+
+  {% set extra_programs = ([second_audit] if second_audit else []) + minor_audits %}
+  {% if extra_programs %}
+  <div class="mb-4">
+    <h5 class="extra-progress-title">{{ 'Second major & minors' if second_audit and minor_audits else ('Second major' if second_audit else ('Minors' if minor_audits|length > 1 else 'Minor')) }}</h5>
+    <p class="text-muted small mb-3">Tracked on their own, separate from the {{ audit.total_required }}-hour degree above. Courses that also meet a major requirement count toward both.</p>
+    <div class="extra-progress-grid">
+      {% for prog in extra_programs %}
+      <div class="extra-progress-card {{ 'extra-progress-second' if prog.key == 'second' else 'extra-progress-minor' }}">
+        <div class="progress-ring" style="--pct: {{ prog.percent }};">
+          <div class="progress-ring-inner">
+            <span class="progress-ring-value">{{ prog.percent | round(0, 'floor') | int }}%</span>
+          </div>
+        </div>
+        <div>
+          <div class="extra-progress-name">{{ prog.label }}</div>
+          <div class="extra-progress-hours">{{ prog.completed_hours }} / {{ prog.required_hours }} cr hrs</div>
+          {% if prog.description %}<div class="extra-progress-desc">{{ prog.description }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <div class="mb-4">
     <h4 class="mb-3">Requirement details</h4>
     <div class="accordion" id="auditAccordion">
@@ -105,6 +114,9 @@
                   {% if item.partial_hours is defined %}{{ item.partial_hours }} / {% endif %}{{ item.hours }} cr hr{{ 's' if item.hours != 1 else '' }}
                 </span>
               </div>
+              {% if item.applied %}
+              <div class="audit-item-applied">Counted: {{ item.applied | join(', ') }}</div>
+              {% endif %}
               {% if item.suggestions %}
               <div class="audit-item-suggestions">e.g. {{ item.suggestions | join(', ') }}</div>
               {% endif %}
@@ -156,14 +168,17 @@
     <h4 class="mb-3">Plan overview</h4>
     <div class="term-grid">
       {% for term, items in plan.items() %}
-      <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
+      {% set remaining = term.startswith('Remaining') %}
+      {# The leftover list can run to dozens of items: show the first few, expand for the rest #}
+      {% set collapse = remaining and items | length > remaining_preview %}
+      <div class="term-card {{ 'term-card-remaining' if remaining }}{{ ' is-collapsed' if collapse }}">
         <div class="term-card-header">
           <span class="term-card-title">{{ term }}</span>
           {% if term in term_hours %}<span class="badge bg-secondary">{{ term_hours[term] }} cr hrs</span>{% endif %}
         </div>
         <div class="plan-item-table">
           {% for item in items %}
-          <div class="plan-item-row plan-item-{{ item.kind }}{{ ' plan-item-minor' if item.minor }}{{ ' plan-item-second' if item.second }}">
+          <div class="plan-item-row plan-item-{{ item.kind }}{{ ' plan-item-minor' if item.minor }}{{ ' plan-item-second' if item.second }}{{ ' plan-item-extra' if collapse and loop.index > remaining_preview }}">
             <span class="plan-item-tag">{{ 'MIN' if item.minor else ('2ND' if item.second else ('MAJ' if item.kind == 'course' else ('GEN' if item.kind == 'requirement' else '—'))) }}</span>
             <div class="plan-item-main">
               {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
@@ -174,10 +189,32 @@
           </div>
           {% endfor %}
         </div>
+        {% if collapse %}
+        <button type="button" class="remaining-toggle" data-more="Show all {{ items | length }} remaining" data-less="Show fewer">Show all {{ items | length }} remaining</button>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
   </div>
+
+  <script>
+    // The PDF is the browser's print-to-PDF: print CSS expands every section,
+    // and the document title becomes the suggested file name.
+    document.getElementById('download-pdf').addEventListener('click', () => {
+      const title = document.title;
+      document.title = {{ ('GradPath plan - ' ~ degree_name) | tojson }};
+      window.print();
+      document.title = title;
+    });
+
+    document.querySelectorAll('.remaining-toggle').forEach(button => {
+      button.addEventListener('click', () => {
+        const card = button.closest('.term-card');
+        const collapsed = card.classList.toggle('is-collapsed');
+        button.textContent = collapsed ? button.dataset.more : button.dataset.less;
+      });
+    });
+  </script>
 
   {% if personal_mermaid %}
   <div class="mb-2">

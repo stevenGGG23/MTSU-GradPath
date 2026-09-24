@@ -143,6 +143,7 @@ def build_second_major_audit(second_cfg, completed_courses, generic_hours, catal
     required = sum(g["required_hours"] for g in groups)
     completed = sum(g["completed_hours"] for g in groups)
     return {
+        "key": "second",
         "label": f"{second_cfg['name']} (second major)",
         "required_hours": _nice(required),
         "completed_hours": _nice(completed),

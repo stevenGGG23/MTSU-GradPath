@@ -1,0 +1,193 @@
+<!-- GPA tools: a small tab on the right edge that slides out a panel with a
+     what-if calculator and a target-GPA calculator. Everything runs in the
+     browser; numbers are kept in sessionStorage for this tab only. -->
+<button type="button" class="gpa-tab" data-bs-toggle="offcanvas" data-bs-target="#gpaTools" aria-controls="gpaTools">GPA</button>
+
+<div class="offcanvas offcanvas-end gpa-panel" tabindex="-1" id="gpaTools" aria-labelledby="gpaToolsLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="gpaToolsLabel">GPA tools</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+    <p class="gpa-hint">Start from the overall GPA and GPA hours on your Degree Works audit.</p>
+    <div class="row g-2 mb-3">
+      <div class="col-6">
+        <label class="form-label gpa-label" for="gpa_current">Current GPA</label>
+        <input type="number" class="form-control form-control-sm" id="gpa_current" min="0" max="4" step="0.001" placeholder="3.20">
+      </div>
+      <div class="col-6">
+        <label class="form-label gpa-label" for="gpa_hours">GPA hours so far</label>
+        <input type="number" class="form-control form-control-sm" id="gpa_hours" min="0" step="1" placeholder="60">
+      </div>
+    </div>
+
+    <ul class="nav nav-pills gpa-tabs mb-3" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#gpaWhatIf" type="button" role="tab">What if</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#gpaTarget" type="button" role="tab">Reach a target</button>
+      </li>
+    </ul>
+
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="gpaWhatIf" role="tabpanel">
+        <p class="gpa-hint">Add the courses you're taking or plan to take. For a retake, pick the grade it replaces &mdash; MTSU drops the old grade from your GPA.</p>
+        <div class="gpa-row-head">
+          <span>Course</span><span>Hrs</span><span>Grade</span><span>Replaces</span><span></span>
+        </div>
+        <div id="gpa_rows"></div>
+        <button type="button" class="btn btn-sm btn-link gpa-add" id="gpa_add">+ Add course</button>
+        <div class="gpa-result" id="gpa_whatif_result"></div>
+      </div>
+
+      <div class="tab-pane fade" id="gpaTarget" role="tabpanel">
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label gpa-label" for="gpa_goal">Target GPA</label>
+            <input type="number" class="form-control form-control-sm" id="gpa_goal" min="0" max="4" step="0.01" placeholder="3.50">
+          </div>
+          <div class="col-6">
+            <label class="form-label gpa-label" for="gpa_more">Hours left to take</label>
+            <input type="number" class="form-control form-control-sm" id="gpa_more" min="1" step="1" placeholder="30">
+          </div>
+        </div>
+        <div class="gpa-result" id="gpa_target_result"></div>
+      </div>
+    </div>
+
+    <p class="gpa-footnote">An estimate only. Pass/fail, transfer, and developmental courses don't count toward your MTSU GPA.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  // MTSU plus/minus grade points
+  const GRADES = [
+    ['A', 4.0], ['A-', 3.67], ['B+', 3.33], ['B', 3.0], ['B-', 2.67], ['C+', 2.33],
+    ['C', 2.0], ['C-', 1.67], ['D+', 1.33], ['D', 1.0], ['F', 0.0],
+  ];
+  const POINTS = Object.fromEntries(GRADES);
+  const STORE = 'gradpath-gpa';
+  const $ = id => document.getElementById(id);
+  const rowsBox = $('gpa_rows');
+
+  function load() {
+    try { return JSON.parse(sessionStorage.getItem(STORE)) || {}; } catch (e) { return {}; }
+  }
+
+  function save() {
+    const state = {
+      current: $('gpa_current').value,
+      hours: $('gpa_hours').value,
+      goal: $('gpa_goal').value,
+      more: $('gpa_more').value,
+      rows: [...rowsBox.children].map(row => ({
+        name: row.querySelector('.gpa-name').value,
+        hours: row.querySelector('.gpa-hrs').value,
+        grade: row.querySelector('.gpa-grade').value,
+        old: row.querySelector('.gpa-old').value,
+      })),
+    };
+    try { sessionStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
+  }
+
+  function gradeOptions(selected, blankLabel) {
+    const blank = blankLabel ? `<option value="">${blankLabel}</option>` : '';
+    return blank + GRADES.map(([g]) => `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
+  }
+
+  function addRow(data = {}) {
+    const row = document.createElement('div');
+    row.className = 'gpa-row';
+    row.innerHTML = `
+      <input type="text" class="form-control form-control-sm gpa-name" placeholder="CSCI 3110" aria-label="Course">
+      <input type="number" class="form-control form-control-sm gpa-hrs" min="0" max="12" step="1" aria-label="Credit hours">
+      <select class="form-select form-select-sm gpa-grade" aria-label="Expected grade">${gradeOptions(data.grade || 'A')}</select>
+      <select class="form-select form-select-sm gpa-old" aria-label="Grade it replaces">${gradeOptions(data.old || '', 'New')}</select>
+      <button type="button" class="btn-close gpa-remove" aria-label="Remove course"></button>`;
+    row.querySelector('.gpa-name').value = data.name || '';
+    row.querySelector('.gpa-hrs').value = data.hours ?? 3;
+    row.querySelector('.gpa-remove').addEventListener('click', () => { row.remove(); update(); });
+    rowsBox.appendChild(row);
+  }
+
+  const num = id => parseFloat($(id).value);
+  const fmt = value => value.toFixed(2);
+
+  function whatIf() {
+    const current = num('gpa_current');
+    const hours = num('gpa_hours') || 0;
+    if (hours && !(current >= 0 && current <= 4)) return 'Enter your current GPA to see the result.';
+    let points = hours ? current * hours : 0;
+    let totalHours = hours;
+    let added = 0;
+    [...rowsBox.children].forEach(row => {
+      const hrs = parseFloat(row.querySelector('.gpa-hrs').value) || 0;
+      const grade = POINTS[row.querySelector('.gpa-grade').value];
+      const old = row.querySelector('.gpa-old').value;
+      if (!hrs) return;
+      if (old) {
+        // A retake swaps the old grade's points out; the hours stay the same
+        points += (grade - POINTS[old]) * hrs;
+      } else {
+        points += grade * hrs;
+        totalHours += hrs;
+        added += hrs;
+      }
+    });
+    if (!totalHours) return 'Add a course to see a GPA.';
+    const gpa = Math.min(Math.max(points / totalHours, 0), 4);
+    const change = hours ? gpa - current : null;
+    const delta = change === null ? '' :
+      ` <span class="${change >= 0 ? 'gpa-up' : 'gpa-down'}">${change >= 0 ? '+' : ''}${fmt(change)}</span>`;
+    return `<div class="gpa-big">${fmt(gpa)}${delta}</div>
+      <div>Projected GPA over ${totalHours} hours${added ? ` (${added} new)` : ''}.</div>`;
+  }
+
+  function target() {
+    const current = num('gpa_current');
+    const hours = num('gpa_hours');
+    const goal = num('gpa_goal');
+    const more = num('gpa_more');
+    if (!(current >= 0 && current <= 4) || !(hours > 0)) return 'Enter your current GPA and hours above.';
+    if (!(goal >= 0 && goal <= 4)) return 'Enter the GPA you want to reach.';
+    if (!(more > 0)) return 'Enter how many more graded hours you’ll take.';
+
+    const needed = (goal * (hours + more) - current * hours) / more;
+    if (needed <= 0) {
+      return `<div class="gpa-big gpa-up">Already there</div><div>You'd stay at or above ${fmt(goal)} across those ${more} hours with any passing grades.</div>`;
+    }
+    if (needed > 4) {
+      const best = (current * hours + 4 * more) / (hours + more);
+      let msg = `<div class="gpa-big gpa-down">Out of reach</div><div>Straight A's over ${more} hours gets you to ${fmt(best)}.`;
+      if (goal < 4) {
+        const hoursNeeded = Math.ceil(hours * (goal - current) / (4 - goal));
+        msg += ` You'd need about ${hoursNeeded} hours of A's to reach ${fmt(goal)}, or retake low grades (see What if).`;
+      }
+      return msg + '</div>';
+    }
+    const letter = (GRADES.find(([, p]) => p <= needed + 1e-9) || GRADES[0])[0];
+    const atLeast = (GRADES.slice().reverse().find(([, p]) => p >= needed - 1e-9) || GRADES[0])[0];
+    return `<div class="gpa-big">${fmt(needed)}</div>
+      <div>Average you need over your next ${more} hours &mdash; roughly ${atLeast === letter ? letter : `${letter}/${atLeast}`} grades in every course.</div>`;
+  }
+
+  function update() {
+    $('gpa_whatif_result').innerHTML = whatIf();
+    $('gpa_target_result').innerHTML = target();
+    save();
+  }
+
+  const saved = load();
+  ['current', 'hours', 'goal', 'more'].forEach(key => {
+    if (saved[key]) $(`gpa_${key}`).value = saved[key];
+  });
+  (saved.rows && saved.rows.length ? saved.rows : [{}]).forEach(addRow);
+
+  $('gpa_add').addEventListener('click', () => { addRow(); update(); rowsBox.lastElementChild.querySelector('.gpa-name').focus(); });
+  $('gpaTools').addEventListener('input', update);
+  $('gpaTools').addEventListener('change', update);
+  update();
+})();
+</script>
