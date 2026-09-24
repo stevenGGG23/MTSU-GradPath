@@ -414,6 +414,7 @@ def index():
         default_year=date.today().year,
         saved_state=saved_state,
         degree_list=degree_list,
+        minors=AVAILABLE_MINORS,  # <-- ADD THIS LINE
     )
 
 # Function that builds and displays the dependency graph
