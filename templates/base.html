@@ -27,12 +27,16 @@
           <li class="nav-item">
             <a class="nav-link" href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">Pipeline</a>
           </li>
+          {# The plan page is the result of a form POST, so the reload a sync
+             finishes with would re-submit it -- sync is only offered elsewhere #}
+          {% if not hide_sync %}
           <li class="nav-item ms-lg-2">
             <button class="btn btn-outline-light btn-sm" id="sync-btn" onclick="triggerSync()">
               <span id="sync-btn-text">Sync Catalog</span>
               <span id="sync-spinner" class="d-none ms-1" style="display:inline-block;width:1em;height:1em;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;"></span>
             </button>
           </li>
+          {% endif %}
         </ul>
       </div>
     </div>

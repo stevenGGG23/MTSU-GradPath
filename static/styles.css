@@ -709,147 +709,258 @@ footer a {
     overflow-x: auto;
 }
 
-/* ── Major selector ──────────────────────────────────────────────────────── */
+/* ── Program picker (major / second major / minors) ─────────────────────
+   One row per kind: chips for what's picked plus a single searchable
+   dropdown, so the panel stays the same size whether the catalog has eight
+   programs or several hundred. */
 
-.major-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    grid-auto-rows: 1fr;
-    gap: 0.75rem;
-}
-
-.major-card {
-    cursor: pointer;
-    user-select: none;
-    display: flex;
-}
-
-.major-card input[type="radio"] {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.major-card-inner {
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 0.75rem 1.1rem;
+.program-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
     background: #f8fafc;
-    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-    width: 100%;
+    padding: 1rem 1.25rem;
+}
+
+.program-panel-title {
+    margin: 0 0 0.5rem;
+}
+
+.program-row {
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-}
-
-.major-card input[type="radio"]:checked + .major-card-inner {
-    border-color: #2563eb;
-    background: #eff6ff;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.major-card:hover:not(.major-card-soon) .major-card-inner {
-    border-color: #93c5fd;
-    background: #f0f7ff;
-}
-
-.major-card-soon {
-    cursor: not-allowed;
-    opacity: 0.55;
-}
-
-.major-card-name {
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: #1e3a5f;
-    line-height: 1.3;
-}
-
-.major-card-conc {
-    font-size: 0.75rem;
-    color: #64748b;
-    margin-top: 0.15rem;
-}
-
-.major-card-tag {
-    display: inline-block;
-    align-self: flex-start;
-    margin-top: 0.35rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #7c3aed;
-    background: #ede9fe;
-    border-radius: 6px;
-    padding: 0.1rem 0.4rem;
-}
-
-/* ── Minor picker ─────────────────────────────────────────────────────────
-   Kept to one compact row under the major grid: a small search field that
-   swaps for a chip once a minor is chosen. */
-
-.minor-picker {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
+    align-items: flex-start;
     gap: 0.5rem 1rem;
+    padding: 0.6rem 0;
 }
 
-.minor-picker-label {
-    margin: 0;
-    font-size: 0.95rem;
+.program-row + .program-row {
+    border-top: 1px solid #e2e8f0;
+}
+
+.program-row-label {
+    flex: 0 0 150px;
+    padding-top: 0.4rem;
+    font-size: 0.9rem;
     font-weight: 600;
     color: #0f172a;
 }
 
-.minor-picker-optional {
+.program-optional {
+    display: block;
+    font-size: 0.75rem;
     font-weight: 400;
     color: #64748b;
+}
+
+.program-row-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.program-picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.program-chip-list {
+    display: contents;
+}
+
+.program-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 100%;
+    padding: 0.35rem 0.75rem;
+    border: 1.5px solid #2563eb;
+    border-radius: 999px;
+    background: #eff6ff;
+    line-height: 1.25;
+}
+
+.program-chip.d-none {
+    display: none !important;
+}
+
+.program-chip-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #1e3a5f;
+}
+
+.program-chip-sub {
+    font-size: 0.75rem;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.program-chip-second {
+    border-color: #7c3aed;
+    background: #f5f3ff;
+}
+
+.program-chip-minor {
+    border-color: #0d9488;
+    background: #f0fdfa;
+}
+
+.program-chip-minor .program-chip-name {
+    color: #134e4a;
+}
+
+.program-chip-remove {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+    margin-right: -0.25rem;
+    border-radius: 50%;
+}
+
+.program-chip-remove:hover,
+.program-chip-remove:focus-visible {
+    color: #0f172a;
+    background: rgba(15, 23, 42, 0.08);
+}
+
+.program-add {
+    border: 1px dashed #94a3b8;
+    border-radius: 999px;
+    background: transparent;
+    color: #2563eb;
     font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.35rem 0.85rem;
 }
 
-.minor-picker-body {
-    flex: 1 1 260px;
-    max-width: 420px;
+.program-add:hover,
+.program-add:focus-visible {
+    border-color: #2563eb;
+    background: #eff6ff;
 }
 
-.minor-picker .form-control-sm {
+.program-add.d-none,
+.program-search.d-none {
+    display: none !important;
+}
+
+.program-search {
+    position: relative;
+    flex: 1 1 280px;
+    max-width: 460px;
+}
+
+.program-search .form-control-sm {
     border-radius: 10px;
-    padding: 0.4rem 0.75rem;
+    padding: 0.45rem 0.75rem;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.minor-chip {
+.program-menu {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(2, 16, 52, 0.16);
+    padding: 0.3rem;
+}
+
+.program-option {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 0.4rem 0.75rem;
-    border: 2px solid #0d9488;
-    border-radius: 10px;
-    background: #f0fdfa;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    cursor: pointer;
 }
 
-.minor-chip.d-none {
-    display: none !important;
+.program-option.is-active {
+    background: #eff6ff;
 }
 
-.minor-chip-text {
-    display: flex;
-    flex-direction: column;
+.program-option.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.program-option-text {
     min-width: 0;
 }
 
-.minor-chip-name {
+.program-option-name {
     font-size: 0.88rem;
     font-weight: 600;
-    color: #134e4a;
+    color: #0f172a;
 }
 
-.minor-chip-desc {
+.program-option-sub {
     font-size: 0.75rem;
     color: #64748b;
+}
+
+.program-option mark {
+    padding: 0;
+    background: #fde68a;
+    color: inherit;
+    border-radius: 2px;
+}
+
+.program-option-meta {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: #475569;
+    background: #f1f5f9;
+    border-radius: 6px;
+    padding: 0.15rem 0.45rem;
+}
+
+.program-menu-empty,
+.program-menu-more {
+    padding: 0.6rem 0.65rem;
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.program-menu-more {
+    border-top: 1px solid #f1f5f9;
+}
+
+.cs-major-heading {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 1rem;
+    color: #1e3a5f;
+}
+
+.cs-major-heading:first-child {
+    margin-top: 0;
+}
+
+.plan-item-second .plan-item-tag {
+    background: #7c3aed;
+}
+
+.category-bar-row-second {
+    padding-top: 0.6rem;
+    border-top: 1px dashed #cbd5e1;
+}
+
+.category-bar-row-second .progress-bar {
+    background: #7c3aed;
 }
 
 .autocomplete-empty {
@@ -905,8 +1016,23 @@ footer a {
         border-radius: 18px;
     }
 
-    .major-grid {
-        grid-template-columns: repeat(2, 1fr);
+    .program-row {
+        flex-direction: column;
+    }
+
+    .program-row-label {
+        flex-basis: auto;
+        padding-top: 0;
+    }
+
+    .program-optional {
+        display: inline;
+        margin-left: 0.25rem;
+    }
+
+    .program-search {
+        flex-basis: 100%;
+        max-width: none;
     }
 
     .progress-summary {

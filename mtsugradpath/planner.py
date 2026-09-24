@@ -86,9 +86,10 @@ def _effective_prereqs(
 # major's own supporting_prereq_map only encodes what that major's own team
 # bothered to declare, which isn't guaranteed complete (see CHEM_CONFIG's
 # supporting_prereq_map for PHYS 2120: only lists PHYS 2110). Catalog-scraped
-# text is intentionally not consulted here for a cross-prefix course: the
-# current major's catalog dict doesn't cover another prefix, and scraped
-# text is only reliable within a course's own major's catalog anyway.
+# text is only consulted for a cross-prefix course when the caller loaded
+# that prefix into the catalog (a second major), and then only its
+# same-prefix prereqs, since scraped text is only reliable within a course's
+# own major's catalog.
 def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     code_prefix = code.split()[0] if " " in code else None
     if code_prefix == cfg.get("prefix"):
@@ -98,6 +99,14 @@ def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     home_cfg = _PREFIX_TO_CONFIG.get(code_prefix)
     if home_cfg is None:
         return set()
+    # A second major's courses are loaded into the catalog alongside the
+    # primary's, so their scraped prereqs are available -- trusted only
+    # within the course's own prefix, same as for the primary major.
+    if code in catalog:
+        return _effective_prereqs(
+            code, catalog, home_cfg.get("prereq_map", {}),
+            home_cfg.get("prereq_override_map", {}), code_prefix,
+        )
     required = set(home_cfg.get("prereq_map", {}).get(code, set()))
     override = home_cfg.get("prereq_override_map", {}).get(code)
     if override is not None:
