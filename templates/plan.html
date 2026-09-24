@@ -5,7 +5,7 @@
   <div class="d-flex justify-content-between align-items-start mb-4 flex-column flex-md-row gap-3">
     <div>
       <h2 class="mb-2">Your recommended plan</h2>
-      <p class="text-muted mb-0">{{ degree_name }} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
+      <p class="text-muted mb-0">{{ degree_name }}{% if minor_audit %} with a {{ minor_audit.label }}{% endif %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
     </div>
     <div>
       <a class="btn btn-outline-light me-2" href="/">Edit completed courses</a>
@@ -44,7 +44,7 @@
     </div>
     <div class="progress-summary-detail">
       <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
-      <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree.</p>
+      <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree{% if minor_audit %}, plus the {{ minor_audit.label }} ({{ minor_audit.required_hours }} cr hrs, counted within your free electives){% endif %}.</p>
       <div class="category-bars">
         {% for group in audit.groups %}
         <div class="category-bar-row">
@@ -58,52 +58,24 @@
           </div>
         </div>
         {% endfor %}
+        {% if minor_audit %}
+        <div class="category-bar-row category-bar-row-minor">
+          <div class="category-bar-label">
+            <span>{{ minor_audit.label }}</span>
+            <span class="text-muted">{{ minor_audit.completed_hours }} / {{ minor_audit.required_hours }} cr hrs</span>
+          </div>
+          <div class="progress category-bar">
+            <div class="progress-bar" role="progressbar" style="width: {{ minor_audit.percent }}%;" aria-valuenow="{{ minor_audit.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
-<!-- Add this near the top of plan.html where the overall degree progress is shown -->
-{% if minor_audit %}
-<div class="col-md-6 mb-4">
-    <div class="card shadow-sm border-0 rounded-4 h-100 border-start border-4 border-info">
-        <div class="card-body p-4">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="fw-bold text-dark mb-0">{{ minor_audit.name }}</h5>
-                <span class="badge {% if minor_audit.is_complete %}bg-success{% else %}bg-info-subtle text-info-emphasis{% endif %} rounded-pill">
-                    {{ minor_audit.percent }}% Complete
-                </span>
-            </div>
-            
-            <p class="text-muted small mb-3">{{ minor_audit.description }}</p>
-            
-            <div class="d-flex justify-content-between text-muted small mb-1">
-                <span>Completed: {{ minor_audit.completed_hours }} hrs</span>
-                <span>Required: {{ minor_audit.required_hours }} hrs</span>
-            </div>
-            
-            <div class="progress rounded-pill mb-3" style="height: 10px;">
-                <div class="progress-bar bg-info" role="progressbar" style="width: {{ minor_audit.percent }}%;"></div>
-            </div>
-
-            <ul class="list-unstyled small mb-0">
-                {% for entry in minor_audit.required_entries %}
-                    <li class="mb-1">
-                        {% if entry.done %}
-                            <i class="bi bi-check-circle-fill text-success me-2"></i>
-                        {% else %}
-                            <i class="bi bi-circle text-muted me-2"></i>
-                        {% endif %}
-                        {{ entry.label }} ({{ entry.hours }} hrs)
-                    </li>
-                {% endfor %}
-            </ul>
-        </div>
-    </div>
-</div>
-{% endif %}
   <div class="mb-4">
     <h4 class="mb-3">Requirement details</h4>
     <div class="accordion" id="auditAccordion">
-      {% for group in audit.groups %}
+      {% for group in audit.groups + ([minor_audit] if minor_audit else []) %}
       <div class="accordion-item">
         <h2 class="accordion-header" id="auditHeading{{ loop.index }}">
           <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#auditCollapse{{ loop.index }}" aria-expanded="false" aria-controls="auditCollapse{{ loop.index }}">
@@ -134,23 +106,7 @@
     </div>
   </div>
   {% endif %}
-<!-- Look for your course rendering loop in plan.html and update the badge/styling -->
-{% for item in term_items %}
-    <div class="card mb-2 shadow-sm border-0">
-        <div class="card-body p-2 d-flex justify-content-between align-items-center">
-            <div>
-                <strong>{{ item.code }}</strong> - {{ item.title }}
-            </div>
-            
-            <!-- Highlight minor courses visually -->
-            {% if minor_audit and item.code in minor_audit.required_entries|map(attribute='label')|join(',') %}
-                <span class="badge bg-info-subtle text-info rounded-pill border border-info">{{ item.hours }} cr (Minor)</span>
-            {% else %}
-                <span class="badge bg-light text-secondary rounded-pill border">{{ item.hours }} cr</span>
-            {% endif %}
-        </div>
-    </div>
-{% endfor %}
+
   {% if term_hours %}
   <div class="mb-4">
     <h4 class="mb-3">Credit hours per term</h4>
@@ -196,8 +152,8 @@
         </div>
         <div class="plan-item-table">
           {% for item in items %}
-          <div class="plan-item-row plan-item-{{ item.kind }}">
-            <span class="plan-item-tag">{{ 'CS' if item.kind == 'course' else ('GEN' if item.kind == 'requirement' else '—') }}</span>
+          <div class="plan-item-row plan-item-{{ item.kind }}{{ ' plan-item-minor' if item.minor }}">
+            <span class="plan-item-tag">{{ 'MIN' if item.minor else ('CS' if item.kind == 'course' else ('GEN' if item.kind == 'requirement' else '—')) }}</span>
             <div class="plan-item-main">
               {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
               <span class="plan-item-title">{{ item.title }}</span>

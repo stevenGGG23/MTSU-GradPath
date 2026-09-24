@@ -25,10 +25,17 @@ from mtsugradpath.degree import (
     elective_required_hours,
     build_audit,
     get_degree_config,
-    AVAILABLE_MINORS,  # <-- ADD THIS LINE
 )
 
 from mtsugradpath.degree_configs import get_full_degree_config, major_prefixes, DEGREE_CONFIGS
+from mtsugradpath.minors import (
+    MINOR_CONFIGS,
+    get_minor_config,
+    minor_allowed_for_major,
+    apply_minor_to_config,
+    build_minor_audit,
+    MINOR_ELECTIVE_ID_PREFIX,
+)
 
 from mtsugradpath.models import Course, SyncStatus
 from mtsugradpath.planner import (
@@ -215,6 +222,29 @@ def index():
     for code, hours, title in degree_cfg_for_display["supporting_courses"]:
         courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
 
+    # Minors are available to any major, so their subject's courses are added
+    # to the course search -- e.g. a CS student with a Math minor can add
+    # MATH 2010 as completed. Minor subjects the major already covers are
+    # skipped since those courses are listed above.
+    minor_prefixes = sorted({m["prefix"] for m in MINOR_CONFIGS.values()} - set(display_prefixes))
+    if minor_prefixes:
+        known_codes = {c["code"] for c in courses}
+        with SessionLocal() as db_session:
+            minor_course_rows = (
+                db_session.query(Course)
+                .filter(Course.prefix.in_(minor_prefixes))
+                .order_by(Course.prefix, Course.number)
+                .all()
+            )
+        for course in minor_course_rows:
+            code = f"{course.prefix} {course.number}"
+            if course.prefix and course.number and code not in known_codes:
+                courses.append({
+                    "code": code,
+                    "label": f"{code} - {course.title}",
+                    "credits": course.credits or 0,
+                })
+
     # Combines major courses with required supporting courses
     courses.sort(key=lambda c: c["code"])
 
@@ -233,6 +263,11 @@ def index():
         degree_cfg = get_full_degree_config(selected_major)
 
         generic_hours = read_generic_hours(request.form, degree_cfg)
+
+        # Optional minor -- ignored if it's the major's own subject
+        minor_cfg = get_minor_config(request.form.get("minor"))
+        if minor_cfg and not minor_allowed_for_major(minor_cfg, major_prefixes(degree_cfg)):
+            minor_cfg = None
 
         try:
             target_semesters = int(
@@ -257,24 +292,47 @@ def index():
         # round trips instead of one.
         catalog = load_catalog_courses(degree_cfg["prefix"])
 
+        # With a minor, the plan is built from a copy of the major's config
+        # with the minor's courses and electives folded in; the major's own
+        # audit still uses the unmodified config.
+        planning_cfg = degree_cfg
+        planning_generic_hours = generic_hours
+        minor_audit = None
+        if minor_cfg:
+            minor_catalog = load_catalog_courses(minor_cfg["prefix"])
+            planning_cfg, minor_generic_hours = apply_minor_to_config(
+                degree_cfg, minor_cfg, completed_courses, minor_catalog
+            )
+            planning_generic_hours = {**generic_hours, **minor_generic_hours}
+            minor_audit = build_minor_audit(minor_cfg, completed_courses, minor_catalog)
+
+        # Courses that are on the plan only because of the minor; ones the
+        # major already requires (e.g. MATH 1920 for CS) keep their normal tag.
+        major_codes = {
+            code
+            for key in ("core_courses", "concentration_courses", "supporting_courses")
+            for code, _, _ in degree_cfg[key]
+        }
+        minor_only_codes = (minor_audit["course_codes"] - major_codes) if minor_audit else set()
+
         # Generates the plan, audits, and prerequisite warnings
         plan = generate_plan(
             completed_courses,
-            generic_hours,
+            planning_generic_hours,
             target_semesters,
             include_summer,
             start_season=start_season,
             start_year=start_year,
-            degree_cfg=degree_cfg,
+            degree_cfg=planning_cfg,
             catalog=catalog,
         )
 
         audit = build_audit(completed_courses, generic_hours, catalog, degree_cfg=degree_cfg)
 
-        prereq_warnings = validate_plan(plan, completed_courses, catalog, degree_cfg=degree_cfg)
+        prereq_warnings = validate_plan(plan, completed_courses, catalog, degree_cfg=planning_cfg)
 
         # Build the student-specific prerequisite tree
-        personal_nodes, personal_edges = build_personal_prereq_graph(catalog, completed_courses, plan, degree_cfg=degree_cfg)
+        personal_nodes, personal_edges = build_personal_prereq_graph(catalog, completed_courses, plan, degree_cfg=planning_cfg)
         personal_mermaid = render_personal_prereq_mermaid(personal_nodes, personal_edges)
 
         # Maps the course codes for full display
@@ -295,7 +353,7 @@ def index():
             for c in post_course_list
             if c.prefix and c.number
         ]
-        for code, hours, title in degree_cfg["supporting_courses"]:
+        for code, hours, title in planning_cfg["supporting_courses"]:
             post_courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
         course_map = {c["code"]: c for c in post_courses}
 
@@ -333,6 +391,7 @@ def index():
                     "code": item["code"],
                     "title": title,
                     "hours": credit_short(item["hours"]),
+                    "minor": item["code"] in minor_only_codes,
                 }
 
             if kind == "requirement":
@@ -342,6 +401,7 @@ def index():
                     "title": item["label"],
                     "hours": credit_short(item["hours"]),
                     "suggestion": item.get("suggestion"),
+                    "minor": item.get("id", "").startswith(MINOR_ELECTIVE_ID_PREFIX),
                 }
 
             return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
@@ -380,6 +440,7 @@ def index():
             warnings=warnings_display,
             personal_mermaid=personal_mermaid,
             degree_name=degree_cfg["name"],
+            minor_audit=minor_audit,
         )
 
     # Build degree list from DEGREE_CONFIGS (all have available=True now)
@@ -414,7 +475,11 @@ def index():
         default_year=date.today().year,
         saved_state=saved_state,
         degree_list=degree_list,
-        minors=AVAILABLE_MINORS,    
+        minors=[
+            {"key": key, "name": m["name"], "hours": m["total_hours"], "description": m["description"]}
+            for key, m in MINOR_CONFIGS.items()
+            if minor_allowed_for_major(m, display_prefixes)
+        ],
     )
 
 # Function that builds and displays the dependency graph

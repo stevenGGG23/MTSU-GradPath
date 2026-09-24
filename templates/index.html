@@ -36,24 +36,27 @@
             {% endfor %}
           </div>
         </div>
-<!-- Add this inside the main form in index.html, near the Major selection -->
-<div class="card shadow-sm mb-4 border-0 rounded-4">
-    <div class="card-body p-4">
-        <h5 class="fw-bold mb-3">Optional Minor</h5>
-        <label for="selected_minor" class="form-label text-muted small fw-semibold">Enhance your degree with a minor track</label>
-        <select class="form-select rounded-3 bg-light" name="selected_minor" id="selected_minor">
-            <option value="">-- No Minor Selected --</option>
-            {% if minors %}
-                {% for key, minor in minors.items() %}
-                    <option value="{{ key }}">{{ minor.name }} ({{ minor.total_credits_required }} hrs)</option>
-                {% endfor %}
-            {% endif %}
-        </select>
-        <div class="form-text mt-2 small text-muted">
-            Selecting a minor will automatically inject its required courses and electives into your generated schedule.
+        <!-- Optional minor: a single search field; picking one swaps it for a chip -->
+        {% if minors %}
+        <div class="minor-picker mb-4">
+          <label for="minor_input" class="minor-picker-label">Minor <span class="minor-picker-optional">(optional)</span></label>
+          <div class="minor-picker-body">
+            <div class="position-relative" id="minor_search">
+              <input id="minor_input" class="form-control form-control-sm" placeholder="Search minors, e.g. Mathematics" autocomplete="off">
+              <div id="minor_suggestions" class="autocomplete-list shadow-sm"></div>
+            </div>
+            <div class="minor-chip d-none" id="minor_chip">
+              <div class="minor-chip-text">
+                <span class="minor-chip-name" id="minor_chip_name"></span>
+                <span class="minor-chip-desc" id="minor_chip_desc"></span>
+              </div>
+              <button type="button" class="btn-close btn-sm" id="minor_remove" aria-label="Remove minor"></button>
+            </div>
+          </div>
+          <input type="hidden" name="minor" id="minor_field" value="">
         </div>
-    </div>
-</div>
+        {% endif %}
+
         <div class="accordion" id="plannerAccordion">
 
           <div class="accordion-item">
@@ -210,6 +213,10 @@ const suggestionsBox = document.getElementById('course_suggestions');
 const courseOptions = {{ courses | tojson | safe }};
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
+const minorOptions = {{ minors | tojson | safe }};
+const minorField = document.getElementById('minor_field');
+const minorInput = document.getElementById('minor_input');
+const minorSuggestions = document.getElementById('minor_suggestions');
 
 // Selections live in sessionStorage, which is scoped to this browser tab: they
 // survive switching majors and going to the plan page and back, but a new tab
@@ -240,6 +247,7 @@ function saveState() {
     start_year: document.getElementById('start_year').value,
     target_semesters: document.getElementById('target_semesters').value,
     include_summer: document.getElementById('include_summer').checked,
+    minor: minorField ? minorField.value : '',
   };
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -441,6 +449,65 @@ document.querySelectorAll('.requirement-hours-input').forEach(input => {
   updateFill();
 });
 
+// ── Minor search ──
+// A minor saved for a different major may not be offered here (e.g. a Math
+// minor for a Math major), so setMinor() ignores keys not in minorOptions.
+function setMinor(key) {
+  if (!minorField) return;
+  const minor = minorOptions.find(m => m.key === key);
+  minorField.value = minor ? minor.key : '';
+  document.getElementById('minor_search').classList.toggle('d-none', !!minor);
+  document.getElementById('minor_chip').classList.toggle('d-none', !minor);
+  if (minor) {
+    document.getElementById('minor_chip_name').textContent = `${minor.name} · ${minor.hours} cr hrs`;
+    document.getElementById('minor_chip_desc').textContent = minor.description;
+  }
+  saveState();
+}
+
+function showMinorSuggestions() {
+  const query = minorInput.value.trim().toLowerCase();
+  const matches = minorOptions.filter(m => m.name.toLowerCase().includes(query));
+  minorSuggestions.innerHTML = '';
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'autocomplete-empty';
+    empty.textContent = 'No minors match that search yet.';
+    minorSuggestions.appendChild(empty);
+  }
+  matches.forEach(minor => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
+    item.textContent = `${minor.name} (${minor.hours} cr hrs)`;
+    item.addEventListener('click', () => {
+      minorInput.value = '';
+      minorSuggestions.style.display = 'none';
+      setMinor(minor.key);
+    });
+    minorSuggestions.appendChild(item);
+  });
+  minorSuggestions.style.display = 'block';
+}
+
+if (minorInput) {
+  minorInput.addEventListener('focus', showMinorSuggestions);
+  minorInput.addEventListener('input', showMinorSuggestions);
+  minorInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      // Enter picks the first match instead of submitting the whole form
+      event.preventDefault();
+      const first = minorSuggestions.querySelector('.autocomplete-item');
+      if (first) first.click();
+    }
+  });
+  minorInput.addEventListener('blur', () => setTimeout(() => { minorSuggestions.style.display = 'none'; }, 150));
+  document.getElementById('minor_remove').addEventListener('click', () => {
+    setMinor('');
+    minorInput.focus();
+  });
+}
+
 function restoreState() {
   const saved = loadSaved();
   restoring = true;
@@ -462,6 +529,7 @@ function restoreState() {
   if (saved.start_year) document.getElementById('start_year').value = saved.start_year;
   if (saved.target_semesters) document.getElementById('target_semesters').value = saved.target_semesters;
   if (saved.include_summer !== undefined) document.getElementById('include_summer').checked = saved.include_summer;
+  if (saved.minor) setMinor(saved.minor);
 
   restoring = false;
   saveState();

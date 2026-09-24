@@ -78,6 +78,7 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 1. On the home page, click `Sync Catalog` to populate the database from MTSU's live catalog.
 2. Pick a major (CS, Biology, Math, Chemistry, Physics, Political and Global Affairs, Aerospace, or Construction Management).
+   Optionally search for a minor under the major grid (currently the Mathematics minor: MATH 1910, 1920, and 10 hours of MATH electives). Its courses are added to the plan, tagged `MIN`, and tracked in their own progress bar; minor hours come out of free electives rather than adding to the 120.
 3. Check off completed courses (grouped by level); use search to add supporting courses.
 4. Enter completed hours for non-major buckets (science sequences, True Blue Core, general electives, required minors, etc.).
 5. Pick a starting term/year, number of terms to plan, and whether to include summers, then submit.
@@ -116,6 +117,7 @@ mtsugradpath/
 ├── scraper.py         Catalog widget API client + DB sync (sync_courses(prefix))
 ├── degree.py          Requirement registry (DEGREE_REGISTRY) + audit logic
 ├── degree_configs.py  Per-major requirement configs (DEGREE_CONFIGS: cs, biology, math, chemistry, physics, political_science, aerospace, construction_mgmt)
+├── minors.py          Optional minor configs (MINOR_CONFIGS: math) + minor audit
 └── planner.py         Term scheduling (generate_plan) + validation (validate_plan)
 templates/, static/    Jinja templates, CSS/assets
 tests/                 pytest suite
