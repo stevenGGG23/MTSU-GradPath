@@ -116,11 +116,11 @@ def test_second_major_row_opens_filled_when_chosen():
     assert 'id="second_add" title="Add a second major" aria-label="Add a second major" hidden' in html
 
 
-def test_remaining_list_is_collapsed_after_a_few_items():
+def test_remaining_list_shows_every_item():
     html = app.test_client().post("/", data={"major": "cs", "target_semesters": "1"}).get_data(as_text=True)
-    assert "term-card-remaining is-collapsed" in html
-    assert "plan-item-extra" in html
-    assert "remaining-toggle" in html
+    assert "term-card-remaining" in html
+    assert "is-collapsed" not in html
+    assert "remaining-toggle" not in html
 
 
 def test_plan_page_offers_pdf_download_with_print_header():

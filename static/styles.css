@@ -1014,30 +1014,23 @@ footer a {
     }
 }
 
-/* ── Planner layout: form on the left, sticky course summary on the right ── */
+/* ── Planner: completed-courses summary under the steps ── */
 
-.planner-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 1.5rem;
-    align-items: start;
+.completed-box {
+    padding: 1.25rem 1.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #f8fafc;
 }
 
-.side-card {
-    position: sticky;
-    top: 1.25rem;
-    padding: 1.5rem;
-    border-radius: 20px;
-}
-
-.side-card #selected-courses {
-    max-height: 55vh;
+.completed-box #selected-courses {
+    max-height: 40vh;
     overflow-y: auto;
     align-content: flex-start;
 }
 
-.side-card #selected-courses:empty::before {
-    content: "Check off courses on the left, or search for them in step 2.";
+.completed-box #selected-courses:empty::before {
+    content: "Check off courses in step 1, or search for them in step 2.";
     font-size: 0.85rem;
     color: #64748b;
 }
@@ -1059,16 +1052,6 @@ footer a {
     padding: 0;
     font-size: 0.85rem;
     text-decoration: none;
-}
-
-@media (max-width: 991.98px) {
-    .planner-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .side-card {
-        position: static;
-    }
 }
 
 /* ── Plan page: second major / minors progress, tracked apart from the 120 ── */
@@ -1133,37 +1116,6 @@ footer a {
     font-size: 0.78rem;
     color: #64748b;
     margin-top: 0.15rem;
-}
-
-/* ── "Remaining after N terms": full width, first few items, then expand ── */
-
-.term-card-remaining {
-    grid-column: 1 / -1;
-}
-
-.term-card-remaining .plan-item-table {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-}
-
-.term-card-remaining.is-collapsed .plan-item-extra {
-    display: none;
-}
-
-.remaining-toggle {
-    display: block;
-    width: 100%;
-    padding: 0.6rem;
-    border: none;
-    border-top: 1px solid #e2e8f0;
-    background: transparent;
-    color: #2563eb;
-    font-size: 0.88rem;
-    font-weight: 500;
-}
-
-.remaining-toggle:hover {
-    background: #eff6ff;
 }
 
 .audit-item-applied {
@@ -1292,6 +1244,91 @@ footer a {
     font-size: 1.25rem;
 }
 
+.gpa-compare {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1.15fr;
+    gap: 0.3rem;
+    align-items: stretch;
+}
+
+.gpa-stat {
+    padding: 0.5rem 0.4rem;
+    border-radius: 10px;
+    background: #ffffff;
+    text-align: center;
+}
+
+.gpa-stat-label {
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.gpa-stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #0b1733;
+    line-height: 1.25;
+}
+
+.gpa-stat-sub {
+    font-size: 0.72rem;
+    color: #64748b;
+}
+
+.gpa-stat-main {
+    border: 2px solid #0b1733;
+}
+
+.gpa-stat-main .gpa-stat-value {
+    font-size: 1.55rem;
+}
+
+.gpa-stat-up {
+    border-color: #15803d;
+}
+
+.gpa-stat-up .gpa-stat-value,
+.gpa-stat-up .gpa-stat-sub {
+    color: #15803d;
+}
+
+.gpa-stat-down {
+    border-color: #b91c1c;
+}
+
+.gpa-stat-down .gpa-stat-value,
+.gpa-stat-down .gpa-stat-sub {
+    color: #b91c1c;
+}
+
+.gpa-arrow {
+    align-self: center;
+    color: #94a3b8;
+    font-size: 0.9rem;
+}
+
+.gpa-sentence {
+    margin-top: 0.6rem;
+}
+
+.gpa-range {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #e2e8f0;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.gpa-range strong {
+    color: #0b1733;
+}
+
 .gpa-footnote {
     margin-top: 1.25rem;
     font-size: 0.72rem;
@@ -1322,7 +1359,6 @@ footer a {
     .gpa-tab,
     .gpa-panel,
     .plan-actions,
-    .remaining-toggle,
     .flash-messages,
     .accordion-button::after {
         display: none !important;
@@ -1361,10 +1397,6 @@ footer a {
         height: auto !important;
     }
 
-    .term-card-remaining.is-collapsed .plan-item-extra {
-        display: flex !important;
-    }
-
     .progress-ring,
     .progress-summary {
         box-shadow: none;
@@ -1379,10 +1411,6 @@ footer a {
     }
 
     .term-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .term-card-remaining .plan-item-table {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
