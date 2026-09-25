@@ -115,34 +115,79 @@
   const num = id => parseFloat($(id).value);
   const fmt = value => value.toFixed(2);
 
+  // Cumulative GPA after the listed courses, with every course graded `pick(row)`
+  function project(current, hours, rows, pick) {
+    let points = hours ? current * hours : 0;
+    let totalHours = hours;
+    rows.forEach(row => {
+      const grade = POINTS[pick(row)];
+      if (row.old) {
+        // A retake swaps the old grade's points out; the hours stay the same
+        points += (grade - POINTS[row.old]) * row.hrs;
+      } else {
+        points += grade * row.hrs;
+        totalHours += row.hrs;
+      }
+    });
+    return { gpa: totalHours ? Math.min(Math.max(points / totalHours, 0), 4) : 0, hours: totalHours };
+  }
+
+  function stat(label, value, sub, extra = '') {
+    return `<div class="gpa-stat${extra}"><div class="gpa-stat-label">${label}</div>
+      <div class="gpa-stat-value">${value}</div><div class="gpa-stat-sub">${sub}</div></div>`;
+  }
+
   function whatIf() {
     const current = num('gpa_current');
     const hours = num('gpa_hours') || 0;
-    if (hours && !(current >= 0 && current <= 4)) return 'Enter your current GPA to see the result.';
-    let points = hours ? current * hours : 0;
-    let totalHours = hours;
-    let added = 0;
-    [...rowsBox.children].forEach(row => {
-      const hrs = parseFloat(row.querySelector('.gpa-hrs').value) || 0;
-      const grade = POINTS[row.querySelector('.gpa-grade').value];
-      const old = row.querySelector('.gpa-old').value;
-      if (!hrs) return;
-      if (old) {
-        // A retake swaps the old grade's points out; the hours stay the same
-        points += (grade - POINTS[old]) * hrs;
-      } else {
-        points += grade * hrs;
-        totalHours += hrs;
-        added += hrs;
-      }
-    });
-    if (!totalHours) return 'Add a course to see a GPA.';
-    const gpa = Math.min(Math.max(points / totalHours, 0), 4);
-    const change = hours ? gpa - current : null;
-    const delta = change === null ? '' :
-      ` <span class="${change >= 0 ? 'gpa-up' : 'gpa-down'}">${change >= 0 ? '+' : ''}${fmt(change)}</span>`;
-    return `<div class="gpa-big">${fmt(gpa)}${delta}</div>
-      <div>Projected GPA over ${totalHours} hours${added ? ` (${added} new)` : ''}.</div>`;
+    const hasCurrent = hours > 0 && current >= 0 && current <= 4;
+    if (hours && !hasCurrent) return 'Enter your current GPA to see the result.';
+
+    const rows = [...rowsBox.children].map(row => ({
+      hrs: parseFloat(row.querySelector('.gpa-hrs').value) || 0,
+      grade: row.querySelector('.gpa-grade').value,
+      old: row.querySelector('.gpa-old').value,
+    })).filter(row => row.hrs > 0);
+
+    const now = hasCurrent
+      ? stat('Right now', fmt(current), `${hours} hrs`)
+      : stat('Right now', '&mdash;', 'enter above');
+    if (!rows.length) {
+      return `<div class="gpa-compare">${now}</div><div class="gpa-sentence">Add a course to see where your GPA lands.</div>`;
+    }
+
+    // Term GPA: just these courses at the grades picked, retakes included
+    const termHours = rows.reduce((sum, row) => sum + row.hrs, 0);
+    const termGpa = rows.reduce((sum, row) => sum + POINTS[row.grade] * row.hrs, 0) / termHours;
+    const after = project(hasCurrent ? current : 0, hasCurrent ? hours : 0, rows, row => row.grade);
+    const change = hasCurrent ? after.gpa - current : null;
+    const trend = change === null ? '' : change > 0.0005 ? ' gpa-stat-up' : change < -0.0005 ? ' gpa-stat-down' : '';
+    const delta = change === null ? `${after.hours} hrs`
+      : `${change >= 0 ? '+' : ''}${fmt(change)} &middot; ${after.hours} hrs`;
+
+    const retakes = rows.filter(row => row.old).length;
+    const sentence = hasCurrent
+      ? `If you get these grades in ${termHours} hours${retakes ? ` (${retakes} retake${retakes > 1 ? 's' : ''})` : ''}, your GPA goes from <strong>${fmt(current)}</strong> to <strong>${fmt(after.gpa)}</strong>.`
+      : `These grades alone make a <strong>${fmt(after.gpa)}</strong> GPA. Enter your current GPA above to see your overall.`;
+
+    let range = '';
+    if (hasCurrent) {
+      const best = project(current, hours, rows, () => 'A').gpa;
+      const allB = project(current, hours, rows, () => 'B').gpa;
+      const allC = project(current, hours, rows, () => 'C').gpa;
+      range = `<div class="gpa-range">
+        <span>All A's <strong>${fmt(best)}</strong></span>
+        <span>All B's <strong>${fmt(allB)}</strong></span>
+        <span>All C's <strong>${fmt(allC)}</strong></span></div>`;
+    }
+
+    return `<div class="gpa-compare">${now}
+        <div class="gpa-arrow" aria-hidden="true">&rarr;</div>
+        ${stat('These courses', fmt(termGpa), `${termHours} hrs`)}
+        <div class="gpa-arrow" aria-hidden="true">&rarr;</div>
+        ${stat('New GPA', fmt(after.gpa), delta, ' gpa-stat-main' + trend)}
+      </div>
+      <div class="gpa-sentence">${sentence}</div>${range}`;
   }
 
   function target() {
