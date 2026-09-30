@@ -102,6 +102,22 @@
                       <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
                     </label>
+                    <select class="form-select form-select-sm course-grade d-none"
+        data-code="{{ course.code }}"
+        aria-label="Grade for {{ course.code }}">
+    <option value="">Grade</option>
+    <option value="A">A</option>
+    <option value="A-">A-</option>
+    <option value="B+">B+</option>
+    <option value="B">B</option>
+    <option value="B-">B-</option>
+    <option value="C+">C+</option>
+    <option value="C">C</option>
+    <option value="C-">C-</option>
+    <option value="D+">D+</option>
+    <option value="D">D</option>
+    <option value="F">F</option>
+</select>
                   </div>
                   {% endfor %}
                 </div>
@@ -212,6 +228,7 @@
         </div>
         <div class="d-flex flex-wrap gap-2" id="selected-courses"></div>
         <textarea name="completed_courses" id="completed_courses" class="d-none"></textarea>
+        <input type="hidden" name="course_grades" id="course_grades">
       </div>
 
       <div class="mt-4">
@@ -226,11 +243,13 @@ const addCourseButton = document.getElementById('add-course');
 const courseInput = document.getElementById('course_input');
 const selectedCourses = document.getElementById('selected-courses');
 const completedCoursesField = document.getElementById('completed_courses');
+const courseGradesField = document.getElementById('course_grades');
 const plannerForm = document.getElementById('planner-form');
 const clearCoursesButton = document.getElementById('clear-courses');
 const suggestionsBox = document.getElementById('course_suggestions');
 const courseOptions = {{ courses | tojson | safe }};
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
+const courseGradeSelects = document.querySelectorAll('.course-grade');
 const csSelectedCount = document.getElementById('cs-selected-count');
 const majorOptions = {{ majors | tojson | safe }};
 const minorOptions = {{ minors | tojson | safe }};
@@ -258,10 +277,17 @@ function saveState() {
   document.querySelectorAll('.requirement-hours-input').forEach(input => {
     hours[input.name] = input.value;
   });
+    const grades = {};
+  courseGradeSelects.forEach(select => {
+    if (select.value) {
+      grades[select.dataset.code] = select.value;
+    }
+  });
   const state = {
     major: currentMajor,
     second_major: currentSecond,
     courses: Array.from(selectedCourses.querySelectorAll('.badge')).map(b => b.dataset.course),
+    grades: grades,
     hours: { ...(loadSaved().hours || {}), ...hours },
     start_season: document.getElementById('start_season').value,
     start_year: document.getElementById('start_year').value,
@@ -297,13 +323,18 @@ function normalizeCourse(code) {
 function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
+
+  const grades = {};
+  courseGradeSelects.forEach(select => {
+    if (select.value && values.includes(select.dataset.code)) {
+      grades[select.dataset.code] = select.value;
+    }
+  });
+
+  courseGradesField.value = JSON.stringify(grades);
+
   document.getElementById('side-count').textContent = values.length;
   saveState();
-}
-
-function updateCsSelectedCount() {
-  const checked = document.querySelectorAll('.cs-course-checkbox:checked').length;
-  csSelectedCount.textContent = `${checked} selected`;
 }
 
 function syncCheckboxForCode(code, checked) {
@@ -311,6 +342,8 @@ function syncCheckboxForCode(code, checked) {
   if (box) {
     box.checked = checked;
     box.closest('.cs-course-check').classList.toggle('is-checked', checked);
+    const gradeSelect = box.closest('.cs-course-check').querySelector('.course-grade');
+if (gradeSelect) gradeSelect.classList.toggle('d-none', !checked);
     updateCsSelectedCount();
   }
 }
@@ -772,6 +805,14 @@ function restoreState() {
   (saved.courses || []).forEach(code => {
     const match = courseOptions.find(c => c.code === code);
     addCourse(code, match ? match.label : null);
+  });
+
+  courseGradeSelects.forEach(select => {
+    const savedGrade = (saved.grades || {})[select.dataset.code];
+
+    if (savedGrade) {
+      select.value = savedGrade;
+    }
   });
 
   document.querySelectorAll('.requirement-hours-input').forEach(input => {
