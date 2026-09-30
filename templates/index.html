@@ -336,7 +336,13 @@ function updateHiddenField() {
   document.getElementById('side-count').textContent = values.length;
   saveState();
 }
+function updateCsSelectedCount() {
+  const count = Array.from(csCourseCheckboxes)
+    .filter(box => box.checked)
+    .length;
 
+  csSelectedCount.textContent = `${count} selected`;
+}
 function syncCheckboxForCode(code, checked) {
   const box = document.querySelector(`.cs-course-checkbox[data-code="${code}"]`);
   if (box) {
@@ -479,6 +485,10 @@ csCourseCheckboxes.forEach(box => {
   box.addEventListener('change', () => {
     const code = box.dataset.code;
     box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
+    const gradeSelect = box.closest('.cs-course-check').querySelector('.course-grade');
+if (gradeSelect) {
+  gradeSelect.classList.toggle('d-none', !box.checked);
+}
     updateCsSelectedCount();
     if (box.checked) {
       addCourse(code, box.dataset.label);
@@ -486,7 +496,13 @@ csCourseCheckboxes.forEach(box => {
       removeCourse(code);
     }
 
-    updateCsSelectedCount();
+        updateCsSelectedCount();
+  });
+});
+
+courseGradeSelects.forEach(select => {
+  select.addEventListener('change', () => {
+    updateHiddenField();
   });
 });
 

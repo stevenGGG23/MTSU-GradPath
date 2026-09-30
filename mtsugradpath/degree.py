@@ -520,12 +520,22 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, course_
     if conc_elective_hours > 0:
         elective_codes = sorted(
             code for code in completed_courses
-            if _is_upper_division(code, prefix, upper_div_min) and code not in required_codes
+            if (
+                _is_upper_division(code, prefix, upper_div_min)
+                and code not in required_codes
+                and course_requirement_met(
+                    code,
+                    completed_courses,
+                    course_grades,
+                    minimum="C",
+                )
+            )
         )
         elective_hours_done = min(
             sum((_course_hours(code, catalog)) for code in elective_codes),
             conc_elective_hours,
         )
+
         conc_items.append({
             "label": f"{prefix} upper-division electives ({len(elective_codes)} course(s) applied)",
             "hours": conc_elective_hours,
