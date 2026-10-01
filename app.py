@@ -1,4 +1,5 @@
 import os
+import json
 import threading
 import time
 from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
@@ -291,6 +292,38 @@ def index():
             if code.strip()
         }
 
+        # Read the grades submitted for completed courses
+        try:
+            submitted_grades = json.loads(
+                request.form.get("course_grades", "{}")
+            )
+        except (TypeError, json.JSONDecodeError):
+            submitted_grades = {}
+
+        if not isinstance(submitted_grades, dict):
+            submitted_grades = {}
+
+        valid_grades = {
+            "A", "A-",
+            "B+", "B", "B-",
+            "C+", "C", "C-",
+            "D+", "D",
+            "F",
+        }
+
+        course_grades = {
+            code.strip().upper(): grade.strip().upper()
+            for code, grade in submitted_grades.items()
+            if (
+                isinstance(code, str)
+                and isinstance(grade, str)
+                and code.strip().upper() in completed_courses
+                and grade.strip().upper() in valid_grades
+            )
+        }
+
+        # Read selected major(s) and get the full degree configs
+
         # Read selected major(s) and get the full degree configs
         selected_major = request.form.get("major", "cs")
         degree_cfg = get_full_degree_config(selected_major)
@@ -383,7 +416,13 @@ def index():
             catalog=catalog,
         )
 
-        audit = build_audit(completed_courses, generic_hours, catalog, degree_cfg=degree_cfg)
+        audit = build_audit(
+            completed_courses,
+            generic_hours,
+            catalog,
+            degree_cfg=degree_cfg,
+            course_grades=course_grades,
+    )
 
         prereq_warnings = validate_plan(plan, completed_courses, catalog, degree_cfg=planning_cfg)
 

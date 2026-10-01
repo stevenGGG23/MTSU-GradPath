@@ -9,6 +9,46 @@ doesn't need to be exact, just give an honest picture of what's left.
 TOTAL_PROGRAM_HOURS = 120
 UPPER_DIVISION_MIN = 3000
 
+GRADE_RANK = {
+    "F": 0,
+    "D": 1,
+    "D+": 2,
+    "C-": 3,
+    "C": 4,
+    "C+": 5,
+    "B-": 6,
+    "B": 7,
+    "B+": 8,
+    "A-": 9,
+    "A": 10,
+}
+
+
+def meets_minimum_grade(grade, minimum="C"):
+    if not grade:
+        return False
+
+    grade = grade.strip().upper()
+    minimum = minimum.strip().upper()
+
+    if grade not in GRADE_RANK or minimum not in GRADE_RANK:
+        return False
+
+    return GRADE_RANK[grade] >= GRADE_RANK[minimum]
+
+
+def course_requirement_met(
+    code,
+    completed_courses,
+    course_grades,
+    minimum="C",
+):
+    if code not in completed_courses:
+        return False
+
+    grade = course_grades.get(code)
+
+    return meets_minimum_grade(grade, minimum)
 # Requires CSCI courses
 CS_CORE_COURSES = [
     ("CSCI 1010", 1, "Computer Science Colloquium"),
@@ -214,13 +254,21 @@ def generic_remaining(generic_hours):
 
 # Function that builds the complete degree audit from the completed hours
 # Accepts an optional degree_cfg for multi-major support.
-def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None):
+
+def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None, course_grades=None):
+    course_grades = course_grades or {}
+
     # When a degree_cfg is provided, use the generic multi-major implementation
     if degree_cfg is not None:
-        return _build_audit_generic(completed_courses, generic_hours, catalog, degree_cfg)
+        return _build_audit_generic(
+            completed_courses,
+            generic_hours,
+            catalog,
+            degree_cfg,
+            course_grades=course_grades,
+        )
 
     completed_courses = {c.strip().upper() for c in completed_courses}
-
     generic_hours = generic_hours or {}
     catalog = catalog or {}
     groups = []
@@ -266,8 +314,17 @@ def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None)
     # are put towards the elective requirement
     elective_codes = sorted(
         code for code in completed_courses
-        if is_upper_division_csci(code) and code not in required_codes
+        if (
+        _is_upper_division(code, prefix, upper_div_min)
+        and code not in required_codes
+        and course_requirement_met(
+            code,
+            completed_courses,
+            course_grades,
+            minimum="C",
+        )
     )
+)
 
     elective_hours_done = min(
         sum(_course_hours(code, catalog) for code in elective_codes),
@@ -400,8 +457,10 @@ def _is_upper_division(code: str, prefix: str, min_num: int) -> bool:
     return int(parts[1]) >= min_num
 
 
-def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
+def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, course_grades=None):
     """Generic build_audit implementation for any degree config."""
+    course_grades = course_grades or {}
+
     completed_courses = {c.strip().upper() for c in completed_courses}
     generic_hours = generic_hours or {}
     catalog = catalog or {}
@@ -420,8 +479,14 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
     # Core section
     core_hours_done = 0
     core_items = []
+
     for code, hours, title in core_courses:
-        done = code in completed_courses
+        done = course_requirement_met(
+            code,
+            completed_courses,
+            course_grades,
+            minimum="C",
+        )
         if done:
             core_hours_done += hours
         core_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
@@ -441,7 +506,13 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
     conc_items = []
     conc_hours_done = 0
     for code, hours, title in conc_courses:
-        done = code in completed_courses
+        done = course_requirement_met(
+            code,
+            completed_courses,
+            course_grades,
+            minimum="C",
+        )
+
         if done:
             conc_hours_done += hours
         conc_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
@@ -449,12 +520,22 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
     if conc_elective_hours > 0:
         elective_codes = sorted(
             code for code in completed_courses
-            if _is_upper_division(code, prefix, upper_div_min) and code not in required_codes
+            if (
+                _is_upper_division(code, prefix, upper_div_min)
+                and code not in required_codes
+                and course_requirement_met(
+                    code,
+                    completed_courses,
+                    course_grades,
+                    minimum="C",
+                )
+            )
         )
         elective_hours_done = min(
             sum((_course_hours(code, catalog)) for code in elective_codes),
             conc_elective_hours,
         )
+
         conc_items.append({
             "label": f"{prefix} upper-division electives ({len(elective_codes)} course(s) applied)",
             "hours": conc_elective_hours,
@@ -479,10 +560,16 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
     sup_items = []
     sup_hours_done = 0
     for code, hours, title in supporting_courses_list:
-        done = code in completed_courses
+        done = course_requirement_met(
+            code,
+            completed_courses,
+            course_grades,
+            minimum="C",
+        )
         if done:
             sup_hours_done += hours
         sup_items.append({"label": f"{code} - {title}", "hours": hours, "done": done})
+
     for gid, label, hours, suggestions in supporting_generic:
         entered = clamp_hours(generic_hours.get(gid, 0), hours)
         sup_hours_done += entered
