@@ -187,7 +187,3 @@ Per the CSCI 4700/5700 Statement of Scope (due 10/01/2026):
 **Data/Scraper:** Abigaid Ortiz, Will Reilly, Zackary Butler
 **Infrastructure/Features:** Kevin Yassa, Mina Eshak, Brett Wilt
 **Hosting:** Steven Gobran
-
-## License
-
-Developed for educational purposes as part of a university Computer Science course project.
