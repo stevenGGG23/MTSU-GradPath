@@ -121,3 +121,13 @@ class Prerequisite(Base):
         "Course", 
         back_populates="prerequisites"
     )
+
+class CourseEquivalency(Base):
+    """Maps an old or alternate course code to the current equivalent course."""
+
+    __tablename__ = "course_equivalencies"
+
+    id = Column(Integer, primary_key=True)
+    old_course_code = Column(String(32), nullable=False)
+    new_course_code = Column(String(32), nullable=False)
+    notes = Column(Text)

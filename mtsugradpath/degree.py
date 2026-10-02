@@ -212,14 +212,39 @@ def generic_remaining(generic_hours):
 
     return remaining
 
+    # Function to add current course codes when a completed course has an equivalent.
+def apply_course_equivalencies(completed_courses, equivalencies):
+    expanded_courses = set(completed_courses)
+
+    for equivalency in equivalencies:
+        old_code = equivalency.old_course_code.strip().upper()
+        new_code = equivalency.new_course_code.strip().upper()
+
+        if old_code in expanded_courses:
+            expanded_courses.add(new_code)
+
+    return expanded_courses
+
 # Function that builds the complete degree audit from the completed hours
 # Accepts an optional degree_cfg for multi-major support.
-def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None):
+def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None, equivalencies=None):
     # When a degree_cfg is provided, use the generic multi-major implementation
     if degree_cfg is not None:
-        return _build_audit_generic(completed_courses, generic_hours, catalog, degree_cfg)
+        return _build_audit_generic(
+            completed_courses,
+            generic_hours,
+            catalog,
+            degree_cfg,
+            equivalencies=equivalencies
+        )
 
     completed_courses = {c.strip().upper() for c in completed_courses}
+
+    if equivalencies:
+        completed_courses = apply_course_equivalencies(
+            completed_courses,
+            equivalencies
+        )
 
     generic_hours = generic_hours or {}
     catalog = catalog or {}
@@ -400,9 +425,15 @@ def _is_upper_division(code: str, prefix: str, min_num: int) -> bool:
     return int(parts[1]) >= min_num
 
 
-def _build_audit_generic(completed_courses, generic_hours, catalog, cfg):
+def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, equivalencies=None):
     """Generic build_audit implementation for any degree config."""
     completed_courses = {c.strip().upper() for c in completed_courses}
+
+    if equivalencies:
+        completed_courses = apply_course_equivalencies(
+        completed_courses,
+        equivalencies
+    )
     generic_hours = generic_hours or {}
     catalog = catalog or {}
     groups = []

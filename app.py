@@ -44,7 +44,7 @@ from mtsugradpath.double_major import (
     config_course_codes,
 )
 
-from mtsugradpath.models import Course, SyncStatus
+from mtsugradpath.models import Course, SyncStatus, CourseEquivalency
 from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
@@ -383,7 +383,16 @@ def index():
             catalog=catalog,
         )
 
-        audit = build_audit(completed_courses, generic_hours, catalog, degree_cfg=degree_cfg)
+        with SessionLocal() as db_session:
+            equivalencies = db_session.query(CourseEquivalency).all()
+
+        audit = build_audit(
+            completed_courses,
+            generic_hours,
+            catalog,
+            degree_cfg=degree_cfg,
+            equivalencies=equivalencies
+        )
 
         prereq_warnings = validate_plan(plan, completed_courses, catalog, degree_cfg=planning_cfg)
 
