@@ -904,13 +904,15 @@ footer a {
 }
 
 .program-menu-empty,
-.program-menu-more {
+.program-menu-more,
+.autocomplete-more {
     padding: 0.6rem 0.65rem;
     font-size: 0.8rem;
     color: #64748b;
 }
 
-.program-menu-more {
+.program-menu-more,
+.autocomplete-more {
     border-top: 1px solid #f1f5f9;
 }
 

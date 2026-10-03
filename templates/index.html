@@ -323,7 +323,7 @@ function setSuggestions(matches) {
   }
 
   suggestionsBox.style.display = 'block';
-  matches.slice(0, 50).forEach(match => {
+  matches.forEach(match => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';

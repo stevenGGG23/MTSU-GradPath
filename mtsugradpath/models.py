@@ -66,6 +66,17 @@ class Course(Base):
     )
 
 
+class CatalogCourseSummary(Base):
+    """Lightweight catalog entry used to search courses outside planned majors."""
+    __tablename__ = "catalog_course_summaries"
+
+    catalog_id = Column(Integer, primary_key=True)
+    course_id = Column(Integer, primary_key=True)
+    prefix = Column(String(16), nullable=False)
+    number = Column(String(16), nullable=False)
+    title = Column(String(256), nullable=False)
+
+
 class CourseType(Base):
     """Represents a catagory type assigned to a course"""
     __tablename__ = "course_types"
