@@ -17,7 +17,7 @@ from .config import (
     PROGRAM_PREFIX,
 )
 from .db import SessionLocal
-from .models import Course, CourseType, Prerequisite
+from .models import CatalogCourseSummary, Course, CourseType, Prerequisite
 
 PAGE_SIZE = 100  # Acalog widget API caps page-size at 100
 
@@ -379,6 +379,57 @@ def _db_course_count(prefix=None):
         return 0
 
 
+def sync_course_search_index(force=False):
+    """Persist searchable code/title summaries for every configured catalog."""
+    if not force:
+        with SessionLocal() as session:
+            indexed_catalogs = {
+                catalog_id
+                for (catalog_id,) in session.query(CatalogCourseSummary.catalog_id)
+                .filter(CatalogCourseSummary.catalog_id.in_(CATALOG_IDS))
+                .distinct()
+                .all()
+            }
+            indexed_count = (
+                session.query(CatalogCourseSummary)
+                .filter(CatalogCourseSummary.catalog_id.in_(CATALOG_IDS))
+                .count()
+            )
+        if set(CATALOG_IDS).issubset(indexed_catalogs) and indexed_count:
+            return -indexed_count
+
+    summaries = {}
+    for catalog_id in CATALOG_IDS:
+        for brief in fetch_all_courses(catalog_id):
+            raw_title = (brief.get("title") or "").replace("\u00a0", " ").strip()
+            match = _SUMMARY_TITLE_RE.match(raw_title)
+            course_id = brief.get("id")
+            if not match or course_id is None:
+                continue
+
+            prefix, number, title = match.groups()
+            summary = CatalogCourseSummary(
+                catalog_id=brief.get("catalog-id") or catalog_id,
+                course_id=course_id,
+                prefix=prefix.upper(),
+                number=number,
+                title=title.strip(),
+            )
+            summaries[(summary.catalog_id, summary.course_id)] = summary
+
+    if not summaries:
+        raise RuntimeError("Catalog search index sync returned no course summaries")
+
+    with SessionLocal() as session:
+        session.query(CatalogCourseSummary).filter(
+            CatalogCourseSummary.catalog_id.in_(CATALOG_IDS)
+        ).delete(synchronize_session=False)
+        session.add_all(summaries.values())
+        session.commit()
+
+    return len(summaries)
+
+
 # ─── HTML scraper (fallback when widget API returns 401) ─────────────────────
 
 # Acalog's content.php with expand=1 returns an HTML page where each course
@@ -404,6 +455,10 @@ _HTML_COURSE_URL = (
 # Regex: "CSCI 1170 - Computer Science I (4 credit hours)"
 _TITLE_RE = re.compile(
     r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+?)(?:\s*\((\d+(?:\.\d+)?)\s*credit hours?\))?$",
+    re.IGNORECASE,
+)
+_SUMMARY_TITLE_RE = re.compile(
+    r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+)$",
     re.IGNORECASE,
 )
 

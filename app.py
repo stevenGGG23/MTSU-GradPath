@@ -44,7 +44,7 @@ from mtsugradpath.double_major import (
     config_course_codes,
 )
 
-from mtsugradpath.models import Course, SyncStatus, CourseEquivalency
+from mtsugradpath.models import CatalogCourseSummary, Course, SyncStatus, CourseEquivalency
 from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
@@ -57,7 +57,7 @@ from mtsugradpath.planner import (
     render_personal_prereq_mermaid,
 )
 
-from mtsugradpath.scraper import sync_courses
+from mtsugradpath.scraper import sync_course_search_index, sync_courses
 from datetime import date
 
 # Create the Flask application and its databases
@@ -228,6 +228,21 @@ def index():
             .order_by(Course.prefix, Course.number)
             .all()
         )
+        searchable_course_rows = (
+            db_session.query(Course)
+            .filter(Course.prefix.isnot(None), Course.number.isnot(None))
+            .order_by(Course.prefix, Course.number)
+            .all()
+        )
+        catalog_summaries = (
+            db_session.query(CatalogCourseSummary)
+            .order_by(
+                CatalogCourseSummary.prefix,
+                CatalogCourseSummary.number,
+                CatalogCourseSummary.catalog_id,
+            )
+            .all()
+        )
 
         major_courses = [
             {
@@ -247,39 +262,33 @@ def index():
 
         major_courses.sort(key=lambda c: (c["group"], c["level"], c["code"]))
 
-    courses = list(major_courses)
+    # The checklist stays major-scoped; search spans the full catalog index.
+    courses_by_code = {}
+    for course in searchable_course_rows:
+        code = f"{course.prefix} {course.number}"
+        courses_by_code[code] = {
+            "code": code,
+            "label": f"{code} - {course.title or ''}".rstrip(),
+            "credits": course.credits or 0,
+        }
 
-    known_codes = {c["code"] for c in courses}
+    for summary in catalog_summaries:
+        code = f"{summary.prefix} {summary.number}"
+        existing = courses_by_code.get(code, {})
+        courses_by_code[code] = {
+            "code": code,
+            "label": f"{code} - {summary.title}",
+            "credits": existing.get("credits", 0),
+        }
+
+    # Keep configured supporting courses searchable even before a catalog sync.
     for code, hours, title in form_cfg["supporting_courses"]:
-        if code not in known_codes:
-            courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
-            known_codes.add(code)
+        courses_by_code.setdefault(
+            code,
+            {"code": code, "label": f"{code} - {title}", "credits": hours},
+        )
 
-    # Minors are available to any major, so their subject's courses are added
-    # to the course search -- e.g. a CS student with a Math minor can add
-    # MATH 2010 as completed. Minor subjects the major already covers are
-    # skipped since those courses are listed above.
-    minor_prefixes = sorted({m["prefix"] for m in MINOR_CONFIGS.values()} - set(display_prefixes))
-    if minor_prefixes:
-        known_codes = {c["code"] for c in courses}
-        with SessionLocal() as db_session:
-            minor_course_rows = (
-                db_session.query(Course)
-                .filter(Course.prefix.in_(minor_prefixes))
-                .order_by(Course.prefix, Course.number)
-                .all()
-            )
-        for course in minor_course_rows:
-            code = f"{course.prefix} {course.number}"
-            if course.prefix and course.number and code not in known_codes:
-                courses.append({
-                    "code": code,
-                    "label": f"{code} - {course.title}",
-                    "credits": course.credits or 0,
-                })
-
-    # Combines major courses with required supporting courses
-    courses.sort(key=lambda c: c["code"])
+    courses = sorted(courses_by_code.values(), key=lambda course: course["code"])
 
     if request.method == "POST":
         completed_text = request.form.get("completed_courses", "")
@@ -593,6 +602,12 @@ def _run_sync_background(force=False):
     cached = 0  # courses already in DB (no network call)
     errors = []
     try:
+        try:
+            sync_course_search_index(force=force)
+        except Exception as exc:
+            errors.append(f"Course search index: {str(exc)[:120]}")
+            _set_sync_state(errors=errors[:])
+
         prefixes = [p for cfg in DEGREE_CONFIGS.values() for p in major_prefixes(cfg)]
         for prefix in prefixes:
             try:

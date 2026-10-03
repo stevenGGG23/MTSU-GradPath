@@ -71,6 +71,7 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 | `WEB_CONCURRENCY` | `3` | Gunicorn worker count (set via Render env vars — see `Procfile`) |
 
 `/sync` syncs all 8 configured majors (CSCI, BIOL, MATH, CHEM, PHYS, PS, AERO, and CMT + CCM for Construction Management) in one pass, regardless of `MTSU_PROGRAM_PREFIX`.
+It also indexes course codes and titles from every configured catalog ID for the planner's "Add other completed courses" search. Detailed credits and prerequisite data remain limited to the configured major prefixes.
 
 ---
 
