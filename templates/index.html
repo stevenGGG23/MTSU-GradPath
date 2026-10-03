@@ -323,8 +323,7 @@ function setSuggestions(matches) {
   }
 
   suggestionsBox.style.display = 'block';
-  const visibleMatches = matches.slice(0, 50);
-  visibleMatches.forEach(match => {
+  matches.forEach(match => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
@@ -337,13 +336,6 @@ function setSuggestions(matches) {
     });
     suggestionsBox.appendChild(item);
   });
-
-  if (matches.length > visibleMatches.length) {
-    const more = document.createElement('div');
-    more.className = 'autocomplete-more';
-    more.textContent = `Showing ${visibleMatches.length} of ${matches.length} matches. Type more to narrow.`;
-    suggestionsBox.appendChild(more);
-  }
 }
 
 function clearSuggestions() {
