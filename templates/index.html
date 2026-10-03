@@ -412,7 +412,7 @@ function updateCourseSearch() {
     const name = label.startsWith(`${code} -`)
       ? label.slice(code.length).replace(/^\s*-\s*/, '')
       : label;
-    return code.startsWith(query) || name.startsWith(query);
+    return code.includes(query) || name.includes(query);
   });
   setSuggestions(matches);
 }
