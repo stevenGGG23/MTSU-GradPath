@@ -406,9 +406,14 @@ function updateCourseSearch() {
     return;
   }
 
-  const matches = courseOptions.filter(course =>
-    course.code.includes(query) || course.label.toUpperCase().includes(query)
-  );
+  const matches = courseOptions.filter(course => {
+    const code = normalizeCourse(course.code);
+    const label = course.label.toUpperCase();
+    const name = label.startsWith(`${code} -`)
+      ? label.slice(code.length).replace(/^\s*-\s*/, '')
+      : label;
+    return code.startsWith(query) || name.startsWith(query);
+  });
   setSuggestions(matches);
 }
 
