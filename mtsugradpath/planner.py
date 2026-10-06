@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import date
 from typing import List, Set, Dict
 
@@ -25,6 +26,18 @@ from .models import Course
 # config declares, not (incorrectly) against the current major's. A major's
 # extra_prefixes (e.g. Construction Management's CCM courses) map to it too.
 _PREFIX_TO_CONFIG = {p: c for c in DEGREE_CONFIGS.values() for p in major_prefixes(c)}
+
+# ── Catalog cache ──────────────────────────────────────────────────────────────
+# Keeps the most recent DB-loaded catalog for each prefix in memory so that
+# repeated plan generations (or second-major + minor combos) don't hit the DB
+# every time. The sync route calls clear_catalog_cache() to flush stale data.
+_catalog_cache: Dict[str, tuple] = {}  # prefix -> (monotonic_time, catalog_dict)
+_CATALOG_TTL = 300  # seconds (5 min)
+
+
+def clear_catalog_cache() -> None:
+    """Flush all cached catalog data — called after a successful catalog sync."""
+    _catalog_cache.clear()
 
 
 # Function that checks whether *code* is offered in a given season/year,
@@ -226,8 +239,15 @@ def meets_minimum_grade(grade: str, minimum_grade: str) -> bool:
 # Function that loads course information from the database for a given prefix
 def load_catalog_courses(prefix: str = None) -> Dict[str, Dict[str, object]]:
     prefix = prefix or PROGRAM_PREFIX
-    catalog = {}
 
+    # Return cached result if still fresh
+    cached = _catalog_cache.get(prefix)
+    if cached is not None:
+        ts, data = cached
+        if time.monotonic() - ts < _CATALOG_TTL:
+            return data
+
+    catalog = {}
     try:
         with SessionLocal() as session:
             course_rows = (
@@ -262,6 +282,7 @@ def load_catalog_courses(prefix: str = None) -> Dict[str, Dict[str, object]]:
     except Exception:
         return {}
 
+    _catalog_cache[prefix] = (time.monotonic(), catalog)
     return catalog
 
 # Function to sort course codes by department prefix and course number

@@ -528,8 +528,9 @@ document.querySelectorAll('.course-grade-select').forEach(select => {
 document.querySelectorAll('.requirement-mark-complete').forEach(button => {
   button.addEventListener('click', () => {
     const input = document.getElementById(button.dataset.target);
+    if (!input) return;
     input.value = input.max;
-    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 });
 

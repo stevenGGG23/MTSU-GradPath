@@ -2,6 +2,7 @@ import os
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
 from mtsugradpath.db import init_db, SessionLocal
 from flask import (
@@ -49,6 +50,7 @@ from mtsugradpath.models import CatalogCourseSummary, Course, SyncStatus, Course
 from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
+    clear_catalog_cache,
     parse_prereq_grade_requirements,
     meets_minimum_grade,
     default_start_season,
@@ -359,9 +361,18 @@ def index():
         except ValueError:
             start_year = date.today().year
 
-        # Loaded once and reused below -- generate_plan() used to reload the
-        # catalog itself internally, so every plan generation cost two DB
-        # round trips instead of one.
+        # Warm the in-process catalog cache for every program this request
+        # needs (primary, second major, minors) concurrently so all the
+        # load_catalog_courses() calls below are instant cache hits.
+        _needed_prefixes = list(dict.fromkeys(
+            [degree_cfg["prefix"]]
+            + ([second_cfg["prefix"]] if second_cfg else [])
+            + [mc["prefix"] for mc in minor_cfgs]
+        ))
+        if len(_needed_prefixes) > 1:
+            with ThreadPoolExecutor(max_workers=len(_needed_prefixes)) as _pool:
+                list(_pool.map(load_catalog_courses, _needed_prefixes))
+
         catalog = load_catalog_courses(degree_cfg["prefix"])
 
         # Build minimum-grade requirements for prerequisite courses
@@ -722,6 +733,7 @@ def _run_sync_background(force=False):
         # Always clears the running flag, even if something above raised
         # outside the per-major try/except -- otherwise the lock never
         # clears and every future sync request just reports "still running".
+        clear_catalog_cache()
         _set_sync_state(
             running=False, total=total,
             fresh=fresh, cached=cached,
