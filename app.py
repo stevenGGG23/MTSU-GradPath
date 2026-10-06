@@ -50,6 +50,7 @@ from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
     parse_prereq_grade_requirements,
+    meets_minimum_grade,
     default_start_season,
     SEASON_CYCLE,
     validate_plan,
@@ -363,6 +364,30 @@ def index():
         # round trips instead of one.
         catalog = load_catalog_courses(degree_cfg["prefix"])
 
+        # Build minimum-grade requirements for prerequisite courses
+        minimum_grades = {}
+
+        for course_info in catalog.values():
+            minimum_grades.update(
+                course_info.get("prereq_grades", {})
+            )
+
+        # Only count a checked course as successfully completed if it
+        # satisfies any minimum-grade requirement that applies to it.
+        validated_completed_courses = set()
+
+        for code in completed_courses:
+            minimum_grade = minimum_grades.get(code)
+
+            if minimum_grade:
+                if meets_minimum_grade(
+                    course_grades.get(code),
+                    minimum_grade,
+                ):
+                    validated_completed_courses.add(code)
+            else:
+                validated_completed_courses.add(code)
+
         # With a second major or minors, the plan is built from a copy of the
         # major's config with their courses and electives folded in; the
         # major's own audit still uses the unmodified config.
@@ -419,7 +444,7 @@ def index():
             equivalencies = db_session.query(CourseEquivalency).all()
 
         audit = build_audit(
-            completed_courses,
+            validated_completed_courses,
             generic_hours,
             catalog,
             degree_cfg=degree_cfg,
@@ -435,7 +460,7 @@ def index():
 )
 
         # Build the student-specific prerequisite tree
-        personal_nodes, personal_edges = build_personal_prereq_graph(catalog, completed_courses, plan, degree_cfg=planning_cfg)
+        personal_nodes, personal_edges = build_personal_prereq_graph(catalog, validated_completed_courses, plan, degree_cfg=planning_cfg)
         personal_mermaid = render_personal_prereq_mermaid(personal_nodes, personal_edges)
 
         # Maps the course codes for full display
