@@ -31,9 +31,14 @@
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but it isn't offered that term.
           {% elif w.type == 'insufficient_grade' %}
           <strong>{{ w.course }}</strong> requires <strong>{{ w.prereq }}</strong> with a grade of <strong>{{ w.minimum_grade }} or better</strong>.
-{% else %}
-<strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
-{% endif %}
+        {% else %}
+        <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   {% if audit %}
   <div class="progress-summary mb-4">
