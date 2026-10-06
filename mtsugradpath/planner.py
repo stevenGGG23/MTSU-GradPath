@@ -173,6 +173,56 @@ def parse_prereq_codes(text: str) -> Set[str]:
 
     return {f"{prefix} {number}" for prefix, number in matches}
 
+    # Extracts minimum-grade requirements for prerequisite courses
+def parse_prereq_grade_requirements(text: str) -> Dict[str, str]:
+    if not text:
+        return {}
+
+    grade_match = re.search(
+        r"\b(?:grade(?:s)?\s+of\s+|a\s+)?([ABCDF][+-]?)"
+        r"(?:\s*\(\d+(?:\.\d+)?\))?\s+or\s+better\b",
+        text,
+        re.IGNORECASE,
+    )
+
+    if not grade_match:
+        return {}
+
+    minimum_grade = grade_match.group(1).upper()
+
+    return {
+        code: minimum_grade
+        for code in parse_prereq_codes(text)
+    }
+
+GRADE_RANK = {
+    "F": 0,
+    "D-": 1,
+    "D": 2,
+    "D+": 3,
+    "C-": 4,
+    "C": 5,
+    "C+": 6,
+    "B-": 7,
+    "B": 8,
+    "B+": 9,
+    "A-": 10,
+    "A": 11,
+    "A+": 12,
+}
+
+def meets_minimum_grade(grade: str, minimum_grade: str) -> bool:
+    if not grade or not minimum_grade:
+        return False
+
+    grade = grade.strip().upper()
+    minimum_grade = minimum_grade.strip().upper()
+
+    if grade not in GRADE_RANK or minimum_grade not in GRADE_RANK:
+        return False
+
+    return GRADE_RANK[grade] >= GRADE_RANK[minimum_grade]
+
 # Function that loads course information from the database for a given prefix
 def load_catalog_courses(prefix: str = None) -> Dict[str, Dict[str, object]]:
     prefix = prefix or PROGRAM_PREFIX
@@ -194,11 +244,16 @@ def load_catalog_courses(prefix: str = None) -> Dict[str, Dict[str, object]]:
 
                 code = f"{course.prefix} {course.number}"
                 prereq_codes = set()
+                prereq_grades = {}
 
                 # Courses may have more than one stored prerequisite
                 for prereq in course.prerequisites:
                     prereq_codes.update(parse_prereq_codes(prereq.prerequisite_text))
+                    prereq_grades.update(
+                        parse_prereq_grade_requirements(prereq.prerequisite_text)
+                )
                 catalog[code] = {
+                    "prereq_grades": prereq_grades,
                     "title": course.title or "",
                     "credits": course.credits or 0,
                     "prereqs": prereq_codes,
@@ -424,10 +479,12 @@ def generate_plan(
     start_year: int = None,
     degree_cfg: dict = None,
     catalog: Dict[str, Dict[str, object]] = None,
+    course_grades: Dict[str, str] = None,
 ) -> Dict[str, List[Dict[str, object]]]:
 
     cfg = degree_cfg or CS_CONFIG
     prefix = cfg["prefix"]
+    course_grades = course_grades or {}
 
     if target_terms < 1:
         target_terms = 1
@@ -460,8 +517,37 @@ def generate_plan(
     for code, hours, _ in core_courses + conc_courses + supporting_courses_list:
         config_hours[code] = hours
 
-    def _offered(code, season, year):
-        return _offered_in_term(code, season, year, cfg)
+        def _offered(code, season, year):
+            return _offered_in_term(code, season, year, cfg)
+
+    def _prereqs_satisfied(code, completed):
+        prereqs = _effective_prereqs(
+            code,
+            catalog,
+            prereq_map,
+            prereq_override_map,
+            prefix,
+        )
+
+        if not prereqs.issubset(completed):
+            return False
+
+        grade_requirements = catalog.get(code, {}).get(
+            "prereq_grades", {}
+        )
+
+        for prereq_code, minimum_grade in grade_requirements.items():
+            # Only validate grades for courses the student reported
+            # as already completed. Future planned courses are assumed
+            # to be completed successfully.
+            if prereq_code in completed_courses:
+                if not meets_minimum_grade(
+                    course_grades.get(prereq_code),
+                    minimum_grade,
+                ):
+                    return False
+
+        return True
 
     def _next_courses_cfg(completed, available):
         candidates = []
@@ -471,7 +557,7 @@ def generate_plan(
             # from another major's course list (e.g. PHYS 2120 needing
             # MATH 1910) must actually be
             # completed, not just assumed handled elsewhere.
-            if prereqs.issubset(completed):
+            if _prereqs_satisfied(code, completed):
                 candidates.append(code)
         return candidates
 
@@ -613,9 +699,11 @@ def validate_plan(
     completed_courses: Set[str],
     catalog: Dict[str, Dict[str, object]] = None,
     degree_cfg: dict = None,
+    course_grades: Dict[str, str] = None,
 ) -> List[Dict[str, str]]:
 
     catalog = catalog or {}
+    course_grades = course_grades or {}
     warnings = []
 
     if degree_cfg is not None:
@@ -647,8 +735,32 @@ def validate_plan(
             prereqs = _full_prereqs(code, effective_cfg, catalog)
             prereqs |= cfg_support_prereq.get(code, set())
 
+            grade_requirements = catalog.get(code, {}).get(
+                "prereq_grades", {}
+            )
+
             for prereq in sorted(prereqs):
                 if prereq in verified_completed:
+                    minimum_grade = grade_requirements.get(prereq)
+
+                    # Grade validation only applies to courses the student
+                    # reported as already completed.
+                    if (
+                        prereq in completed_courses
+                        and minimum_grade
+                        and not meets_minimum_grade(
+                            course_grades.get(prereq),
+                            minimum_grade,
+                        )
+                    ):
+                        warnings.append({
+                            "course": code,
+                            "term": term,
+                            "prereq": prereq,
+                            "type": "insufficient_grade",
+                            "minimum_grade": minimum_grade,
+                        })
+
                     continue
 
                 warnings.append({

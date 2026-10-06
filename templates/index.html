@@ -101,6 +101,25 @@
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
                       <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
+                      {% if course.minimum_grade %}
+                    <span class="small text-muted">
+                      Requires {{ course.minimum_grade }} or better
+                    </span>
+
+                    <select
+                      class="form-select form-select-sm course-grade-select"
+                      data-code="{{ course.code }}"
+                      data-minimum-grade="{{ course.minimum_grade }}"
+                      disabled
+                    >
+                      <option value="">Grade</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                      <option value="D">D</option>
+                      <option value="F">F</option>
+                    </select>
+                    {% endif %}
                     </label>
                   </div>
                   {% endfor %}
@@ -212,6 +231,7 @@
         </div>
         <div class="d-flex flex-wrap gap-2" id="selected-courses"></div>
         <textarea name="completed_courses" id="completed_courses" class="d-none"></textarea>
+        <input type="hidden" name="course_grades" id="course_grades" value="{}">
       </div>
 
       <div class="mt-4">
@@ -226,6 +246,7 @@ const addCourseButton = document.getElementById('add-course');
 const courseInput = document.getElementById('course_input');
 const selectedCourses = document.getElementById('selected-courses');
 const completedCoursesField = document.getElementById('completed_courses');
+const courseGradesField = document.getElementById('course_grades');
 const plannerForm = document.getElementById('planner-form');
 const clearCoursesButton = document.getElementById('clear-courses');
 const suggestionsBox = document.getElementById('course_suggestions');
@@ -262,6 +283,7 @@ function saveState() {
     major: currentMajor,
     second_major: currentSecond,
     courses: Array.from(selectedCourses.querySelectorAll('.badge')).map(b => b.dataset.course),
+    grades: JSON.parse(courseGradesField.value || '{}'),
     hours: { ...(loadSaved().hours || {}), ...hours },
     start_season: document.getElementById('start_season').value,
     start_year: document.getElementById('start_year').value,
@@ -294,6 +316,20 @@ function normalizeCourse(code) {
   return code.trim().toUpperCase().replace(/\s+/g, ' ');
 }
 
+function updateCourseGrades() {
+  const grades = {};
+
+  document.querySelectorAll('.course-grade-select').forEach(select => {
+    const code = select.dataset.code;
+
+    if (!select.disabled && select.value) {
+      grades[code] = select.value;
+    }
+  });
+
+  courseGradesField.value = JSON.stringify(grades);
+}
+
 function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
@@ -311,9 +347,24 @@ function syncCheckboxForCode(code, checked) {
   if (box) {
     box.checked = checked;
     box.closest('.cs-course-check').classList.toggle('is-checked', checked);
+
+    const gradeSelect = box
+      .closest('.cs-course-check')
+      .querySelector('.course-grade-select');
+
+    if (gradeSelect) {
+      gradeSelect.disabled = !checked;
+
+      if (!checked) {
+        gradeSelect.value = '';
+      }
+    }
+
     updateCsSelectedCount();
   }
 }
+
+updateCourseGrades();
 
 function setSuggestions(matches) {
   suggestionsBox.innerHTML = '';
@@ -377,6 +428,7 @@ function addCourse(code, label = null) {
     badge.remove();
     updateHiddenField();
     syncCheckboxForCode(normalized, false);
+    updateCourseGrades();
     updateCsSelectedCount();
   });
 
@@ -395,6 +447,8 @@ function removeCourse(code) {
 
   if (badge) {
     badge.remove();
+    syncCheckboxForCode(normalized, false);
+    updateCourseGrades();
     updateHiddenField();
   }
 }
@@ -434,26 +488,53 @@ courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
 clearCoursesButton.addEventListener('click', () => {
   selectedCourses.innerHTML = '';
-  updateHiddenField();
+
   csCourseCheckboxes.forEach(box => {
     box.checked = false;
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
+
+  document.querySelectorAll('.course-grade-select').forEach(select => {
+    select.value = '';
+    select.disabled = true;
+  });
+
+  updateCourseGrades();
+  updateHiddenField();
   updateCsSelectedCount();
 });
 
 csCourseCheckboxes.forEach(box => {
   box.addEventListener('change', () => {
     const code = box.dataset.code;
+    const gradeSelect = box
+      .closest('.cs-course-check')
+      .querySelector('.course-grade-select');
+
+    if (gradeSelect) {
+      gradeSelect.disabled = !box.checked;
+
+      if (!box.checked) {
+        gradeSelect.value = '';
+      }
+    }
+
     box.closest('.cs-course-check').classList.toggle('is-checked', box.checked);
-    updateCsSelectedCount();
+
     if (box.checked) {
       addCourse(code, box.dataset.label);
     } else {
       removeCourse(code);
     }
 
+    updateCourseGrades();
     updateCsSelectedCount();
+  });
+});
+
+document.querySelectorAll('.course-grade-select').forEach(select => {
+  select.addEventListener('change', () => {
+    updateCourseGrades();
   });
 });
 
@@ -773,6 +854,16 @@ function restoreState() {
     const match = courseOptions.find(c => c.code === code);
     addCourse(code, match ? match.label : null);
   });
+
+  document.querySelectorAll('.course-grade-select').forEach(select => {
+  const savedGrade = (saved.grades || {})[select.dataset.code];
+
+  if (savedGrade) {
+    select.value = savedGrade;
+  }
+});
+
+updateCourseGrades();
 
   document.querySelectorAll('.requirement-hours-input').forEach(input => {
     const value = (saved.hours || {})[input.name];

@@ -1,4 +1,5 @@
 import os
+import json
 import threading
 import time
 from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
@@ -48,6 +49,7 @@ from mtsugradpath.models import CatalogCourseSummary, Course, SyncStatus, Course
 from mtsugradpath.planner import (
     generate_plan,
     load_catalog_courses,
+    parse_prereq_grade_requirements,
     default_start_season,
     SEASON_CYCLE,
     validate_plan,
@@ -243,7 +245,16 @@ def index():
             )
             .all()
         )
+                # Track prerequisite courses that require a minimum grade
+        prerequisite_grade_requirements = {}
 
+        for course in course_list:
+            for prereq in course.prerequisites:
+                prerequisite_grade_requirements.update(
+                    parse_prereq_grade_requirements(
+                        prereq.prerequisite_text
+                    )
+                )
         major_courses = [
             {
                 "code": f"{course.prefix} {course.number}",
@@ -252,6 +263,9 @@ def index():
                     f" - {course.title}"
                 ),
                 "credits": course.credits or 0,
+                "minimum_grade": prerequisite_grade_requirements.get(
+                    f"{course.prefix} {course.number}"
+                ),
                 "level": f"{course.number[0]}000-Level",
                 # 0 = primary major, 1 = second major (checklist sections)
                 "group": 0 if course.prefix in primary_prefixes else 1,
@@ -299,6 +313,14 @@ def index():
             for code in completed_text.splitlines()
             if code.strip()
         }
+
+                # Read grades for completed prerequisite courses that require a minimum grade
+        try:
+            course_grades = json.loads(
+                request.form.get("course_grades", "{}")
+            )
+        except (json.JSONDecodeError, TypeError):
+            course_grades = {}
 
         # Read selected major(s) and get the full degree configs
         selected_major = request.form.get("major", "cs")
@@ -390,6 +412,7 @@ def index():
             start_year=start_year,
             degree_cfg=planning_cfg,
             catalog=catalog,
+            course_grades=course_grades,
         )
 
         with SessionLocal() as db_session:
@@ -403,7 +426,13 @@ def index():
             equivalencies=equivalencies
         )
 
-        prereq_warnings = validate_plan(plan, completed_courses, catalog, degree_cfg=planning_cfg)
+        prereq_warnings = validate_plan(
+        plan,
+        completed_courses,
+        catalog,
+        degree_cfg=planning_cfg,
+        course_grades=course_grades,
+)
 
         # Build the student-specific prerequisite tree
         personal_nodes, personal_edges = build_personal_prereq_graph(catalog, completed_courses, plan, degree_cfg=planning_cfg)
@@ -442,6 +471,7 @@ def index():
                 "prereq": warning_label(w["prereq"]) if w.get("prereq") else None,
                 "term": w["term"],
                 "type": w["type"],
+                "minimum_grade": w.get("minimum_grade"),
             }
             for w in prereq_warnings
         ]
