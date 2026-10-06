@@ -102,7 +102,7 @@
                       <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
                       {% if course.minimum_grade %}
-                    <i class="bi bi-info-circle-fill grade-req-icon" data-tip="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" role="img" tabindex="0"></i>
+                    <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
                     {% endif %}
                     </label>
                   </div>

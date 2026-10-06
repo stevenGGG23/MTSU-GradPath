@@ -1346,34 +1346,9 @@ footer a {
     right: 0.45rem;
     font-size: 0.85rem;
     color: #3b82f6;
-    cursor: help;
+    cursor: pointer;
     line-height: 1;
     z-index: 2;
-}
-
-.grade-req-icon::after {
-    content: attr(data-tip);
-    position: absolute;
-    bottom: calc(100% + 6px);
-    right: -4px;
-    white-space: nowrap;
-    background: #0b1733;
-    color: #ffffff;
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 0.3rem 0.65rem;
-    border-radius: 8px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-    z-index: 100;
-    font-family: 'Inter', sans-serif;
-    letter-spacing: 0.01em;
-}
-
-.grade-req-icon:hover::after,
-.grade-req-icon:focus::after {
-    opacity: 1;
 }
 
 /* ── Button loading state ── */
