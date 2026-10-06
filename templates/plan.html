@@ -26,9 +26,11 @@
       {% for w in warnings %}
       <li>
         {% if w.type == 'same_term' %}
-        <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong> together with its prerequisite <strong>{{ w.prereq }}</strong> &mdash; these can't be taken in the same term.
-        {% elif w.type == 'not_offered' %}
+      <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong> together with its prerequisite <strong>{{ w.prereq }}</strong> &mdash; these can't be taken in the same term.
+          {% elif w.type == 'not_offered' %}
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but it isn't offered that term.
+          {% elif w.type == 'insufficient_grade' %}
+          <strong>{{ w.course }}</strong> requires <strong>{{ w.prereq }}</strong> with a grade of <strong>{{ w.minimum_grade }} or better</strong>.
         {% else %}
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
         {% endif %}

@@ -230,12 +230,15 @@ def extract_prerequisites(body_text):
     if not body_text:
         return []
 
-    match = re.search(r"Prerequisites?:\s*(.+?)(?:\.|$)", body_text, re.IGNORECASE)
+    match = re.search(r"Prerequisites?:\s*(.+?)(?<!\d)\.(?!\d)|Prerequisites?:\s*(.+)$",
+    body_text,
+    re.IGNORECASE,
+)
 
     if not match:
         return []
 
-    prereq = match.group(1).strip()
+    prereq = (match.group(1) or match.group(2)).strip()
     prereq = re.sub(r"\s+", " ", prereq)
 
     return [prereq]
