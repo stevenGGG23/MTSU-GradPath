@@ -78,7 +78,7 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#stepCs" aria-expanded="true">
-                <span class="step-badge">1</span>&nbsp;{{ degree_cfg.name }}{% if second_cfg %} &amp; {{ second_cfg.name }}{% endif %} courses
+                <span class="step-badge">1</span>&nbsp;<i class="bi bi-journal-check me-1"></i>{{ degree_cfg.name }}{% if second_cfg %} &amp; {{ second_cfg.name }}{% endif %} courses
                 <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
               </button>
             </h2>
@@ -131,7 +131,7 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepSearch" aria-expanded="false">
-                <span class="step-badge">2</span>&nbsp;Add other completed courses
+                <span class="step-badge">2</span>&nbsp;<i class="bi bi-search me-1"></i>Add other completed courses
               </button>
             </h2>
             <div id="stepSearch" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
@@ -139,7 +139,7 @@
                 <p class="form-text mt-0 mb-2">For supporting courses like MATH 1910 or COMM 2200, or anything not in the checklist.</p>
                 <div class="input-group position-relative">
                   <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off">
-                  <button type="button" class="btn btn-primary" id="add-course">Add</button>
+                  <button type="button" class="btn btn-primary" id="add-course"><i class="bi bi-plus-lg me-1"></i>Add</button>
                   <div id="course_suggestions" class="autocomplete-list shadow-sm"></div>
                 </div>
               </div>
@@ -149,7 +149,7 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepRequirements" aria-expanded="false">
-                <span class="step-badge">3</span>&nbsp;Other degree requirements
+                <span class="step-badge">3</span>&nbsp;<i class="bi bi-list-check me-1"></i>Other degree requirements
               </button>
             </h2>
             <div id="stepRequirements" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
@@ -185,7 +185,7 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepTerms" aria-expanded="false">
-                <span class="step-badge">4</span>&nbsp;Target terms
+                <span class="step-badge">4</span>&nbsp;<i class="bi bi-calendar3 me-1"></i>Target terms
               </button>
             </h2>
             <div id="stepTerms" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
@@ -224,7 +224,7 @@
       <div class="completed-box mt-4">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h5 class="mb-0">Completed courses <span class="side-count" id="side-count">0</span></h5>
-          <button type="button" class="btn btn-sm btn-link side-clear" id="clear-courses">Clear all</button>
+          <button type="button" class="btn btn-sm btn-link side-clear" id="clear-courses"><i class="bi bi-x-circle me-1"></i>Clear all</button>
         </div>
         <div class="d-flex flex-wrap gap-2" id="selected-courses"></div>
         <textarea name="completed_courses" id="completed_courses" class="d-none"></textarea>
@@ -233,7 +233,7 @@
 
       <div class="mt-4">
         <button class="btn btn-primary btn-lg" type="submit" id="generate-btn">
-          <span id="generate-btn-text">Generate Plan</span>
+          <i class="bi bi-lightning-charge-fill me-1"></i><span id="generate-btn-text">Generate Plan</span>
           <span id="generate-btn-spinner" class="d-none ms-2" style="display:inline-block;width:1em;height:1em;border:2px solid rgba(255,255,255,0.5);border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;"></span>
         </button>
       </div>

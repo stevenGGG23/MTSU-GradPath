@@ -14,8 +14,8 @@
       <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
     </div>
     <div class="d-flex gap-2 plan-actions">
-      <a class="btn btn-outline-light text-nowrap" href="/">Edit completed courses</a>
-      <button type="button" class="btn btn-primary text-nowrap" id="download-pdf">Download PDF</button>
+      <a class="btn btn-outline-light text-nowrap" href="/"><i class="bi bi-pencil me-1"></i>Edit completed courses</a>
+      <button type="button" class="btn btn-primary text-nowrap" id="download-pdf"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF</button>
     </div>
   </div>
 
@@ -108,7 +108,7 @@
   </div>
   {% endif %}
   <div class="mb-4">
-    <h4 class="mb-3">Requirement details</h4>
+    <h4 class="mb-3"><i class="bi bi-clipboard-check me-2 text-primary"></i>Requirement details</h4>
     <div class="accordion" id="auditAccordion">
       {% for group in audit.groups + (second_audit.groups if second_audit else []) + minor_audits %}
       <div class="accordion-item">
@@ -147,7 +147,7 @@
 
   {% if term_hours %}
   <div class="mb-4">
-    <h4 class="mb-3">Credit hours per term</h4>
+    <h4 class="mb-3"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Credit hours per term</h4>
     <div class="term-chart">
       {% for term, hours in term_hours.items() %}
       {% set season, year = term.split() %}
@@ -167,7 +167,7 @@
   {% endif %}
 
   <div class="mb-4">
-    <h4 class="mb-3">Completed courses</h4>
+    <h4 class="mb-3"><i class="bi bi-check2-all me-2 text-primary"></i>Completed courses</h4>
     {% if completed %}
     <div class="d-flex flex-wrap gap-2">
       {% for course in completed %}
@@ -180,7 +180,7 @@
   </div>
 
   <div class="mb-4">
-    <h4 class="mb-3">Plan overview</h4>
+    <h4 class="mb-3"><i class="bi bi-calendar3-range me-2 text-primary"></i>Plan overview</h4>
     <div class="term-grid">
       {% for term, items in plan.items() %}
       <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
@@ -220,7 +220,7 @@
 
   {% if personal_mermaid %}
   <div class="mb-2">
-    <h4 class="mb-1">Your prerequisite path</h4>
+    <h4 class="mb-1"><i class="bi bi-diagram-2 me-2 text-primary"></i>Your prerequisite path</h4>
     <p class="text-muted mb-3">Courses are shown based on your selections. Green = completed, blue = next up (first two terms), light blue = later in your plan, gray = supporting prerequisites.</p>
     <div class="personal-prereq-legend mb-3">
       <span class="legend-item"><span class="legend-swatch" style="background:#16a34a;"></span>Completed</span>
