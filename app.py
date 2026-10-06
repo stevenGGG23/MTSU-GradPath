@@ -383,18 +383,18 @@ def index():
                 course_info.get("prereq_grades", {})
             )
 
-        # Only count a checked course as successfully completed if it
-        # satisfies any minimum-grade requirement that applies to it.
+        # Only exclude a completed course when the student explicitly provided
+        # a grade AND that grade falls below the required minimum. If no grade
+        # was supplied (the dropdown was removed from the UI), assume the course
+        # was completed satisfactorily and include it.
         validated_completed_courses = set()
 
         for code in completed_courses:
             minimum_grade = minimum_grades.get(code)
+            provided_grade = course_grades.get(code)
 
-            if minimum_grade:
-                if meets_minimum_grade(
-                    course_grades.get(code),
-                    minimum_grade,
-                ):
+            if minimum_grade and provided_grade:
+                if meets_minimum_grade(provided_grade, minimum_grade):
                     validated_completed_courses.add(code)
             else:
                 validated_completed_courses.add(code)
