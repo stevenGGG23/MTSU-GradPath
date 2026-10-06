@@ -184,6 +184,12 @@ BIOL_CONFIG = {
         "BIOL 4800": {"Fall", "Spring"},
     },
     "odd_year_spring_only": set(),
+    # Lab sections that must be taken concurrently with their lecture.
+    # The planner warns if the lecture is scheduled without the lab in the same term.
+    "coreq_map": {
+        "BIOL 1110": {"BIOL 1111"},  # General Biology I lecture + lab
+        "BIOL 1120": {"BIOL 1121"},  # General Biology II lecture + lab
+    },
     "upper_division_prefix": "BIOL",
     "upper_division_min": 3000,
     "available": True,
@@ -322,6 +328,11 @@ CHEM_CONFIG = {
         "CHEM 4900": {"Fall", "Spring"},
     },
     "odd_year_spring_only": set(),
+    # Lab sections that must be taken concurrently with their lecture.
+    "coreq_map": {
+        "CHEM 1110": {"CHEM 1111"},  # General Chemistry I lecture + lab
+        "CHEM 1120": {"CHEM 1121"},  # General Chemistry II lecture + lab
+    },
     "upper_division_prefix": "CHEM",
     "upper_division_min": 3000,
     "available": True,

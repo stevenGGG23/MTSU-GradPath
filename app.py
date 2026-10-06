@@ -452,12 +452,52 @@ def index():
         )
 
         prereq_warnings = validate_plan(
-        plan,
-        completed_courses,
-        catalog,
-        degree_cfg=planning_cfg,
-        course_grades=course_grades,
-)
+            plan,
+            completed_courses,
+            catalog,
+            degree_cfg=planning_cfg,
+            course_grades=course_grades,
+        )
+
+        # Co-requisite check: warn when a student reports a lecture complete
+        # without its companion lab.  The planner never schedules lab sections
+        # itself, so this check lives here (on completed_courses) rather than
+        # inside validate_plan (which only sees the generated schedule).
+        coreq_map = planning_cfg.get("coreq_map", {})
+        for coreq_lecture, coreq_labs in coreq_map.items():
+            if coreq_lecture in completed_courses:
+                for lab in sorted(coreq_labs):
+                    if lab not in completed_courses:
+                        prereq_warnings.append({
+                            "course": coreq_lecture,
+                            "term": None,
+                            "prereq": lab,
+                            "type": "missing_coreq",
+                        })
+
+        # Detect completed courses that don't map to any known requirement.
+        # These are courses the student entered that fall outside every degree
+        # bucket — they vanished silently before; now we surface them so the
+        # student can manually count them toward free electives.
+        all_applied_codes = set()
+        for group in audit["groups"]:
+            for entry in group["entries"]:
+                all_applied_codes.update(entry.get("applied", []))
+        all_known_codes = set()
+        for cfg_item in [degree_cfg] + ([second_cfg] if second_cfg else []):
+            for code, _, _ in cfg_item.get("core_courses", []):
+                all_known_codes.add(code)
+            for code, _, _ in cfg_item.get("concentration_courses", []):
+                all_known_codes.add(code)
+            for code, _, _ in cfg_item.get("supporting_courses", []):
+                all_known_codes.add(code)
+        for mc in minor_cfgs:
+            for code, _, _ in mc.get("required_courses", []):
+                all_known_codes.add(code)
+        unrecognized_courses = sorted(
+            code for code in completed_courses
+            if code not in all_applied_codes and code not in all_known_codes
+        )
 
         # Build the student-specific prerequisite tree
         personal_nodes, personal_edges = build_personal_prereq_graph(catalog, validated_completed_courses, plan, degree_cfg=planning_cfg)
@@ -494,7 +534,7 @@ def index():
             {
                 "course": warning_label(w["course"]),
                 "prereq": warning_label(w["prereq"]) if w.get("prereq") else None,
-                "term": w["term"],
+                "term": w.get("term"),
                 "type": w["type"],
                 "minimum_grade": w.get("minimum_grade"),
             }
@@ -573,6 +613,7 @@ def index():
             degree_name=degree_cfg["name"],
             second_audit=second_audit,
             minor_audits=minor_audits,
+            unrecognized_courses=unrecognized_courses,
             hide_sync=True,
             generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
         )

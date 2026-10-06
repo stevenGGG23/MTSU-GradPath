@@ -231,6 +231,7 @@ footer a {
 }
 
 .cs-course-check {
+    position: relative;
     background: #ffffff;
     border: 1px solid #e2e8f0;
     border-radius: 10px;
@@ -1335,6 +1336,138 @@ footer a {
     margin-top: 1.25rem;
     font-size: 0.72rem;
     color: #94a3b8;
+}
+
+/* ── Grade requirement info icon ── */
+
+.grade-req-icon {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.4rem;
+    font-size: 0.7rem;
+    color: #2563eb;
+    cursor: help;
+    line-height: 1;
+    z-index: 2;
+    /* CSS-only tooltip */
+}
+
+.grade-req-icon::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 5px);
+    right: 0;
+    white-space: nowrap;
+    background: #0b1733;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.25rem 0.55rem;
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 100;
+}
+
+.grade-req-icon:hover::after,
+.grade-req-icon:focus::after {
+    opacity: 1;
+}
+
+/* ── Button loading state ── */
+
+.btn-primary:disabled {
+    opacity: 0.75;
+    cursor: not-allowed;
+}
+
+/* ── Unrecognized courses alert ── */
+
+.unrecognized-alert {
+    border-radius: 14px;
+    border-color: #fbbf24;
+    background: #fffbeb;
+    color: #78350f;
+}
+
+.unrecognized-alert .badge {
+    font-size: 0.78rem;
+    background: #92400e !important;
+}
+
+/* ── Plan card: tighten top spacing on mobile ── */
+
+.plan-card {
+    container-type: inline-size;
+}
+
+/* ── Accordion: softer open state ── */
+
+.accordion-button:not(.collapsed) {
+    background: #f0f6ff;
+    color: #1e3a5f;
+    box-shadow: inset 0 -1px 0 rgba(37, 99, 235, 0.12);
+}
+
+/* ── Planner main card: consistent max-width ── */
+
+.planner-main {
+    max-width: 860px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* ── Navbar brand: tighter spacing on narrow screens ── */
+
+@media (max-width: 400px) {
+    .navbar-brand {
+        font-size: 0.9rem;
+    }
+    .navbar-logo {
+        height: 30px;
+    }
+}
+
+/* ── Course grid: tighter columns on small phones ── */
+
+@media (max-width: 480px) {
+    .cs-course-grid {
+        grid-template-columns: 1fr;
+        max-height: 280px;
+    }
+}
+
+/* ── Term grid: single column on small phones ── */
+
+@media (max-width: 480px) {
+    .term-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── GPA panel: full-width on narrow screens ── */
+
+@media (max-width: 480px) {
+    .gpa-panel {
+        --bs-offcanvas-width: 100vw;
+    }
+}
+
+/* ── Progress summary: stack ring + detail on very narrow screens ── */
+
+@media (max-width: 400px) {
+    .progress-summary {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+/* ── Smooth focus outline for accessibility ── */
+
+:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 /* ── Print / "Download PDF": the full plan, every section expanded ── */

@@ -75,6 +75,18 @@ It also indexes course codes and titles from every configured catalog ID for the
 
 ---
 
+## Recent Changes
+
+- **Grade requirement tooltip** — courses that require a minimum grade (e.g. "C or better") now show a small ⓘ icon in the top-right corner of the course card. Hover over it to see the requirement; the bulky text line is gone, keeping the checklist clean.
+- **Unrecognized course bucket** — if a student enters a course that doesn't match any major requirement or generic bucket, it now surfaces as an "Unrecognized courses" banner on the results page instead of silently disappearing. The banner prompts the student to count those hours manually under free electives.
+- **Lab co-requisite warnings** — Biology (BIOL 1110/1111, BIOL 1120/1121) and Chemistry (CHEM 1110/1111, CHEM 1120/1121) now carry a `coreq_map` that `validate_plan` checks. If a lecture is scheduled without its companion lab in the same term, a prerequisite warning surfaces on the plan page.
+- **GPA calculator cleanup** — the pre-filled placeholder values (3.20 / 60) were removed from the Current GPA and GPA hours inputs so the fields are clearly empty for first-time users.
+- **Generate Plan loading state** — the submit button now shows a spinner and disables itself while the plan is being generated, preventing double-submits and giving visual feedback on slower connections.
+- **Scraper / DB code cleanup** — `scraper.py` was reorganised into clearly labelled sections with consistent docstrings. `models.py` and `db.py` had typos fixed and comments clarified.
+- **Responsive polish** — course grid collapses to a single column on phones under 480 px; GPA panel goes full-width on very narrow screens; `focus-visible` outlines and touch targets improved throughout.
+
+---
+
 ## Usage
 
 1. On the home page, click `Sync Catalog` to populate the database from MTSU's live catalog.

@@ -708,9 +708,11 @@ def validate_plan(
 
     if degree_cfg is not None:
         cfg_support_prereq = degree_cfg.get("supporting_prereq_map", {})
+        coreq_map = degree_cfg.get("coreq_map", {})
         effective_cfg = degree_cfg
     else:
         cfg_support_prereq = SUPPORTING_PREREQUISITE_MAP
+        coreq_map = {}
         effective_cfg = {"prefix": PROGRAM_PREFIX, "prereq_map": PREREQUISITE_MAP, "prereq_override_map": {}}
 
     verified_completed = {c.strip().upper() for c in completed_courses}

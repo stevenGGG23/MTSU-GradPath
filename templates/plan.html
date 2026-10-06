@@ -21,7 +21,7 @@
 
   {% if warnings %}
   <div class="alert alert-danger prereq-warning mb-4">
-    <strong>⚠ Prerequisite warning{{ 's' if warnings|length != 1 }}:</strong> the plan below has {{ warnings|length }} issue{{ 's' if warnings|length != 1 }} that would not actually be allowed at registration.
+    <strong>⚠ Plan warning{{ 's' if warnings|length != 1 }}:</strong> {{ warnings|length }} issue{{ 's' if warnings|length != 1 }} found — review before registering.
     <ul class="mb-0 mt-2">
       {% for w in warnings %}
       <li>
@@ -31,12 +31,26 @@
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but it isn't offered that term.
           {% elif w.type == 'insufficient_grade' %}
           <strong>{{ w.course }}</strong> requires <strong>{{ w.prereq }}</strong> with a grade of <strong>{{ w.minimum_grade }} or better</strong>.
+        {% elif w.type == 'missing_coreq' %}
+          You marked <strong>{{ w.course }}</strong> complete but not its companion lab/co-requisite <strong>{{ w.prereq }}</strong> — make sure both are recorded.
         {% else %}
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but its prerequisite <strong>{{ w.prereq }}</strong> hasn't been completed by then.
         {% endif %}
       </li>
       {% endfor %}
     </ul>
+  </div>
+  {% endif %}
+
+  {% if unrecognized_courses %}
+  <div class="alert alert-warning unrecognized-alert mb-4">
+    <strong>Unrecognized course{{ 's' if unrecognized_courses|length != 1 }} ({{ unrecognized_courses|length }}):</strong>
+    {{ 'These courses were' if unrecognized_courses|length != 1 else 'This course was' }} not matched to any {{ degree_name }} requirement. If {{ 'they count' if unrecognized_courses|length != 1 else 'it counts' }} toward free electives or gen-ed, add the hours manually in Step&nbsp;3.
+    <div class="mt-2 d-flex flex-wrap gap-2">
+      {% for code in unrecognized_courses %}
+      <span class="badge bg-secondary">{{ code }}</span>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 

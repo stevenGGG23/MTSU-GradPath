@@ -1,3 +1,13 @@
+"""MTSU catalog scraper.
+
+Fetches course data from the Acalog widget API (or the HTML catalog as a
+fallback) and persists it to the database.  Public entry points:
+
+  sync_courses(prefix, force)          – sync one major's courses
+  sync_course_search_index(force)      – sync the full-catalog search index
+  html_sync_courses(prefix, ...)       – HTML fallback scraper
+"""
+
 import json
 import re
 import time
@@ -19,19 +29,23 @@ from .config import (
 from .db import SessionLocal
 from .models import CatalogCourseSummary, Course, CourseType, Prerequisite
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+
 PAGE_SIZE = 100  # Acalog widget API caps page-size at 100
 
 # Per-course detail fetches are plain network GETs (no DB access), so they're
-# safe to run concurrently. Kept modest -- fetch_json() already treats an AWS
+# safe to run concurrently. Kept modest — fetch_json() already treats an AWS
 # WAF challenge (HTTP 202) as an error, and firing too many requests at once
 # raises the odds of tripping that, same as hammering it sequentially fast.
 DETAIL_FETCH_WORKERS = 5
+
 ROOT_URL = f"{BASE_CATALOG_URL}/"
 INIT_REFERER = "https://www.google.com/"
 
-# Reuses a request session for connection to persist
-SESSION = requests.Session()
+# ── HTTP session ───────────────────────────────────────────────────────────────
 
+# Reuses a single requests.Session so TCP connections are pooled across calls.
+SESSION = requests.Session()
 SESSION.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     "Accept-Encoding": "gzip, deflate",
@@ -44,8 +58,43 @@ SESSION.headers.update({
 
 SESSION_READY = False
 
-# Function to open the main catalog page and API requests
+# Minimal headers accepted by the Acalog widget API without authentication.
+# Using the persistent SESSION object's defaults causes 400 responses (the
+# server rejects combined cookie/Accept-Encoding artifacts), so each JSON
+# request uses this clean header set instead.
+_API_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/128.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": ROOT_URL,
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+# ── Regex patterns ─────────────────────────────────────────────────────────────
+
+# Matches "CSCI 1170 - Computer Science I (4 credit hours)"
+_TITLE_RE = re.compile(
+    r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+?)(?:\s*\((\d+(?:\.\d+)?)\s*credit hours?\))?$",
+    re.IGNORECASE,
+)
+
+# Lightweight version used for the search index (no hours capture group needed)
+_SUMMARY_TITLE_RE = re.compile(
+    r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+)$",
+    re.IGNORECASE,
+)
+
+# ── Session initialization ─────────────────────────────────────────────────────
+
 def initialize_session():
+    """Open the catalog homepage to establish cookies for subsequent API calls.
+
+    Only runs once per process; subsequent calls are no-ops.
+    """
     global SESSION_READY
 
     if SESSION_READY:
@@ -67,25 +116,15 @@ def initialize_session():
 
     SESSION_READY = True
 
-# Minimal headers that the Acalog widget API accepts without authentication.
-# Using a persistent Session object adds default headers (cookies, Accept-Encoding
-# negotiation artifacts) that cause the server to return 400, so we make each
-# request with a clean header set instead.
-_API_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/128.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": ROOT_URL,
-    "X-Requested-With": "XMLHttpRequest",
-}
 
+# ── Widget API fetch helpers ───────────────────────────────────────────────────
 
-# Function that requests the JSON data from the catalog
 def fetch_json(url):
+    """GET *url* and return parsed JSON.
+
+    Raises RuntimeError on an AWS WAF challenge (HTTP 202) and re-raises
+    requests.HTTPError for any other non-2xx response.
+    """
     response = requests.get(url, headers=_API_HEADERS, timeout=60)
 
     if response.status_code == 202:
@@ -101,26 +140,32 @@ def fetch_json(url):
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid JSON from {url}: {exc}") from exc
 
-# Function that downloads a page of course summaries from the catalog
+
 def fetch_course_page(catalog_id, page=1, page_size=PAGE_SIZE):
+    """Download one page of course summaries from the widget API.
+
+    Returns (course_list, total_count).
+    """
     url = (
         f"{BASE_CATALOG_URL}/widget-api/catalog/{catalog_id}/courses/"
         f"?page-size={page_size}&page={page}"
     )
-
     data = fetch_json(url)
-
     return data.get("course-list") or [], data.get("count", 0)
 
-# Function that downloads every course summary page from the catalog
+
 def fetch_all_courses(catalog_id):
+    """Paginate through the widget API and return all course summaries.
+
+    Sleeps 0.3 s between pages to avoid WAF rate limiting.
+    """
     page = 1
     all_courses = []
     total_count = None
 
     while True:
         if page > 1:
-            time.sleep(0.3)  # avoid WAF rate limiting
+            time.sleep(0.3)
         courses, count = fetch_course_page(catalog_id, page)
 
         if total_count is None:
@@ -138,14 +183,16 @@ def fetch_all_courses(catalog_id):
 
     return all_courses
 
-# Function that converts catalog details into an API URL
+
+# ── Text / title helpers ───────────────────────────────────────────────────────
+
 def construct_detail_url(detail_path):
+    """Convert a catalog detail path into a full widget API URL."""
     if not detail_path:
         return None
 
     detail_path = detail_path.strip()
 
-    # Convert older paths into widget format
     if detail_path.startswith("http://") or detail_path.startswith("https://"):
         return detail_path
 
@@ -160,93 +207,98 @@ def construct_detail_url(detail_path):
 
     return f"{BASE_CATALOG_URL}/{detail_path.lstrip('/')}"
 
-# Function that removes the HTML tags and cleans spacing from catalog text
+
 def normalize_text(html_text):
+    """Strip HTML tags and collapse whitespace from catalog body text."""
     if html_text is None:
         return None
 
     text = html_text.replace("\r", " ").replace("\n", " ")
-
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-
     text = re.sub(r"<[^>]+>", "", text)
-
     text = unescape(text).strip()
-
     return re.sub(r"\s+", " ", text)
 
-# Function that checks the catalog course titles match the program prefix
+
 def brief_matches_program(title, prefix=PROGRAM_PREFIX):
+    """Return True if the course title starts with the given prefix token.
+
+    Matches on the leading alphabetic token (e.g. "CSCI") rather than a raw
+    string prefix, so "PS" (Political Science) won't accidentally match
+    "PSY 1410" or "PSCI ...".
+    """
     if not prefix:
         return True
-
     if not title:
         return False
 
-    # Matches the leading course-prefix token exactly (up to the first
-    # digit), not just a raw string prefix -- a plain startswith() would
-    # also match unrelated departments whose code happens to start with the
-    # same letters, e.g. prefix="PS" (Political Science) incorrectly
-    # matching "PSY 1410 - General Psychology" or "PSCI ...".
-    normalized = title.replace(" ", " ").strip().upper()
+    normalized = title.replace(" ", " ").strip().upper()
     match = re.match(r"^([A-Z]{2,5})\s*\d", normalized)
-
     return bool(match) and match.group(1) == prefix.upper()
 
-# Function that separates a course's title prefix, number, and name
+
 def parse_title(title):
+    """Extract (prefix, number, name) from a catalog title string.
+
+    Returns (None, None, title) when the title doesn't match the expected
+    "PREFIX 1234 - Course Name" format.
+    """
     if not title:
         return None, None, None
 
     title = title.replace("\u00a0", " ")
 
     match = re.match(r"^([A-Z]{2,4})\s*(\d{4})\s*-\s*(.+)$", title)
-
     if match:
         return match.group(1), match.group(2), match.group(3).strip()
 
-    # Catalog title may skip over a hyphen after course number
+    # Some catalog titles omit the hyphen after the course number
     match = re.match(r"^([A-Z]{2,4})\s*(\d{4})\s*(.+)$", title)
-
     if match:
         return match.group(1), match.group(2), match.group(3).strip("- ")
 
     return None, None, title.strip()
 
-# Function that extracts the number of credit hours from a course description
+
 def extract_credits(body_text):
+    """Return the number of credit hours from a course description, or None."""
     if not body_text:
         return None
 
     match = re.search(r"(\d+(?:\.\d+)?)\s*credit hours", body_text, re.IGNORECASE)
+    return float(match.group(1)) if match else None
 
-    if match:
-        return float(match.group(1))
 
-    return None
-
-# Function that extracts prerequisite wording from a course description
 def extract_prerequisites(body_text):
+    """Return a list of prerequisite strings extracted from a course description.
+
+    Returns at most one entry (the raw prerequisite sentence), or an empty
+    list when no prerequisite clause is found.
+    """
     if not body_text:
         return []
 
-    match = re.search(r"Prerequisites?:\s*(.+?)(?<!\d)\.(?!\d)|Prerequisites?:\s*(.+)$",
-    body_text,
-    re.IGNORECASE,
-)
-
+    match = re.search(
+        r"Prerequisites?:\s*(.+?)(?<!\d)\.(?!\d)|Prerequisites?:\s*(.+)$",
+        body_text,
+        re.IGNORECASE,
+    )
     if not match:
         return []
 
     prereq = (match.group(1) or match.group(2)).strip()
     prereq = re.sub(r"\s+", " ", prereq)
-
     return [prereq]
 
-# Function that fetches full course detail JSON for a batch of course briefs
-# concurrently. Network-only (no DB session involved), so it's thread-safe;
-# the caller still does all DB writes sequentially on one session afterward.
+
+# ── Concurrent detail fetches ──────────────────────────────────────────────────
+
 def _fetch_course_details(course_briefs):
+    """Fetch full course detail JSON for a batch of course briefs concurrently.
+
+    Network-only (no DB session), so it is thread-safe.  All DB writes happen
+    sequentially on a single session in the caller.
+    """
     def _fetch_one(course_brief):
         detail_path = course_brief.get("url", "")
         if not detail_path:
@@ -271,18 +323,20 @@ def _fetch_course_details(course_briefs):
     return results
 
 
-# Function that creates a new course record or updates an existing one
+# ── Database upsert ────────────────────────────────────────────────────────────
+
 def upsert_course(session, detail):
+    """Create or update a Course record from a widget API detail dict.
+
+    Flushes the session so the course ID is available for prerequisite rows
+    added by the caller immediately after.
+    """
     title = detail.get("title") or detail.get("name")
-
     prefix, number, title_name = parse_title(title)
-
     body = normalize_text(detail.get("body"))
-
     credits = extract_credits(body)
 
     course = session.get(Course, detail["id"])
-
     if course is None:
         course = Course(id=detail["id"])
 
@@ -297,14 +351,14 @@ def upsert_course(session, detail):
     course.updated_at = detail.get("modified")
 
     session.add(course)
-
-    # Flush so a course can be used again
     session.flush()
-
     return course
 
-# Function that exports all synced courses from the DB to a JSON cache file
+
+# ── Local cache (JSON file) ────────────────────────────────────────────────────
+
 def _export_cache(prefix=None):
+    """Write synced courses for *prefix* to the JSON cache file."""
     prefix = prefix or PROGRAM_PREFIX
     try:
         courses_data = []
@@ -334,8 +388,12 @@ def _export_cache(prefix=None):
         print(f"Cache export failed (non-fatal): {exc}")
 
 
-# Function that imports courses from the JSON cache file into the DB
 def _import_cache(prefix=None):
+    """Read courses from the JSON cache file into the DB.
+
+    Returns the number of courses imported, or 0 when the cache is absent
+    or belongs to a different prefix.
+    """
     prefix = prefix or PROGRAM_PREFIX
     if not Path(CACHE_FILE).exists():
         return 0
@@ -372,8 +430,8 @@ def _import_cache(prefix=None):
         return 0
 
 
-# Function that returns the number of courses in the DB for a given prefix
 def _db_course_count(prefix=None):
+    """Return the number of courses in the DB for the given prefix."""
     prefix = prefix or PROGRAM_PREFIX
     try:
         with SessionLocal() as session:
@@ -382,8 +440,14 @@ def _db_course_count(prefix=None):
         return 0
 
 
+# ── Search index sync ──────────────────────────────────────────────────────────
+
 def sync_course_search_index(force=False):
-    """Persist searchable code/title summaries for every configured catalog."""
+    """Persist searchable code/title summaries for every configured catalog.
+
+    Returns the number of summaries written, or a negative number when the
+    index was already populated and *force* is False.
+    """
     if not force:
         with SessionLocal() as session:
             indexed_catalogs = {
@@ -433,8 +497,8 @@ def sync_course_search_index(force=False):
     return len(summaries)
 
 
-# ─── HTML scraper (fallback when widget API returns 401) ─────────────────────
-
+# ── HTML scraper (fallback when widget API returns 401) ────────────────────────
+#
 # Acalog's content.php with expand=1 returns an HTML page where each course
 # entry looks like:
 #
@@ -453,16 +517,6 @@ _HTML_COURSE_URL = (
     "{base}/content.php?catoid={catoid}&navoid={navoid}"
     "&filter%5Bitem_type%5D=3&filter%5Bonly_active%5D=1"
     "&filter%5B3%5D=1&expand=1&filter%5Bcpage%5D={page}"
-)
-
-# Regex: "CSCI 1170 - Computer Science I (4 credit hours)"
-_TITLE_RE = re.compile(
-    r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+?)(?:\s*\((\d+(?:\.\d+)?)\s*credit hours?\))?$",
-    re.IGNORECASE,
-)
-_SUMMARY_TITLE_RE = re.compile(
-    r"^([A-Z]{2,5})\s*(\d{3,4})\s*[-\u2013]\s*(.+)$",
-    re.IGNORECASE,
 )
 
 
@@ -490,13 +544,13 @@ def _html_fetch_page(catoid: int, navoid: int, page: int) -> bytes:
 def _parse_html_course_page(html: bytes, catoid: int, prefix_filter: str):
     """Parse one Acalog content.php page and return a list of raw course dicts.
 
-    Each dict has keys: id (int coid), prefix, number, title, credits, body, url, prereq_texts.
-    Returns an empty list when no courses are found (signals last page).
+    Each dict has keys: id (int coid), prefix, number, title, credits, body,
+    url, prereq_texts.  Returns an empty list when no courses are found,
+    which signals the last page.
     """
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
-    # Course links have href containing "preview_course" and a coid param
     for anchor in soup.find_all("a", href=re.compile(r"preview_course.*coid=\d+")):
         href = anchor.get("href", "")
         coid_match = re.search(r"coid=(\d+)", href)
@@ -511,30 +565,24 @@ def _parse_html_course_page(html: bytes, catoid: int, prefix_filter: str):
 
         pfx, number, course_title, credits_str = m.groups()
 
-        # Filter by prefix if requested
         if prefix_filter and pfx.upper() != prefix_filter.upper():
             continue
 
         credits = float(credits_str) if credits_str else None
 
-        # The body and prerequisites live in the nearest parent <td> or <div>
         container = anchor.find_parent("td") or anchor.find_parent("div")
         body_text = ""
         prereq_texts = []
 
         if container:
-            # Remove the anchor's own text to get just the description
             full_text = container.get_text("\n", strip=True)
-            # Strip the title line from the top
             body_text = full_text[len(raw_title):].strip(" \n-–")
 
-            # Try to extract credits from body if not in title
             if credits is None:
                 cm = re.search(r"(\d+(?:\.\d+)?)\s*credit hours?", body_text, re.I)
                 if cm:
                     credits = float(cm.group(1))
 
-            # Extract prerequisite sentence
             prereq_match = re.search(
                 r"Prerequisites?[:\s]+(.+?)(?:\.|$)", body_text, re.I
             )
@@ -586,18 +634,16 @@ def html_sync_courses(
                 raise RuntimeError(
                     f"HTML catalog scrape failed on page {page}: {exc}"
                 ) from exc
-            # If later pages fail, stop gracefully with what we have
             print(f"HTML scrape stopped at page {page}: {exc}")
             break
 
         courses = _parse_html_course_page(html, catoid, prefix)
-
         if not courses:
-            break  # No more results
+            break
 
         new_courses = [c for c in courses if c["id"] not in seen_coids]
         if not new_courses:
-            break  # All coids already seen — avoid infinite loop
+            break  # all coids already seen — avoid infinite loop
 
         all_courses.extend(new_courses)
         seen_coids.update(c["id"] for c in new_courses)
@@ -649,22 +695,31 @@ def html_sync_courses(
     return saved
 
 
-# Function to download matching courses and saves to SQLlite database
+# ── Primary sync entry point ───────────────────────────────────────────────────
+
 def sync_courses(prefix=None, force=False):
+    """Download courses for *prefix* from the catalog and save them to the DB.
+
+    Returns a positive count of courses synced, or a negative number when the
+    DB already had data and *force* was False (no network calls made).
+
+    Falls back to the HTML scraper on a 401, then to the local JSON cache.
+    Raises RuntimeError when no data source succeeds.
+    """
     effective_prefix = (prefix or PROGRAM_PREFIX).upper()
 
-    # Skip network calls if DB already has data and we're not forcing a refresh.
-    # Return a negative number to signal "already loaded" vs a positive fresh count.
     if not force and _db_course_count(prefix=effective_prefix) > 0:
         return -_db_course_count(prefix=effective_prefix)
 
     courses = []
-    waf_partial = False  # set True when WAF interrupts mid-sync
 
     try:
         for catalog_id in CATALOG_IDS:
             catalog_courses = fetch_all_courses(catalog_id)
-            courses.extend(c for c in catalog_courses if brief_matches_program(c.get("title"), prefix=effective_prefix))
+            courses.extend(
+                c for c in catalog_courses
+                if brief_matches_program(c.get("title"), prefix=effective_prefix)
+            )
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else None
         if status == 401:
@@ -692,17 +747,16 @@ def sync_courses(prefix=None, force=False):
                 )
         raise
     except RuntimeError as exc:
-        # WAF challenge or other runtime error mid-fetch — use what we collected so far
+        # WAF challenge or other runtime error mid-fetch — use what we have so far
         if courses:
             print(f"Sync interrupted for {effective_prefix} after {len(courses)} course summaries: {exc}")
-            waf_partial = True
         else:
             raise
 
     if not courses:
         existing = _db_course_count(prefix=effective_prefix)
         if existing > 0:
-            return existing  # Keep existing data, don't raise
+            return existing
         raise RuntimeError(
             f"No '{effective_prefix}' courses found in catalogs {CATALOG_IDS}"
         )
@@ -710,8 +764,8 @@ def sync_courses(prefix=None, force=False):
     synced = 0
 
     # Detail fetches (one HTTP round trip per course) run concurrently since
-    # they're pure network I/O; the resulting DB writes below stay on one
-    # session/thread, since SQLAlchemy sessions aren't safe to share across threads.
+    # they're pure network I/O; DB writes below stay on one session/thread —
+    # SQLAlchemy sessions aren't safe to share across threads.
     detailed_courses = _fetch_course_details(courses)
 
     with SessionLocal() as session:
@@ -726,7 +780,6 @@ def sync_courses(prefix=None, force=False):
 
                 for ct in detail.get("course_types", []):
                     course_type = session.get(CourseType, ct["id"])
-
                     if course_type is None:
                         course_type = CourseType(id=ct["id"])
 
@@ -743,10 +796,8 @@ def sync_courses(prefix=None, force=False):
                         course.course_types.append(course_type)
 
                 session.query(Prerequisite).filter_by(course_id=course.id).delete()
-
                 for prereq_text in extract_prerequisites(course.body):
-                    prerequisite = Prerequisite(course_id=course.id, prerequisite_text=prereq_text)
-                    session.add(prerequisite)
+                    session.add(Prerequisite(course_id=course.id, prerequisite_text=prereq_text))
 
                 session.commit()
                 synced += 1
@@ -763,5 +814,4 @@ def sync_courses(prefix=None, force=False):
         raise RuntimeError("Catalog sync ran but no courses were saved")
 
     _export_cache(prefix=effective_prefix)
-
     return synced

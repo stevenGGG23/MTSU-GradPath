@@ -102,10 +102,7 @@
                       <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
                       {% if course.minimum_grade %}
-                    <span class="small text-muted">
-                      Requires {{ course.minimum_grade }} or better
-                    </span>
-
+                    <span class="grade-req-icon" data-tip="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" role="img">ⓘ</span>
                     <select
                       class="form-select form-select-sm course-grade-select"
                       data-code="{{ course.code }}"
@@ -235,7 +232,10 @@
       </div>
 
       <div class="mt-4">
-        <button class="btn btn-primary btn-lg" type="submit">Generate Plan</button>
+        <button class="btn btn-primary btn-lg" type="submit" id="generate-btn">
+          <span id="generate-btn-text">Generate Plan</span>
+          <span id="generate-btn-spinner" class="d-none ms-2" style="display:inline-block;width:1em;height:1em;border:2px solid rgba(255,255,255,0.5);border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;"></span>
+        </button>
       </div>
   </div>
 </div>
@@ -892,6 +892,14 @@ plannerForm.addEventListener('change', saveState);
 
 plannerForm.addEventListener('submit', () => {
   updateHiddenField();
+  const btn = document.getElementById('generate-btn');
+  const btnText = document.getElementById('generate-btn-text');
+  const spinner = document.getElementById('generate-btn-spinner');
+  if (btn) {
+    btn.disabled = true;
+    btnText.textContent = 'Generating\u2026';
+    spinner.classList.remove('d-none');
+  }
 });
 
 </script>
