@@ -4,20 +4,22 @@
 <button type="button" class="gpa-tab" data-bs-toggle="offcanvas" data-bs-target="#gpaTools" aria-controls="gpaTools">GPA</button>
 
 <div class="offcanvas offcanvas-end gpa-panel" tabindex="-1" id="gpaTools" aria-labelledby="gpaToolsLabel">
-  <div class="offcanvas-header">
-    <h5 class="offcanvas-title" id="gpaToolsLabel"><i class="bi bi-calculator me-2"></i>GPA tools</h5>
+  <div class="offcanvas-header gpa-panel-header">
+    <h5 class="offcanvas-title d-flex align-items-center gap-2" id="gpaToolsLabel"><i class="bi bi-calculator text-primary"></i>GPA Calculator</h5>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
   </div>
   <div class="offcanvas-body">
-    <p class="gpa-hint">Start from the overall GPA and GPA hours on your Degree Works audit.</p>
-    <div class="row g-2 mb-3">
-      <div class="col-6">
-        <label class="form-label gpa-label" for="gpa_current">Current GPA</label>
-        <input type="number" class="form-control form-control-sm" id="gpa_current" min="0" max="4" step="0.001">
-      </div>
-      <div class="col-6">
-        <label class="form-label gpa-label" for="gpa_hours">GPA hours so far</label>
-        <input type="number" class="form-control form-control-sm" id="gpa_hours" min="0" step="1">
+    <div class="gpa-current-card mb-3">
+      <p class="gpa-hint mb-2">Use the overall GPA and GPA hours from your Degree Works audit.</p>
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label gpa-label" for="gpa_current">Current GPA</label>
+          <input type="number" class="form-control form-control-sm" id="gpa_current" min="0" max="4" step="0.001" placeholder="e.g. 3.25">
+        </div>
+        <div class="col-6">
+          <label class="form-label gpa-label" for="gpa_hours">GPA hours so far</label>
+          <input type="number" class="form-control form-control-sm" id="gpa_hours" min="0" step="1" placeholder="e.g. 60">
+        </div>
       </div>
     </div>
 
@@ -32,12 +34,12 @@
 
     <div class="tab-content">
       <div class="tab-pane fade show active" id="gpaWhatIf" role="tabpanel">
-        <p class="gpa-hint">Add the courses you're taking or plan to take. For a retake, pick the grade it replaces &mdash; MTSU drops the old grade from your GPA.</p>
+        <p class="gpa-hint">Add courses you plan to take. For a retake, set "Replaces" to the old grade — MTSU removes it from your GPA.</p>
         <div class="gpa-row-head">
           <span>Course</span><span>Hrs</span><span>Grade</span><span>Replaces</span><span></span>
         </div>
         <div id="gpa_rows"></div>
-        <button type="button" class="btn btn-sm btn-link gpa-add" id="gpa_add">+ Add course</button>
+        <button type="button" class="btn btn-sm btn-outline-primary gpa-add mt-2" id="gpa_add"><i class="bi bi-plus-lg me-1"></i>Add course</button>
         <div class="gpa-result" id="gpa_whatif_result"></div>
       </div>
 
