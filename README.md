@@ -7,16 +7,28 @@ Currently supports 8 majors: **Computer Science, Biology, Mathematics, Chemistry
 Live demo: **https://mtsu-gradpath.onrender.com**
 Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
-<p align="center">
-  <img src="static/demo-course-selection.png" width="49%" alt="Course selection form" />
-  &nbsp;
-  <img src="static/demo-plan-overview.png" width="49%" alt="Plan overview and completion progress" />
-</p>
-<p align="center">
-  <img src="static/demo-plan-schedule.png" width="49%" alt="Term-by-term generated schedule" />
-  &nbsp;
-  <img src="static/demo-prerequisite-map.png" width="49%" alt="Prerequisite dependency graph" />
-</p>
+<table width="100%" cellpadding="8">
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="static/demo-course-selection.png" width="100%" alt="Course selection form" /><br/>
+      <sub><b>Course selection &amp; completed-course checklist</b></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="static/demo-plan-overview.png" width="100%" alt="Plan overview and completion progress" /><br/>
+      <sub><b>Completion progress &amp; requirement breakdown</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="static/demo-plan-schedule.png" width="100%" alt="Term-by-term generated schedule" /><br/>
+      <sub><b>Term-by-term generated schedule</b></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="static/demo-prerequisite-map.png" width="100%" alt="Prerequisite dependency graph" /><br/>
+      <sub><b>Prerequisite dependency graph</b></sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
