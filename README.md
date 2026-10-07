@@ -7,10 +7,16 @@ Currently supports 8 majors: **Computer Science, Biology, Mathematics, Chemistry
 Live demo: **https://mtsu-gradpath.onrender.com**
 Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
-| | |
-|---|---|
-| ![Course selection form](https://github.com/user-attachments/assets/7982969b-0b6d-4cc3-8d5b-b5633f3ef384) | ![Plan overview and completion progress](https://github.com/user-attachments/assets/097134c7-4851-46e6-85e8-6a5555462883) |
-| ![Term-by-term generated schedule](https://github.com/user-attachments/assets/8ed3f0cd-f5b3-4aee-a132-4a6798aca2b8) | ![Prerequisite dependency graph](static/demo-prerequisite-map.png) |
+<p align="center">
+  <img src="static/demo-course-selection.png" width="49%" alt="Course selection form" />
+  &nbsp;
+  <img src="static/demo-plan-overview.png" width="49%" alt="Plan overview and completion progress" />
+</p>
+<p align="center">
+  <img src="static/demo-plan-schedule.png" width="49%" alt="Term-by-term generated schedule" />
+  &nbsp;
+  <img src="static/demo-prerequisite-map.png" width="49%" alt="Prerequisite dependency graph" />
+</p>
 
 ---
 
