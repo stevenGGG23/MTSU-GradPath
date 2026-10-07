@@ -9,8 +9,11 @@ Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
 | | |
 |---|---|
-| ![Course selection form](static/demo-course-selection.png) | ![Plan overview and completion progress](static/demo-plan-overview.png) |
-| ![Term-by-term generated schedule](static/demo-plan-schedule.png) | ![Prerequisite dependency graph](static/demo-prerequisite-map.png) |
+| ![Course selection form](<img width="1898" height="897" alt="image" src="https://github.com/user-attachments/assets/7982969b-0b6d-4cc3-8d5b-b5633f3ef384" />
+) | ![Plan overview and completion progress](<img width="1544" height="899" alt="image" src="https://github.com/user-attachments/assets/097134c7-4851-46e6-85e8-6a5555462883" />
+) |
+| ![Term-by-term generated schedule](<img width="1774" height="891" alt="image" src="https://github.com/user-attachments/assets/8ed3f0cd-f5b3-4aee-a132-4a6798aca2b8" />
+) | ![Prerequisite dependency graph](static/demo-prerequisite-map.png) |
 
 ---
 
