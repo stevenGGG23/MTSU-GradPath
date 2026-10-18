@@ -5,7 +5,13 @@ from dotenv import load_dotenv
 # Finds the main project directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+try:
+    DATA_DIR.mkdir(exist_ok=True)
+except OSError:
+    # Serverless environments (Vercel) have a read-only filesystem;
+    # fall back to /tmp which is always writable.
+    DATA_DIR = Path("/tmp/data")
+    DATA_DIR.mkdir(exist_ok=True)
 
 # Lodas optional .env values
 load_dotenv(BASE_DIR / ".env")
