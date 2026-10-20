@@ -102,3 +102,44 @@ def test_rate_limited_page_still_has_a_valid_csp(monkeypatch):
     csp = resp.headers["Content-Security-Policy"]
     nonce = re.search(r"'nonce-([^']+)'", csp).group(1)
     assert nonce and f'nonce="{nonce}"' in resp.get_data(as_text=True)
+
+
+def test_postgres_tables_get_row_level_security(monkeypatch):
+    """Supabase exposes public tables through its REST API; init_db turns on
+    RLS for each one (the app's direct connection is unaffected)."""
+    from mtsugradpath import db
+
+    executed = []
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return ["sync_status", "courses"]
+
+    class FakeConn:
+        def execute(self, statement):
+            executed.append(str(statement))
+            return FakeResult()
+
+        def begin_nested(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class FakeEngine:
+        class dialect:
+            name = "postgresql"
+
+        def begin(self):
+            return FakeConn()
+
+    monkeypatch.setattr(db, "engine", FakeEngine())
+    db._lock_down_public_tables()
+    assert 'ALTER TABLE public."sync_status" ENABLE ROW LEVEL SECURITY' in executed
+    assert 'ALTER TABLE public."courses" ENABLE ROW LEVEL SECURITY' in executed

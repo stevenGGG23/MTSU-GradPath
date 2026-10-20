@@ -37,6 +37,36 @@ def init_db():
     from .models import Base
     Base.metadata.create_all(bind=engine)
     _ensure_sync_status_started_at_column()
+    _lock_down_public_tables()
+
+
+def _lock_down_public_tables():
+    """Turn on Row-Level Security for every table in the public schema.
+
+    Supabase serves the public schema through its auto-generated REST API,
+    reachable with the project's public "anon" key. With RLS off, anyone
+    with the project URL can read, edit and delete those tables. RLS with no
+    policies blocks that API completely. GradPath itself connects straight
+    to Postgres as the database owner, which RLS doesn't restrict, so the
+    app is unaffected. Runs on every start (it's a no-op once enabled), so a
+    newly created table is covered too. Postgres only; skipped for SQLite.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        with engine.begin() as conn:
+            tables = conn.execute(text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity"
+            )).scalars().all()
+            for table in tables:
+                # Each in its own savepoint: a table we don't own can't stop the rest
+                try:
+                    with conn.begin_nested():
+                        conn.execute(text(f'ALTER TABLE public."{table}" ENABLE ROW LEVEL SECURITY'))
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def _ensure_sync_status_started_at_column():
