@@ -144,3 +144,14 @@ def test_refresh_refuses_to_publish_a_shrunken_catalog(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="shrank"):
         scrape_courses.export(out_file=out, raw_dir=tmp_path, fetch=False)
     assert len(json.loads(out.read_text())["courses"]) == 3000  # untouched
+
+
+def test_old_link_survives_a_program_rename(edited_catalog):
+    def rename(data):
+        program = next(p for p in data["programs"] if p["name"] == CS_NAME)
+        program["name"] = "Computer Science, Professional Software Engineering Concentration, B.S."
+
+    edited_catalog(rename)
+    cfg = get_full_degree_config("cs")
+    assert cfg.get("catalog_driven")
+    assert cfg["name"].startswith("Computer Science,")

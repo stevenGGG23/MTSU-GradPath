@@ -19,6 +19,7 @@ Each config dict has:
   upper_division_min:     int, e.g. 3000 or 4000
 """
 
+import re
 from .degree import TBC_GENERIC, TOTAL_PROGRAM_HOURS
 
 # ── Shared gen-ed (True Blue Core) – identical across all MTSU undergrad majors ──
@@ -735,10 +736,35 @@ def find_degree_config(key: str):
     if key in majors:
         return majors[key]
     if key in LEGACY_KEYS:
-        for cfg in majors.values():
-            if cfg["name"] == LEGACY_KEYS[key]:
-                return cfg
-    return DEGREE_CONFIGS.get(key)
+        return _closest_catalog_major(key, majors)
+    return DEGREE_CONFIGS.get(key) if not majors else None
+
+
+def _closest_catalog_major(key, majors):
+    """The catalog program an old short key points to -- by exact name, or,
+    if MTSU renamed it, the closest program in the same subject, so an old
+    link never falls back to a frozen hand-written config while catalog
+    data exists."""
+    wanted = LEGACY_KEYS[key]
+    for cfg in majors.values():
+        if cfg["name"] == wanted:
+            return cfg
+    if not majors:
+        return DEGREE_CONFIGS.get(key)
+    hand = DEGREE_CONFIGS.get(key) or {}
+    field = wanted.split(",")[0].strip().lower()
+    words = set(re.findall(r"[a-z]+", wanted.lower()))
+
+    def score(cfg):
+        name = cfg["name"].lower()
+        return (
+            name.startswith(field),
+            cfg["prefix"] == hand.get("prefix"),
+            len(words & set(re.findall(r"[a-z]+", name))),
+        )
+
+    best = max(majors.values(), key=score)
+    return best if score(best)[0] or score(best)[1] else None
 
 
 def get_full_degree_config(key: str) -> dict:

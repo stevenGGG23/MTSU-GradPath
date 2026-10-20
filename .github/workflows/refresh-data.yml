@@ -1,9 +1,9 @@
 # Keeps GradPath's data current with no one maintaining it:
 #   - every Monday: MTSU's class schedule (which terms each course runs)
 #   - the 1st of each month: the full catalog too (courses, majors, minors)
-# The whole test suite runs against the new data -- every major must still
-# plan cleanly and reach 100% -- and only then is it committed to main
-# (which redeploys the site). If anything fails, nothing is published, the
+# Before publishing, the new data must pass the checks that mean the site
+# works -- every major plans cleanly and reaches 100% -- and only then is it
+# committed to main (which redeploys the site). If anything fails, nothing is published, the
 # site keeps serving its last good data, and an issue is opened.
 #
 # The weekly run always commits (the schedule's timestamp changes), which
@@ -54,10 +54,20 @@ jobs:
           SECRET_KEY: ci-only
         run: python scrape_courses.py --schedule
 
-      - name: Test against the new data
+      # The gate: checks that mean the site would be broken with this data.
+      # (Tests that pin specific facts -- "Accounting requires ACTG 3110" --
+      # run after publishing instead, so a real catalog change can't block
+      # the refresh; see "Spot checks" below.)
+      - name: Test that the site works with the new data
         env:
           SECRET_KEY: ci-only
-        run: python -m pytest -q tests
+        run: >
+          python -m pytest -q
+          tests/test_catalog_build.py tests/test_catalog_programs.py tests/test_production.py
+          tests/test_catalog_majors.py
+          -k "every_catalog_major or every_catalog_minor or every_major_page or partial_progress
+          or finishing_everything or plan_page_for_catalog_majors or course_search_json
+          or whole_undergraduate_catalog or test_catalog_build or test_catalog_programs or test_production"
 
       - name: Publish
         run: |
@@ -72,8 +82,25 @@ jobs:
           git commit -m "Refresh catalog/schedule data from MTSU (automated)"
           git push
 
+      - name: Spot checks
+        id: spot
+        continue-on-error: true
+        env:
+          SECRET_KEY: ci-only
+        run: python -m pytest -q tests
+
+      - name: Report spot checks that drifted
+        if: steps.spot.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Catalog changed: update spot-check tests ($(date -u +%Y-%m-%d))" \
+            --body "The new catalog/schedule data was published (the site works with it), but some tests that check specific courses or programs now fail -- probably because MTSU changed that course or program. Update those tests to the new facts. Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            || true
+
       - name: Report a failure
-        if: failure()
+        if: failure() && steps.spot.outcome != 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
