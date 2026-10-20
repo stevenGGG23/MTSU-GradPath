@@ -473,6 +473,7 @@ def _course_card(code, required, min_grades):
         "required": code in required,
         "desc": info.get("desc", ""),
         "minimum_grade": min_grades.get(code),
+        "offered": catalog_store.offering_summary(code),
     }
 
 
@@ -823,6 +824,8 @@ def _plan():
         code for code in validated_completed_courses
         if code not in used and catalog_store.course(code)
     )
+    # With no free-elective room left, extra courses are listed as not counted
+    uncounted_courses = [] if has_free_electives else extra_courses
     if extra_courses and has_free_electives:
         free_hours = sum(catalog_store.credits(code, default=3) for code in extra_courses)
         for hours_map in (generic_hours, audit_generic_hours):
@@ -867,6 +870,16 @@ def _plan():
         degree_cfg=planning_cfg,
         course_grades=course_grades,
     )
+
+    # A course that only runs in summer can't fit a plan without summers
+    if not include_summer:
+        for term, items in plan.items():
+            if term.startswith("Remaining"):
+                for item in items:
+                    if item.get("kind") == "course" and catalog_store.summer_only(item["code"]):
+                        prereq_warnings.append({
+                            "course": item["code"], "term": None, "prereq": None, "type": "summer_only",
+                        })
 
     # Co-requisite check: warn when a student reports a lecture complete
     # without its companion lab.  The planner never schedules lab sections
@@ -967,6 +980,7 @@ def _plan():
                 "title": title,
                 "hours": credit_short(item["hours"]),
                 "minor": item["code"] in minor_only_codes,
+                "offered": catalog_store.offering_summary(item["code"]),
                 "second": item["code"] in second_only_codes,
             }
 
@@ -1021,6 +1035,7 @@ def _plan():
         second_audit=second_audit,
         minor_audits=minor_audits,
         unrecognized_courses=unrecognized_courses,
+        uncounted_courses=[c for c in uncounted_courses if c not in unrecognized_courses],
         hide_sync=True,
         catalog_meta=catalog_store.meta(),
         generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
@@ -1125,8 +1140,25 @@ def sync_status():
 def healthz():
     meta = catalog_store.meta()
     ok = catalog_store.has_data()
+    sched = catalog_store.schedule() or {}
+
+    def _age_days(stamp):
+        try:
+            return (date.today() - date.fromisoformat((stamp or "")[:10])).days
+        except ValueError:
+            return None
+
+    catalog_age = _age_days(meta.get("fetched_at"))
+    schedule_age = _age_days(sched.get("fetched_at"))
     return jsonify({
         "ok": ok,
+        # The refresh job runs monthly (catalog) and weekly (schedule); data
+        # much older than that means it has been failing
+        "stale": bool((catalog_age or 0) > 45 or (schedule_age or 0) > 21),
+        "catalog_age_days": catalog_age,
+        "schedule_fetched_at": sched.get("fetched_at"),
+        "schedule_age_days": schedule_age,
+        "schedule_terms": [f"{t['season']} {t['year']}" for t in sched.get("terms", [])],
         "catalog": meta.get("name"),
         "fetched_at": meta.get("fetched_at"),
         "courses": len(catalog_store.courses()),

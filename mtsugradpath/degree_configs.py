@@ -696,20 +696,24 @@ DEGREE_CONFIGS = {
 }
 
 
-# Hand-curated configs stand in for their catalog twin in the major picker:
-# they carry offering seasons and prerequisite fixes the catalog doesn't have.
-# Biology, Math and Physics were written against a generic (no-concentration)
-# program that the 2026-27 catalog no longer has, so they stay available by
-# key (old links, and as the home config for BIOL/MATH/PHYS scheduling data)
-# but the catalog's concentrations are what the picker lists.
-CATALOG_TWINS = {
+# Every major the planner offers comes from the catalog export, so a catalog
+# change (a dropped or added course) reaches students on the next refresh
+# with nobody editing code. The hand-written configs above are no longer
+# offered; they stay for two jobs:
+#   * old links: ?major=cs etc. resolve to the same program in the catalog
+#   * last-resort offering seasons/prerequisite notes for a course that has
+#     no history in MTSU's class schedules (see planner._offered_in_term)
+LEGACY_KEYS = {
     "cs": "Computer Science, Professional Computer Science Concentration, B.S.",
     "chemistry": "Chemistry, B.S.",
     "political_science": "Political and Global Affairs, B.S.",
     "aerospace": "Aerospace, Professional Pilot Concentration, B.S.",
     "construction_mgmt": "Construction Management, Commercial Construction Management Concentration, B.S.",
+    "biology": "Biology, Physiology Concentration, B.S.",
+    "math": "Mathematics, General Mathematics Concentration, B.S.",
+    "physics": "Physics, Professional Physics Concentration, B.S.",
 }
-HIDDEN_FROM_PICKER = {"biology", "math", "physics"}
+DEFAULT_MAJOR = "cs"
 
 
 def major_prefixes(cfg: dict) -> list:
@@ -722,38 +726,41 @@ def _catalog_majors() -> dict:
     return catalog_majors()
 
 
-def get_full_degree_config(key: str) -> dict:
-    """Return the full degree config for *key* (hand-curated first, then the
-    catalog-generated majors), defaulting to CS."""
-    return DEGREE_CONFIGS.get(key) or _catalog_majors().get(key or "") or CS_CONFIG
-
-
 def find_degree_config(key: str):
-    """Like get_full_degree_config but None for an unknown key."""
-    return DEGREE_CONFIGS.get(key or "") or _catalog_majors().get(key or "")
+    """The catalog major for *key* (a catalog key or an old short key like
+    "cs"), or None. Falls back to the hand-written config only if the
+    catalog has no such program."""
+    majors = _catalog_majors()
+    key = key or ""
+    if key in majors:
+        return majors[key]
+    if key in LEGACY_KEYS:
+        for cfg in majors.values():
+            if cfg["name"] == LEGACY_KEYS[key]:
+                return cfg
+    return DEGREE_CONFIGS.get(key)
+
+
+def get_full_degree_config(key: str) -> dict:
+    """Like find_degree_config, defaulting to Computer Science."""
+    return find_degree_config(key) or find_degree_config(DEFAULT_MAJOR) or CS_CONFIG
 
 
 def picker_majors() -> list:
     """(key, config) for every major the planner offers, sorted by name."""
-    twins = set(CATALOG_TWINS.values())
-    entries = [
-        (key, cfg) for key, cfg in DEGREE_CONFIGS.items() if key not in HIDDEN_FROM_PICKER
-    ]
-    entries += [
-        (key, cfg) for key, cfg in _catalog_majors().items() if cfg["name"] not in twins
-    ]
     seen, unique = set(), []
-    for key, cfg in entries:
-        name = display_name(cfg)
-        if name not in seen:
-            seen.add(name)
+    for key, cfg in _catalog_majors().items():
+        if cfg["name"] not in seen:
+            seen.add(cfg["name"])
             unique.append((key, cfg))
+    if not unique:  # no catalog data at all: keep the site usable
+        unique = list(DEGREE_CONFIGS.items())
     return sorted(unique, key=lambda kv: display_name(kv[1]).lower())
 
 
 def display_name(cfg: dict) -> str:
     """Catalog-style program name ("Computer Science, Professional ... B.S.")."""
-    for key, name in CATALOG_TWINS.items():
+    for key, name in LEGACY_KEYS.items():
         if cfg is DEGREE_CONFIGS.get(key):
             return name
     return cfg["name"]

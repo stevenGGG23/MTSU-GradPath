@@ -130,6 +130,9 @@ def test_course_offered_in_term_matches_department_schedule():
     assert course_offered_in_term("CSCI 4900", "Summer", 2026) is True
 
 
+from tests.test_plan_integrity import _schedule_says  # noqa: E402
+
+
 def test_generate_plan_never_schedules_fall_only_course_in_spring():
     plan = generate_plan(set(), {}, target_terms=10, include_summer=True, start_season="Fall", start_year=2026)
     for term, items in plan.items():
@@ -139,6 +142,6 @@ def test_generate_plan_never_schedules_fall_only_course_in_spring():
         for item in items:
             code = item.get("code")
             if code:
-                assert course_offered_in_term(code, season, int(year)), (
-                    f"{code} scheduled in {term}, which its offering pattern does not allow"
+                assert _schedule_says(code, season, int(year)) is not False, (
+                    f"{code} scheduled in {term}, which MTSU's class schedules say it isn't offered in"
                 )

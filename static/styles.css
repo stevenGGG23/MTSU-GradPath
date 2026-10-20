@@ -1690,3 +1690,22 @@ footer a {
     line-height: 1;
     margin-bottom: 0.75rem;
 }
+
+.plan-item-offered,
+.cs-course-offered {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cs-course-offered {
+    display: block;
+    width: fit-content;
+    margin: 0.15rem 0 0;
+}

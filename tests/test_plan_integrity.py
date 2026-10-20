@@ -51,10 +51,42 @@ def _oracle_prereqs(code):
     return required
 
 
+def _schedule_says(code, season, year):
+    """Independent read of catalog_data/schedule.json (not via the app's own
+    lookup): False only where the data is unambiguous -- a posted term
+    without the course, or a course with two-plus terms of history in a
+    season and never offered in it. None when it doesn't decide."""
+    import json
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "catalog_data" / "schedule.json"
+    if not path.exists():
+        return None
+    if not hasattr(_schedule_says, "data"):
+        _schedule_says.data = json.loads(path.read_text(encoding="utf-8"))
+    data = _schedule_says.data
+    suffix = {"Spring": "10", "Summer": "50", "Fall": "80"}[season]
+    term = f"{year}{suffix}"
+    seen = set(data["offered"].get(code, []))
+    if term in {t["code"] for t in data["terms"]}:
+        return term in seen
+    if not seen:
+        return None
+    since = [t["code"] for t in data["terms"] if t["season"] == season and t["code"] >= min(seen)]
+    if len(since) >= 2 and not seen & set(since):
+        return False
+    return None
+
+
 def _oracle_offered(code, season, year):
-    """Whether *code* is offered in a given season/year, per its own major's
-    declared offering pattern (or unrestricted if untracked).
+    """Whether *code* is offered in a given season/year: MTSU's class
+    schedules where they're unambiguous, else its own major's declared
+    offering pattern (or unrestricted if untracked).
     """
+    observed = _schedule_says(code, season, year)
+    if observed is not None:
+        return observed
+    if observed is None and _schedule_says.__dict__.get("data", {}).get("offered", {}).get(code):
+        return True  # has history; alternate-year nuances are the planner's call
     home_cfg = _CFG_BY_PREFIX.get(code.split()[0])
     if home_cfg is None:
         return True
@@ -247,16 +279,16 @@ def test_validate_plan_flags_wrong_season_course():
     cfg = DEGREE_CONFIGS["physics"]
     catalog = load_catalog_courses(cfg["prefix"])
 
-    # PHYS 3110 is Fall-only per PHYS_CONFIG's offering_seasons.
+    # Spring 2027's schedule is posted: pick a PHYS course with no section in it
+    code = next(c for c in sorted(catalog) if _schedule_says(c, "Spring", 2027) is False)
     broken_plan = {
         "Spring 2027": [
-            {"kind": "course", "code": "PHYS 3110", "label": "PHYS 3110 - Mechanics", "hours": 3},
+            {"kind": "course", "code": code, "label": code, "hours": 3},
         ],
     }
-    completed = {"PHYS 2110", "PHYS 2120", "MATH 1910", "MATH 1920"}
-    warnings = validate_plan(broken_plan, completed, catalog, degree_cfg=cfg)
+    warnings = validate_plan(broken_plan, set(catalog) - {code}, catalog, degree_cfg=cfg)
 
-    assert any(w["type"] == "not_offered" and w["course"] == "PHYS 3110" for w in warnings), warnings
+    assert any(w["type"] == "not_offered" and w["course"] == code for w in warnings), warnings
 
 
 def test_generate_plan_never_schedules_wrong_season_course_for_any_major():

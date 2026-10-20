@@ -73,7 +73,8 @@ def test_index_has_no_public_catalog_sync():
     # Catalog data ships with the app; re-exporting it is an admin-only route
     html = app.test_client().get("/").get_data(as_text=True)
     assert 'id="sync-btn"' not in html
-    assert 'href="/prerequisites?major=cs"' in html
+    # Old short keys resolve to the live catalog program
+    assert 'href="/prerequisites?major=computer-science-professional-computer-science-concentration-bs"' in html
 
 
 def _minor_keys(html):
@@ -82,9 +83,9 @@ def _minor_keys(html):
 
 def test_index_with_second_major_lists_both_checklists():
     html = app.test_client().get("/?major=biology&second_major=cs").get_data(as_text=True)
-    assert 'id="second_major_field" value="cs"' in html
-    assert 'class="cs-major-heading">B.S. Biology<' in html
-    assert 'class="cs-major-heading">B.S. Computer Science<' in html
+    assert 'id="second_major_field" value="computer-science-professional-computer-science-concentration-bs"' in html
+    assert 'class="cs-major-heading">Biology, Physiology Concentration, B.S.<' in html
+    assert 'class="cs-major-heading">Computer Science, Professional Computer Science Concentration, B.S.<' in html
 
 
 def test_index_drops_same_major_as_second():
@@ -103,7 +104,7 @@ def test_plan_page_shows_second_major():
         "major": "cs", "second_major": "math", "completed_courses": "MATH 1910", **PLAN_FORM,
     }).get_data(as_text=True)
     assert "extra-progress-second" in html
-    assert "B.S. Mathematics (second major)" in html
+    assert "Mathematics, General Mathematics Concentration, B.S. (second major)" in html
     assert "plan-item-second" in html
 
 

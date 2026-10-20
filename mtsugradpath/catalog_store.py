@@ -198,3 +198,132 @@ def planner_catalog(prefixes=(), codes=(), prefer: set | None = None) -> dict:
     for prefix in prefixes:
         wanted.update(codes_for_prefix(prefix))
     return {code: catalog_entry(code, prefer) for code in wanted if code in courses()}
+
+
+# ── Class schedule (which terms each course actually ran) ───────────────────
+
+SCHEDULE_FILE = BASE_DIR / "catalog_data" / "schedule.json"
+_SUFFIX = {"Spring": "10", "Summer": "50", "Fall": "80"}
+_sched: dict = {"mtime": None, "data": None, "checked": 0.0}
+
+
+def schedule() -> dict | None:
+    """The exported class schedule, or None when there isn't one.
+
+    Adds two derived keys: "complete" (term codes whose schedule looks fully
+    posted -- at least 70% of that season's typical course count) and
+    "by_season" ({season: [term dicts]} in date order).
+    """
+    now = time.monotonic()
+    if _sched["data"] is not None and now - _sched["checked"] < _CHECK_EVERY:
+        return _sched["data"] or None
+    _sched["checked"] = now
+    try:
+        mtime = SCHEDULE_FILE.stat().st_mtime
+    except OSError:
+        _sched.update(mtime=None, data={})
+        return None
+    if mtime == _sched["mtime"]:
+        return _sched["data"] or None
+    try:
+        with open(SCHEDULE_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        offered = {code: set(terms) for code, terms in data["offered"].items()}
+        counts = {}
+        for terms in offered.values():
+            for term in terms:
+                counts[term] = counts.get(term, 0) + 1
+        by_season = {}
+        for term in sorted(data["terms"], key=lambda t: t["code"]):
+            by_season.setdefault(term["season"], []).append(term)
+        complete = set()
+        for season, terms in by_season.items():
+            sizes = sorted(counts.get(t["code"], 0) for t in terms)
+            typical = sizes[len(sizes) // 2] if sizes else 0
+            complete |= {t["code"] for t in terms if counts.get(t["code"], 0) >= 0.7 * typical}
+        parsed = {**data, "offered": offered, "complete": complete, "by_season": by_season}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        log.error("Couldn't read class schedule %s: %s", SCHEDULE_FILE, exc)
+        if _sched["data"]:
+            return _sched["data"]
+        parsed = {}
+    _sched.update(mtime=mtime, data=parsed)
+    return parsed or None
+
+
+def offered_in(code: str, season: str, year: int):
+    """True/False from MTSU's own class schedules, or None when they don't say.
+
+    - A term whose schedule is posted: exactly whether the course has a section.
+    - Otherwise its history in that season over the last few years: never run
+      in that season -> False; only in odd (or even) years -> that parity;
+      otherwise True.
+    - A course with no history at all -> None (caller decides).
+    """
+    sched = schedule()
+    if not sched:
+        return None
+    seen = sched["offered"].get(code)
+    term = f"{year}{_SUFFIX.get(season, '')}"
+    if term in sched["complete"]:
+        return bool(seen) and term in seen
+    if not seen:
+        return None
+    pattern = _season_pattern(sched, seen, season)
+    if pattern is None:
+        return None
+    if pattern == "never":
+        return False
+    if pattern in ("odd", "even"):
+        return (year % 2 == 1) == (pattern == "odd")
+    return True
+
+
+def _season_pattern(sched, seen, season):
+    """'every' / 'odd' / 'even' / 'never' for a course in one season, or None
+    when there isn't enough history to say. Only terms since the course first
+    appeared count, so a brand-new course isn't judged on years before it
+    existed; alternate-year and never-in-this-season need two observations."""
+    first = min(seen)
+    history = [t for t in sched["by_season"].get(season, [])
+               if t["code"] in sched["complete"] and t["code"] >= first]
+    hits = [t for t in history if t["code"] in seen]
+    if not hits:
+        return "never" if len(history) >= 2 else None
+    parities = {t["year"] % 2 for t in hits}
+    if len(parities) == 1 and len(hits) >= 2:
+        misses = [t for t in history if t["year"] % 2 not in parities]
+        if len(misses) >= 2:
+            return "odd" if parities == {1} else "even"
+    return "every"
+
+
+def offering_summary(code: str) -> str:
+    """Short label like "Fall only", "Spring & summer", "Odd-year springs"
+    when a course isn't offered every fall and spring; "" otherwise."""
+    sched = schedule()
+    if not sched or not sched["offered"].get(code):
+        return ""
+    seasons = []
+    for season in ("Fall", "Spring", "Summer"):
+        pattern = _season_pattern(sched, sched["offered"][code], season)
+        if pattern in ("odd", "even"):
+            seasons.append(f"{pattern}-year {season.lower()}s")
+        elif pattern == "every":
+            seasons.append(season.lower())
+    if not seasons or (len(seasons) >= 2 and {"fall", "spring"} <= set(seasons)):
+        return ""
+    text = " & ".join(seasons)
+    text = text[0].upper() + text[1:]
+    return text + (" only" if len(seasons) == 1 and "-year" not in text else "")
+
+
+def summer_only(code: str) -> bool:
+    """True when MTSU's schedules show a course runs in summers but never in
+    fall or spring (e.g. a field course)."""
+    sched = schedule()
+    seen = sched["offered"].get(code) if sched else None
+    if not seen:
+        return False
+    patterns = {season: _season_pattern(sched, seen, season) for season in ("Fall", "Spring", "Summer")}
+    return patterns["Fall"] == "never" and patterns["Spring"] == "never" and patterns["Summer"] not in (None, "never")

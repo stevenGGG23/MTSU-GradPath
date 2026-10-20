@@ -54,7 +54,9 @@ AVAILABLE_MINORS = MINOR_CONFIGS
 
 
 # The hand-written Math minor stands in for its catalog twin
-CATALOG_MINOR_TWINS = {"math": "Mathematics Minor"}
+# Every minor comes from the catalog export. The hand-written Math minor
+# above stays only so old links/forms with minor=math still resolve.
+LEGACY_MINOR_KEYS = {"math": "Mathematics Minor"}
 
 
 def _catalog_minors():
@@ -64,15 +66,20 @@ def _catalog_minors():
 
 def get_minor_config(key):
     """Return the minor config for *key*, or None when no minor is chosen."""
-    return MINOR_CONFIGS.get(key or "") or _catalog_minors().get(key or "")
+    minors = _catalog_minors()
+    key = key or ""
+    if key in minors:
+        return minors[key]
+    if key in LEGACY_MINOR_KEYS:
+        for cfg in minors.values():
+            if cfg["name"] == LEGACY_MINOR_KEYS[key]:
+                return cfg
+    return MINOR_CONFIGS.get(key)
 
 
 def picker_minors():
     """(key, config) for every minor the planner offers, sorted by name."""
-    twins = set(CATALOG_MINOR_TWINS.values())
-    entries = list(MINOR_CONFIGS.items()) + [
-        (key, cfg) for key, cfg in _catalog_minors().items() if cfg["name"] not in twins
-    ]
+    entries = list(_catalog_minors().items()) or list(MINOR_CONFIGS.items())
     # Cross-listed minors appear once per department in the catalog
     seen, unique = set(), []
     for key, cfg in entries:

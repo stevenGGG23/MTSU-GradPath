@@ -34,7 +34,8 @@ def test_major_choice_does_not_persist_across_requests():
     # A fresh visit with no ?major= in the URL must default back to CS, not
     # remember the "math" choice submitted above.
     resp2 = client.get("/")
-    assert _checked_major(resp2.get_data(as_text=True)) == "cs"
+    # The default major (old key "cs") is the catalog's CS program
+    assert _checked_major(resp2.get_data(as_text=True)) == "computer-science-professional-computer-science-concentration-bs"
 
 
 def test_completed_courses_are_not_echoed_back_on_reload():

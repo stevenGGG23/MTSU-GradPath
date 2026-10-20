@@ -32,6 +32,8 @@
         <strong>{{ w.course }}</strong> is scheduled in <strong>{{ w.term }}</strong>, but it isn't offered that term.
           {% elif w.type == 'insufficient_grade' %}
           <strong>{{ w.course }}</strong> requires <strong>{{ w.prereq }}</strong> with a grade of <strong>{{ w.minimum_grade }} or better</strong>.
+        {% elif w.type == 'summer_only' %}
+          <strong>{{ w.course }}</strong> is only offered in summer terms &mdash; turn on <em>Include summer term planning</em> (step&nbsp;4) to fit it into your plan.
         {% elif w.type == 'missing_coreq' %}
           You marked <strong>{{ w.course }}</strong> complete but not its companion lab/co-requisite <strong>{{ w.prereq }}</strong> — make sure both are recorded.
         {% else %}
@@ -40,6 +42,16 @@
       </li>
       {% endfor %}
     </ul>
+  </div>
+  {% endif %}
+
+  {% if uncounted_courses %}
+  <div class="alert alert-info uncounted-alert mb-4">
+    <strong>Not counted toward this degree:</strong>
+    {{ 'These courses go' if uncounted_courses|length != 1 else 'This course goes' }} beyond what {{ degree_name }} requires (the requirement {{ 'they belong' if uncounted_courses|length != 1 else 'it belongs' }} to is already full, and the degree has no free-elective hours left).
+    <div class="mt-2 d-flex flex-wrap gap-2">
+      {% for code in uncounted_courses %}<span class="badge bg-info text-dark">{{ code }}</span>{% endfor %}
+    </div>
   </div>
   {% endif %}
 
@@ -196,6 +208,7 @@
             <div class="plan-item-main">
               {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
               <span class="plan-item-title">{{ item.title }}</span>
+              {% if item.offered %}<span class="plan-item-offered" title="From MTSU's class schedules for recent terms">{{ item.offered }}</span>{% endif %}
               {% if item.suggestion %}<span class="plan-item-suggestion">e.g. {{ item.suggestion }}</span>{% endif %}
             </div>
             {% if item.hours %}<span class="plan-item-hours">{{ item.hours }}</span>{% endif %}

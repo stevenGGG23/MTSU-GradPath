@@ -42,6 +42,11 @@ def clear_catalog_cache() -> None:
 # degree_cfg, the major currently being planned) -- a supporting course like
 # MATH 1910 on a Physics plan is restricted by MATH's own config.
 def _offered_in_term(code: str, season: str, year: int, degree_cfg: dict) -> bool:
+    # MTSU's own class schedules come first: a posted term says exactly what
+    # runs, and past terms show fall-only / no-summer / alternate-year patterns
+    observed = catalog_store.offered_in(code, season, year)
+    if observed is not None:
+        return observed
     code_prefix = code.split()[0] if " " in code else None
     home_cfg = (
         degree_cfg if code_prefix == degree_cfg.get("prefix")
@@ -53,7 +58,8 @@ def _offered_in_term(code: str, season: str, year: int, degree_cfg: dict) -> boo
     if home_cfg is not None and home_cfg.get("catalog_driven") and code_prefix in _PREFIX_TO_CONFIG:
         home_cfg = _PREFIX_TO_CONFIG[code_prefix]
     if home_cfg is None:
-        return True
+        # Never seen in a recent schedule: assume fall/spring, not summer
+        return season != "Summer" or catalog_store.schedule() is None
     if code in home_cfg.get("odd_year_spring_only", set()):
         return season == "Spring" and year % 2 == 1
     allowed = home_cfg.get("offering_seasons", {}).get(code)
@@ -393,6 +399,8 @@ def _elective_candidates(
         and code not in completed
         and (catalog.get(code, {}).get("credits") or 0) > 0  # skip 0-credit lab sections
         and _schedulable(code)
+        # electives are interchangeable: don't pick one that only runs in summer
+        and not catalog_store.summer_only(code)
     }
 
     # High-level language courses can be alternatives, one should be in the recommended section
@@ -806,7 +814,9 @@ def generate_plan(
                 "label": "No courses available this term",
             }]
             idle_terms += 1
-            if idle_terms >= 3:
+            # Alternate-year courses can mean a two-year wait; stop only
+            # after three years with nothing schedulable
+            if idle_terms >= 9:
                 break
             continue
 
@@ -918,11 +928,7 @@ def validate_plan(
             # gate, but nothing previously re-verified that independently;
             # a bug there would have produced a bad plan with zero warnings.
             if term_season and term_year is not None:
-                is_offered = (
-                    _offered_in_term(code, term_season, term_year, degree_cfg)
-                    if degree_cfg is not None
-                    else course_offered_in_term(code, term_season, term_year)
-                )
+                is_offered = _offered_in_term(code, term_season, term_year, degree_cfg or CS_CONFIG)
                 if not is_offered:
                     warnings.append({
                         "course": code,

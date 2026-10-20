@@ -63,7 +63,7 @@
     <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="" class="footer-logo mb-2">
     <p class="mb-1">This planner does not register you for classes &mdash; use <a href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">PipelineMT</a> to enroll. Not an official registration tool.</p>
     {% if catalog_meta is defined and catalog_meta.name %}
-    <p class="mb-0 footer-catalog">Course and program data: {{ catalog_meta.name }} (<a href="https://catalog.mtsu.edu/" target="_blank" rel="noopener">catalog.mtsu.edu</a>), exported {{ (catalog_meta.fetched_at or '')[:10] }}.</p>
+    <p class="mb-0 footer-catalog">Course and program data: {{ catalog_meta.name }} (<a href="https://catalog.mtsu.edu/" target="_blank" rel="noopener">catalog.mtsu.edu</a>), exported {{ (catalog_meta.fetched_at or '')[:10] }}. Offering terms from MTSU's class schedules.</p>
     {% endif %}
   </footer>
 

@@ -55,6 +55,9 @@ def test_every_catalog_major_plans_from_scratch_without_warnings(key):
     # prerequisite the plan never provides
     required = {code for k in ("core_courses", "concentration_courses", "supporting_courses") for code, _, _ in cfg[k]}
     stuck = required & set(_courses_in(plan, remaining=True))
+    # A summer-only course can't fit a plan without summers (the plan page
+    # warns about it); everything else must be scheduled
+    stuck = {code for code in stuck if not catalog_store.summer_only(code)}
     assert not stuck, f"{cfg['name']}: never scheduled {sorted(stuck)}"
 
 
@@ -345,3 +348,21 @@ def test_finishing_everything_reads_100_percent(key):
     assert done == total, f"{key}: {done}/{total}"
     assert not re.findall(r'class="plan-item-code">([^<]+)<', html)
     assert "plan warning" not in html.lower()
+
+
+def test_summer_only_course_is_called_out_when_summers_are_off():
+    form = {"major": "geosciences-environmental-science-concentration-bs",
+            "target_semesters": "8", "start_season": "Fall", "start_year": "2026"}
+    html = app.test_client().post("/", data=form).get_data(as_text=True)
+    assert "GEOL 3040" in html and "only offered in summer terms" in html
+    html = app.test_client().post("/", data={**form, "include_summer": "on", "target_semesters": "12"}).get_data(as_text=True)
+    assert "only offered in summer terms" not in html
+
+
+def test_course_beyond_a_full_degree_is_reported_not_hidden():
+    html = app.test_client().post("/", data={
+        "major": "leisure-and-sport-management-bs", "completed_courses": "LSTS 4902\nLSTS 4903",
+        "target_semesters": "4", "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    assert "Not counted toward this degree" in html
+    assert html.split("uncounted-alert", 1)[1].split("</div>\n  </div>", 1)[0].count("LSTS 4903") == 1

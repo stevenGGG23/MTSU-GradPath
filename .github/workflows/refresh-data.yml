@@ -1,0 +1,85 @@
+# Keeps GradPath's data current with no one maintaining it:
+#   - every Monday: MTSU's class schedule (which terms each course runs)
+#   - the 1st of each month: the full catalog too (courses, majors, minors)
+# The whole test suite runs against the new data -- every major must still
+# plan cleanly and reach 100% -- and only then is it committed to main
+# (which redeploys the site). If anything fails, nothing is published, the
+# site keeps serving its last good data, and an issue is opened.
+#
+# The weekly run always commits (the schedule's timestamp changes), which
+# also keeps GitHub from disabling this workflow for inactivity.
+name: Refresh catalog and schedule
+
+on:
+  workflow_dispatch:
+    inputs:
+      catalog:
+        description: "Also re-download the full catalog (~40 min)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 8 * * 1"  # Mondays 08:00 UTC: class schedule
+    - cron: "0 9 1 * *"  # 1st of the month 09:00 UTC: catalog + schedule
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Refresh the full catalog
+        if: github.event.schedule == '0 9 1 * *' || inputs.catalog
+        env:
+          SECRET_KEY: ci-only
+        run: python scrape_courses.py --refresh
+
+      - name: Refresh the class schedule
+        env:
+          SECRET_KEY: ci-only
+        run: python scrape_courses.py --schedule
+
+      - name: Test against the new data
+        env:
+          SECRET_KEY: ci-only
+        run: python -m pytest -q tests
+
+      - name: Publish
+        run: |
+          git config user.name "gradpath-data-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog_data/
+          if git diff --cached --quiet; then
+            echo "No data changes."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "Refresh catalog/schedule data from MTSU (automated)"
+          git push
+
+      - name: Report a failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Data refresh failed ($(date -u +%Y-%m-%d))" \
+            --body "The automated catalog/schedule refresh failed, so nothing was published and the site is still serving its last good data. Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Common causes: catalog.mtsu.edu or ssb.mtsu.edu was down or rate-limiting (re-run the workflow later), or MTSU changed its catalog/schedule format (see mtsugradpath/catalog_fetch.py and schedule_fetch.py)." \
+            || true

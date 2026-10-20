@@ -113,6 +113,7 @@
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
                       <span class="cs-course-code">{% if course.required %}<span class="req-dot" aria-label="Required"></span>{% endif %}{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.title }}</span>
+                      {% if course.offered %}<span class="cs-course-offered">{{ course.offered }}</span>{% endif %}
                       {% if course.minimum_grade %}
                     <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
                     {% endif %}
