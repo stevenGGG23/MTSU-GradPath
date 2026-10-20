@@ -56,7 +56,8 @@ main,
 }
 
 .header h1 {
-    font-size: 3rem;
+    font-size: 2.1rem;
+    font-weight: 600;
     letter-spacing: 0.03em;
     margin-bottom: 0.5rem;
     color: #ffffff;
@@ -968,7 +969,7 @@ footer a {
     }
 
     .header h1 {
-        font-size: 2rem;
+        font-size: 1.5rem;
     }
 
     .header p {
@@ -1617,4 +1618,75 @@ footer a {
         max-width: none;
         width: 100%;
     }
+}
+
+.navbar-sub {
+    margin-left: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 400;
+    opacity: 0.65;
+}
+
+@media (max-width: 400px) {
+    .navbar-sub {
+        display: none;
+    }
+}
+
+.checklist-count {
+    margin-left: 0.35rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #475569;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    vertical-align: 1px;
+}
+
+.checklist-note {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #64748b;
+}
+
+.checklist-more {
+    margin-top: 0.75rem;
+}
+
+.checklist-more > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.checklist-more > summary::-webkit-details-marker {
+    display: none;
+}
+
+.checklist-more > summary::before {
+    content: "\25B8";
+    display: inline-block;
+    margin-right: 0.4rem;
+    transition: transform 0.15s;
+}
+
+.checklist-more[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.error-card {
+    max-width: 560px;
+    margin: 2rem auto;
+    padding: 2.5rem 2rem;
+}
+
+.error-code {
+    font-size: 3rem;
+    font-weight: 700;
+    color: #2563eb;
+    line-height: 1;
+    margin-bottom: 0.75rem;
 }

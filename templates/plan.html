@@ -207,7 +207,7 @@
     </div>
   </div>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     // The PDF is the browser's print-to-PDF: print CSS expands every section,
     // and the document title becomes the suggested file name.
     document.getElementById('download-pdf').addEventListener('click', () => {
@@ -234,8 +234,8 @@
     </div>
   </div>
 
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  <script type="module" nonce="{{ csp_nonce }}">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.4/dist/mermaid.esm.min.mjs";
     mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
   </script>
   {% endif %}

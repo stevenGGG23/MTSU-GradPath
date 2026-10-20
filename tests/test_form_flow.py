@@ -212,3 +212,10 @@ def test_get_all_majors_return_200():
     for major in ["cs", "biology", "math", "chemistry", "physics"]:
         resp = app.test_client().get(f"/?major={major}")
         assert resp.status_code == 200, f"GET /?major={major} returned {resp.status_code}"
+
+
+def test_unknown_page_shows_friendly_404():
+    resp = app.test_client().get("/no-such-page")
+    assert resp.status_code == 404
+    html = resp.get_data(as_text=True)
+    assert "Page not found" in html and "Back to the planner" in html

@@ -166,3 +166,23 @@ def test_minor_conversion(example_catalog):
     assert cfg["elective_hours"] == 6
     assert cfg["elective_options"] == ["EXMP 3100", "EXMP 3200", "OTHR 2100"]
     assert cfg["total_hours"] == 13
+
+
+def test_blank_catalog_line_ends_an_or_chain():
+    # The published Physiology page reads "BIOL 4351 OR" then a blank line
+    # then "CHEM 1110" -- CHEM 1110 is required, not another option
+    units = cp.parse_units([
+        {"course": "MATH 1920"}, {"op": "OR"}, {"course": "BIOL 4350"}, {"op": "OR"}, {"sep": True},
+        {"course": "CHEM 1110"},
+    ])
+    assert units[0]["kind"] == "choice" and len(units[0]["options"]) == 2
+    assert units[1] == {"kind": "course", "code": "CHEM 1110", "with": []}
+
+
+def test_physiology_requires_general_chemistry(tmp_path):
+    from mtsugradpath.catalog_programs import catalog_majors
+    cfg = catalog_majors().get("biology-physiology-concentration-bs")
+    if cfg is None:
+        pytest.skip("catalog export missing")
+    required = {c for k in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg[k]}
+    assert {"CHEM 1110", "CHEM 1120", "MATH 1910"} <= required

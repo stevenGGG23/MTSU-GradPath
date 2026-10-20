@@ -9,7 +9,7 @@
     </div>
     <div class="prereq-picker">
       <label class="form-label small text-muted mb-1" for="prereq-major">Major</label>
-      <select class="form-select form-select-sm" id="prereq-major" onchange="window.location.href='/prerequisites?major=' + encodeURIComponent(this.value)">
+      <select class="form-select form-select-sm" id="prereq-major">
         {% for m in majors %}
         <option value="{{ m.key }}" {{ 'selected' if m.key == degree_cfg.key }}>{{ m.name }}</option>
         {% endfor %}
@@ -43,8 +43,11 @@
   <p class="form-text mt-3 mb-0">Outside requirements (dashed) are prerequisites that aren't part of this program's own course list, such as a math placement course. {% if degree_cfg.catalog_url %}<a href="{{ degree_cfg.catalog_url }}" target="_blank" rel="noopener">View this program in the catalog</a>.{% endif %}</p>
 </div>
 
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+<script type="module" nonce="{{ csp_nonce }}">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.4/dist/mermaid.esm.min.mjs";
+  document.getElementById("prereq-major").addEventListener("change", event => {
+    window.location.href = "/prerequisites?major=" + encodeURIComponent(event.target.value);
+  });
   mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
 </script>
 {% endblock %}

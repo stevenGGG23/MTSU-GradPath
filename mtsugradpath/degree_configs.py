@@ -742,7 +742,13 @@ def picker_majors() -> list:
     entries += [
         (key, cfg) for key, cfg in _catalog_majors().items() if cfg["name"] not in twins
     ]
-    return sorted(entries, key=lambda kv: display_name(kv[1]).lower())
+    seen, unique = set(), []
+    for key, cfg in entries:
+        name = display_name(cfg)
+        if name not in seen:
+            seen.add(name)
+            unique.append((key, cfg))
+    return sorted(unique, key=lambda kv: display_name(kv[1]).lower())
 
 
 def display_name(cfg: dict) -> str:

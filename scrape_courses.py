@@ -23,6 +23,9 @@ from mtsugradpath.config import BASE_DIR, DATA_DIR
 
 RAW_DIR = DATA_DIR / "raw_catalog"
 OUT_FILE = BASE_DIR / "catalog_data" / "catalog.json"
+# Sanity floor for a full undergraduate catalog (2026-27 has 3,475 courses / 397 programs)
+MIN_COURSES = 2000
+MIN_PROGRAMS = 200
 
 
 def export(out_file=OUT_FILE, raw_dir=RAW_DIR, fetch=True, refresh=False, catalog_id=None, log=print):
@@ -32,11 +35,17 @@ def export(out_file=OUT_FILE, raw_dir=RAW_DIR, fetch=True, refresh=False, catalo
     if fetch:
         fetch_raw(raw_dir, catalog_id=catalog_id, log=log)
     data = build_catalog(raw_dir)
+    # Never replace a good catalog with a broken export
+    if len(data["courses"]) < MIN_COURSES or len(data["programs"]) < MIN_PROGRAMS:
+        raise RuntimeError(
+            f"Export looks incomplete ({len(data['courses'])} courses, {len(data['programs'])} programs); "
+            f"not writing {out_file}"
+        )
     out_file = Path(out_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_file.with_suffix(".tmp")
     # One course/program per line keeps git diffs between catalog years readable
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         fh.write('{"catalog": ' + json.dumps(data["catalog"]) + ',\n"courses": {\n')
         items = list(data["courses"].items())
         for i, (code, course) in enumerate(items):

@@ -169,7 +169,8 @@ def is_upper_division_csci(code):
 def _course_hours(code, catalog, fallback=3):
     info = catalog.get(code) if catalog else None
 
-    if info and info.get("credits"):
+    # 0 is a real value (labs); only unknown credits fall back
+    if info and info.get("credits") is not None:
         return info["credits"]
 
     return fallback
@@ -544,13 +545,17 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, equival
     # TBC / gen-ed section
     tbc_items = []
     tbc_hours_done = 0
+    applied_by_gid = cfg.get("_applied", {})
     for gid, label, hours, suggestions in tbc_generic:
         entered = clamp_hours(generic_hours.get(gid, 0), hours)
         tbc_hours_done += entered
-        tbc_items.append({
+        entry = {
             "label": label, "hours": hours, "done": entered >= hours,
             "partial_hours": entered, "generic_id": gid, "suggestions": suggestions,
-        })
+        }
+        if applied_by_gid.get(gid):
+            entry["applied"] = applied_by_gid[gid]
+        tbc_items.append(entry)
     tbc_required = sum(h for _, _, h, _ in tbc_generic)
     groups.append({
         "key": "tbc",
@@ -682,10 +687,13 @@ def _build_audit_sections(completed_courses, generic_hours, catalog, cfg, equiva
     for gid, label, hours, suggestions in cfg["tbc_generic"]:
         entered = clamp_hours(generic_hours.get(gid, 0), hours)
         tbc_done += entered
-        tbc_items.append({
+        entry = {
             "label": label, "hours": hours, "done": entered >= hours,
             "partial_hours": entered, "generic_id": gid, "suggestions": suggestions,
-        })
+        }
+        if applied_by_gid.get(gid):
+            entry["applied"] = applied_by_gid[gid]
+        tbc_items.append(entry)
     tbc_required = sum(h for _, _, h, _ in cfg["tbc_generic"])
     if tbc_items:
         groups.append({

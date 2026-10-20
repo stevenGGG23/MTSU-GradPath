@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}{{ heading }} · GradPath{% endblock %}
+
+{% block content %}
+<div class="card error-card text-center">
+  <div class="error-code">{{ code }}</div>
+  <h2 class="mb-2">{{ heading }}</h2>
+  <p class="text-muted mb-4">{{ message }}</p>
+  <a class="btn btn-primary" href="/"><i class="bi bi-house me-1"></i>Back to the planner</a>
+</div>
+{% endblock %}

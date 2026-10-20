@@ -73,7 +73,13 @@ def picker_minors():
     entries = list(MINOR_CONFIGS.items()) + [
         (key, cfg) for key, cfg in _catalog_minors().items() if cfg["name"] not in twins
     ]
-    return sorted(entries, key=lambda kv: kv[1]["name"].lower())
+    # Cross-listed minors appear once per department in the catalog
+    seen, unique = set(), []
+    for key, cfg in entries:
+        if cfg["name"] not in seen:
+            seen.add(cfg["name"])
+            unique.append((key, cfg))
+    return sorted(unique, key=lambda kv: kv[1]["name"].lower())
 
 
 def minor_allowed_for_major(minor_cfg, major_prefixes):
@@ -87,6 +93,11 @@ def _course_number(code):
     if len(parts) != 2 or not parts[1].isdigit():
         return None
     return int(parts[1])
+
+
+def _hours_or_3(credits):
+    """Catalog credits, keeping 0 (labs); 3 only when unknown."""
+    return 3 if credits is None else credits
 
 
 def _nice(number):
@@ -118,7 +129,7 @@ def minor_elective_codes(minor_cfg, completed_courses):
 def minor_elective_hours_done(minor_cfg, completed_courses, catalog=None):
     catalog = catalog or {}
     hours = sum(
-        (catalog.get(code) or {}).get("credits") or 3
+        _hours_or_3((catalog.get(code) or {}).get("credits"))
         for code in minor_elective_codes(minor_cfg, completed_courses)
     )
     return min(hours, minor_cfg["elective_hours"])
@@ -176,6 +187,21 @@ def apply_minor_to_config(degree_cfg, minor_cfg, completed_courses, catalog=None
         generic_extra[generic_id] = applied
         done -= applied
     cfg["supporting_generic"] = list(degree_cfg["supporting_generic"]) + minor_generic
+
+    # The minor's courses keep their real order (Arabic 1010 -> 1020 -> 2010),
+    # enforcing only prerequisites that are on the plan
+    from . import catalog_store
+    planned = {code for key in ("core_courses", "concentration_courses", "supporting_courses")
+               for code, _, _ in cfg[key]}
+    overrides = dict(degree_cfg.get("prereq_override_map", {}))
+    for code, _, _ in extra_supporting:
+        if code not in overrides and catalog_store.course(code):
+            overrides[code] = {
+                p for p in catalog_store.resolve_prereqs(code, prefer=planned)
+                if p in planned and p != code
+            }
+    cfg["prereq_override_map"] = overrides
+    cfg["coreq_map"] = {**minor_cfg.get("coreq_map", {}), **degree_cfg.get("coreq_map", {})}
 
     return cfg, generic_extra
 

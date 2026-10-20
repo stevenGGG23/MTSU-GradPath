@@ -39,13 +39,14 @@ Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
    **Linux / macOS**
    ```bash
    python3 -m venv .venv && source .venv/bin/activate
-   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
    **Windows (PowerShell)**
    ```powershell
    python -m venv .venv; .venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
+   (`requirements-dev.txt` = the production `requirements.txt` plus pytest.)
 
 2. Set a `SECRET_KEY` — **required**, `app.py` reads it via `os.environ["SECRET_KEY"]` and will not start without it:
 
@@ -96,7 +97,7 @@ Asking the API for catalog 49 returns an error, which is why we originally thoug
 |---|---|
 | A course on its own | Required course, scheduled by prerequisites |
 | Courses joined by **OR** | One choice — any completed option counts |
-| Lecture **AND** 0-credit lab | Taken together (lab warning if one is missing) |
+| Lecture **AND** 0-credit lab | Taken together: checking the lecture counts the lab, and the planner schedules them in the same term |
 | "Choose five from the following" / more courses than hours | A pool: N hours from the listed courses |
 | "CSCI upper-division electives 9 credit hours" | Upper-division electives, filled with real catalog courses |
 | An empty "College of Business Core (42 hours)" | Filled from the four-year academic map |
@@ -130,7 +131,10 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 | `MTSU_CATALOG_URL` | `https://catalog.mtsu.edu` | Catalog site the exporter reads from |
 | `GRADPATH_CATALOG_FILE` | *(unset)* | Load a different catalog JSON (testing) |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | SQLAlchemy connection pool size per process |
-| `SYNC_ADMIN_USER` / `SYNC_ADMIN_PASSWORD` | *(unset = open)* | HTTP Basic Auth for `/sync`, which re-exports the catalog on a running server. Set both in production |
+| `SYNC_ADMIN_USER` / `SYNC_ADMIN_PASSWORD` | *(unset = disabled)* | HTTP Basic Auth for `/sync`, which re-exports the catalog on a running server. Without both set, `/sync` refuses every request |
+| `ALLOW_OPEN_SYNC` | *(unset)* | `1` allows `/sync` without credentials — local development only |
+| `SESSION_COOKIE_SECURE` | `1` on Render/Vercel, else `0` | Send the session cookie over HTTPS only |
+| `FLASK_DEBUG` | *(unset)* | `1` turns on the debugger for `python app.py` (never in production) |
 | `WEB_CONCURRENCY` | `3` | Gunicorn worker count (see `Procfile`) |
 
 ---
@@ -207,7 +211,18 @@ tests/                  pytest suite
 
 Hosted on [Render](https://render.com) (`stevenGGG23/MTSU-GradPath`, `main`, auto-deploy). Build: `pip install -r requirements.txt`. Start: see `Procfile`. Requires `SECRET_KEY`; set `SYNC_ADMIN_USER`/`SYNC_ADMIN_PASSWORD` so `/sync` isn't public. `DATABASE_URL` is optional now — without it the app uses a local SQLite file for its small bits of state, and all course data comes from the committed JSON. Vercel (`vercel.json`, `api/index.py`) works the same way.
 
-`/healthz` reports the loaded catalog and how many majors/minors/courses it has.
+`/healthz` reports the loaded catalog and how many majors/minors/courses it has, and returns 503 if no catalog is loaded — point the host's health check at it.
+
+**Re-exporting on a running server** (normally you'd run `scrape_courses.py` and commit instead):
+
+```bash
+curl -u "$SYNC_ADMIN_USER:$SYNC_ADMIN_PASSWORD" -X POST -H "X-Requested-With: curl" https://<host>/sync
+curl https://<host>/sync/status
+```
+
+It's POST-only and needs the `X-Requested-With` header, so another site can't trigger it with a browser's saved admin login. On Vercel it's disabled (serverless functions can't run the 40-minute export).
+
+**Production hardening already in place:** security headers (CSP with per-request script nonces, `X-Frame-Options`, `nosniff`, HSTS over HTTPS), Subresource Integrity on the Bootstrap CDN files, a 64 KB request size limit, course-code validation on every submitted field, rate limiting keyed on the real client IP behind Render's proxy (`ProxyFix`), gzip, versioned static assets, friendly 404/413/429/500 pages, threaded gunicorn workers with a 60 s timeout (`Procfile`), and a startup that survives the database being unreachable.
 
 ---
 

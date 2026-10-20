@@ -105,17 +105,38 @@ def _effective_prereqs(
 # that prefix into the catalog (a second major), and then only its
 # same-prefix prereqs, since scraped text is only reliable within a course's
 # own major's catalog.
+def plan_universe(cfg: dict) -> Set[str]:
+    """Every course a config schedules by name."""
+    codes = {code for key in ("core_courses", "concentration_courses", "supporting_courses")
+             for code, _, _ in cfg.get(key, [])}
+    return codes | set(cfg.get("high_level_options", []))
+
+
+def _trim_to_plan(prereqs: Set[str], code: str, home_cfg: dict, universe: Set[str]) -> Set[str]:
+    """Drop catalog-scraped prerequisites the plan never schedules.
+
+    "MATH 1710 or high school precalculus" can't be enforced against a plan
+    that doesn't contain MATH 1710 -- the course would wait forever. The
+    team's curated prereq_map / prereq_override_map entries always stay.
+    """
+    curated = set(home_cfg.get("prereq_map", {}).get(code, ())) | set(
+        home_cfg.get("prereq_override_map", {}).get(code, ()) or ()
+    )
+    return {p for p in prereqs if p in universe or p in curated}
+
+
 def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     code_prefix = code.split()[0] if " " in code else None
-    # Catalog-generated configs carry a resolved prerequisite set for every
-    # course they plan (see catalog_programs), whatever its prefix.
+    # Catalog-generated configs (and minors/second majors folded into a plan)
+    # carry a resolved prerequisite set for the courses they plan
     override = cfg.get("prereq_override_map", {})
     if code in override and (cfg.get("catalog_driven") or code_prefix != cfg.get("prefix")):
         return set(override[code]) | set(cfg.get("prereq_map", {}).get(code, set()))
+    universe = plan_universe(cfg)
     if code_prefix == cfg.get("prefix"):
-        return _effective_prereqs(
+        return _trim_to_plan(_effective_prereqs(
             code, catalog, cfg.get("prereq_map", {}), cfg.get("prereq_override_map", {}), cfg["prefix"]
-        )
+        ), code, cfg, universe)
     home_cfg = _PREFIX_TO_CONFIG.get(code_prefix)
     if home_cfg is None:
         return set()
@@ -123,10 +144,10 @@ def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     # primary's, so their scraped prereqs are available -- trusted only
     # within the course's own prefix, same as for the primary major.
     if code in catalog:
-        return _effective_prereqs(
+        return _trim_to_plan(_effective_prereqs(
             code, catalog, home_cfg.get("prereq_map", {}),
             home_cfg.get("prereq_override_map", {}), code_prefix,
-        )
+        ), code, home_cfg, universe)
     required = set(home_cfg.get("prereq_map", {}).get(code, set()))
     override = home_cfg.get("prereq_override_map", {}).get(code)
     if override is not None:
@@ -232,7 +253,7 @@ GRADE_RANK = {
 }
 
 def meets_minimum_grade(grade: str, minimum_grade: str) -> bool:
-    if not grade or not minimum_grade:
+    if not isinstance(grade, str) or not isinstance(minimum_grade, str) or not grade or not minimum_grade:
         return False
 
     grade = grade.strip().upper()
@@ -279,14 +300,18 @@ def load_catalog_for(*cfgs, completed=()) -> Dict[str, Dict[str, object]]:
     or the programs require, so nobody is told to take a course they've
     already satisfied another way.
     """
-    prefixes, codes = set(), set()
+    prefixes, codes, required = set(), set(), set()
     for cfg in cfgs:
         if not cfg:
             continue
         prefixes.add(cfg["prefix"])
         prefixes.update(cfg.get("extra_prefixes", []))
         codes |= config_course_codes_all(cfg)
-    prefer = set(completed) | codes
+        required |= plan_universe(cfg) | {code for code, _, _ in cfg.get("required_courses", [])}
+    # Only options that are done or actually scheduled count -- a course that
+    # is merely one choice among several (e.g. a minor elective) must not
+    # become the prerequisite the plan waits on
+    prefer = set(completed) | required
     return catalog_store.planner_catalog(prefixes=prefixes, codes=codes, prefer=prefer)
 
 # Function to sort course codes by department prefix and course number
@@ -310,36 +335,52 @@ def _is_upper_division(code: str, prefix: str, min_num: int) -> bool:
     return int(parts[1]) >= min_num
 
 
-# Function to select an upper-division elective that can fill the elective hours
-# Accepts an optional degree_cfg for multi-major support; defaults to CS.
-def build_elective_pool(
+def course_hours(code: str, catalog: Dict[str, Dict[str, object]], config_hours: Dict[str, float] = None,
+                 fallback: float = 3) -> float:
+    """A course's credit hours: the program's own figure, else the catalog's
+    (0 for a 0-credit lab is a real value), else *fallback* when unknown."""
+    if config_hours and config_hours.get(code) is not None:
+        return config_hours[code]
+    credits = (catalog.get(code) or {}).get("credits")
+    return fallback if credits is None else credits
+
+
+def _elective_candidates(
     completed: Set[str],
     catalog: Dict[str, Dict[str, object]],
     required_codes: Set[str],
-    degree_cfg: dict = None,
-) -> Set[str]:
-    cfg = degree_cfg or CS_CONFIG
+    cfg: dict,
+    exclude: Set[str] = None,
+):
+    """(hours still needed, candidate codes in order) for the major's
+    upper-division elective hours.
+
+    *exclude* lists courses already spoken for elsewhere in the plan
+    (supporting courses, courses that filled a choice row, choice options)
+    so nothing counts or gets scheduled twice.
+    """
     prefix = cfg["prefix"]
     min_num = cfg.get("upper_division_min", 3000)
     elective_hours_needed_total = cfg.get("concentration_elective_hours", 12)
     high_level_opts = cfg.get("high_level_options", [])
+    exclude = set(exclude or ()) | set(required_codes)
+    spoken_for = set(cfg.get("_auto_applied_codes", ())) | {
+        code for key in ("supporting_courses",) for code, _, _ in cfg.get(key, [])
+    } | set(required_codes)
 
-    # Selects the upper-division course to fill
     done_electives = {
         code for code in completed
-        if _is_upper_division(code, prefix, min_num) and code not in required_codes
+        if _is_upper_division(code, prefix, min_num) and code not in spoken_for
     }
-
-    hours_done = sum((catalog.get(code, {}).get("credits") or 3) for code in done_electives)
+    hours_done = sum(course_hours(code, catalog) for code in done_electives)
     hours_needed = max(elective_hours_needed_total - hours_done, 0)
-
     if hours_needed <= 0:
-        return set()
+        return 0, []
 
     # A candidate is only useful if its own-subject prerequisites are things
     # the student has done or this plan will schedule -- otherwise it would
     # sit in "Remaining" forever waiting on a course nobody plans.
-    reachable = set(completed) | set(required_codes)
+    reachable = set(completed) | set(required_codes) | plan_universe(cfg)
 
     def _schedulable(code):
         prereqs = {p for p in catalog.get(code, {}).get("prereqs", set()) if p.startswith(prefix)}
@@ -348,7 +389,7 @@ def build_elective_pool(
     candidate_codes = {
         code for code in catalog
         if _is_upper_division(code, prefix, min_num)
-        and code not in required_codes
+        and code not in exclude
         and code not in completed
         and (catalog.get(code, {}).get("credits") or 0) > 0  # skip 0-credit lab sections
         and _schedulable(code)
@@ -364,21 +405,36 @@ def build_elective_pool(
         elif available_language_options:
             candidate_codes -= set(available_language_options[1:])
 
-    candidates = sorted_course_codes(candidate_codes)
+    return hours_needed, sorted_course_codes(candidate_codes)
 
+
+# Function to select upper-division electives that can fill the elective hours
+# Accepts an optional degree_cfg for multi-major support; defaults to CS.
+def build_elective_pool(
+    completed: Set[str],
+    catalog: Dict[str, Dict[str, object]],
+    required_codes: Set[str],
+    degree_cfg: dict = None,
+    exclude: Set[str] = None,
+) -> Set[str]:
+    cfg = degree_cfg or CS_CONFIG
+    hours_needed, candidates = _elective_candidates(completed, catalog, required_codes, cfg, exclude)
     pool = []
     hours_acc = 0
-
-    # Adds enough elective courses to cover the remaining hours
     for code in candidates:
         if hours_acc >= hours_needed:
             break
-
         pool.append(code)
-
-        hours_acc += catalog.get(code, {}).get("credits") or 3
-
+        hours_acc += course_hours(code, catalog)
     return set(pool)
+
+
+def elective_shortfall(completed, catalog, required_codes, cfg, exclude=None) -> float:
+    """Upper-division elective hours the catalog has no plannable courses
+    for (e.g. 24 hours of BUS electives when BUS has three courses)."""
+    hours_needed, candidates = _elective_candidates(completed, catalog, required_codes, cfg, exclude)
+    available = sum(course_hours(code, catalog) for code in candidates)
+    return max(hours_needed - available, 0)
 
 # Function that returns major prerequisites that are completed
 # Accepts an optional prefix to filter prereqs; defaults to CSCI.
@@ -428,13 +484,14 @@ def _remaining_pool_cfg(
     catalog: Dict[str, Dict[str, object]],
     required_codes: Set[str],
     cfg: dict,
+    exclude: Set[str] = None,
 ) -> Set[str]:
     remaining_required = {code for code in required_codes if code not in completed}
 
     if not catalog:
         return remaining_required
 
-    elective_pool = build_elective_pool(completed, catalog, required_codes, degree_cfg=cfg)
+    elective_pool = build_elective_pool(completed, catalog, required_codes, degree_cfg=cfg, exclude=exclude)
 
     return remaining_required | elective_pool
 
@@ -454,10 +511,14 @@ def _course_item(
     cat_info = catalog.get(code) or {}
     sup_info = supporting_info.get(code) or {}
     title = cat_info.get("title", "") or sup_info.get("title", "")
-    cat_credits = cat_info.get("credits") or None
-    sup_credits = sup_info.get("credits") or None
-    cfg_credits = (config_hours or {}).get(code) or None
-    hours = cat_credits or cfg_credits or sup_credits or 3
+    if (config_hours or {}).get(code) is not None:
+        hours = config_hours[code]
+    elif cat_info.get("credits") is not None:
+        hours = cat_info["credits"]
+    elif sup_info.get("credits") is not None:
+        hours = sup_info["credits"]
+    else:
+        hours = 3
     label = f"{code} - {title}" if title else code
 
     return {
@@ -493,15 +554,30 @@ def _build_generic_queue(remaining_map: Dict[str, Dict[str, object]]) -> List[Di
                 remaining_hours -= size
 
         else:
-            queue.append({
-                "kind": "requirement", 
-                "id": generic_id, 
-                "label": label, 
-                "hours": hours, 
-                "suggestion": suggestion,
-            })
+            for size in split_requirement_hours(hours):
+                queue.append({
+                    "kind": "requirement",
+                    "id": generic_id,
+                    "label": label,
+                    "hours": size,
+                    "suggestion": suggestion,
+                })
 
     return queue
+
+
+def split_requirement_hours(hours) -> List[float]:
+    """Course-sized pieces of a requirement row: 3 -> [3], 8 -> [4, 4],
+    9 -> [3, 3, 3], 40 -> ten 4s. Rows of 4 hours or less stay whole."""
+    if hours <= 4:
+        return [hours]
+    pieces = -(-hours // 4)  # ceil
+    pieces = int(max(pieces, round(hours / 3) if hours % 3 == 0 else pieces))
+    base = hours / pieces
+    if float(hours).is_integer():
+        whole, extra = divmod(int(hours), pieces)
+        return [whole + (1 if i < extra else 0) for i in range(pieces)]
+    return [base] * pieces
 
 # Function that generates the graduation plan
 # Accepts an optional degree_cfg for multi-major support; defaults to CS.
@@ -541,28 +617,33 @@ def generate_plan(
     supporting_courses_list = cfg["supporting_courses"]
     supporting_info = {code: {"title": title, "credits": hours} for code, hours, title in supporting_courses_list}
     required_codes = {code for code, _, _ in core_courses} | {code for code, _, _ in conc_courses}
-
-    prereq_map = cfg.get("prereq_map", {})
-    prereq_override_map = cfg.get("prereq_override_map", {})
+    supporting_codes = {code for code, _, _ in supporting_courses_list}
     supporting_prereq_map = cfg.get("supporting_prereq_map", {})
 
-    # Build a config_hours dict from all course lists so _course_item can fall back
-    # to the catalog-defined hours when the DB entry has 0 credits (lecture/lab splits).
+    # Courses the elective pool must not pick: they're already required, or
+    # they fill (or could fill) one of the program's choice rows
+    elective_exclude = supporting_codes | set(cfg.get("_auto_applied_codes", ()))
+    for options in (cfg.get("generic_options") or {}).values():
+        elective_exclude |= set(options)
+
+    # Labs that go with a lecture are scheduled in the same term as it
+    lab_partners = {lecture: list(labs) for lecture, labs in (cfg.get("lab_partners") or {}).items()}
+    lecture_of = {lab: lecture for lecture, labs in lab_partners.items() for lab in labs}
+
+    # Build a config_hours dict from all course lists so a course's hours
+    # come from the program first (lecture/lab splits), then the catalog.
     config_hours: Dict[str, float] = {}
     for code, hours, _ in core_courses + conc_courses + supporting_courses_list:
         config_hours[code] = hours
+
+    def _hrs(code):
+        return course_hours(code, catalog, config_hours)
 
     def _offered(code, season, year):
         return _offered_in_term(code, season, year, cfg)
 
     def _prereqs_satisfied(code, completed):
-        prereqs = _effective_prereqs(
-            code,
-            catalog,
-            prereq_map,
-            prereq_override_map,
-            prefix,
-        )
+        prereqs = _full_prereqs(code, cfg, catalog)
 
         if not prereqs.issubset(completed):
             return False
@@ -586,18 +667,6 @@ def generate_plan(
 
         return True
 
-    def _next_courses_cfg(completed, available):
-        candidates = []
-        for code in sorted_course_codes(available):
-            prereqs = _effective_prereqs(code, catalog, prereq_map, prereq_override_map, prefix)
-            # prereq_map entries are never prefix-filtered: a prerequisite
-            # from another major's course list (e.g. PHYS 2120 needing
-            # MATH 1910) must actually be
-            # completed, not just assumed handled elsewhere.
-            if _prereqs_satisfied(code, completed):
-                candidates.append(code)
-        return candidates
-
     current_completed = set(completed_courses)
     supporting_remaining = [code for code, _, _ in supporting_courses_list if code not in current_completed]
 
@@ -619,12 +688,29 @@ def generate_plan(
         left = hours - entered
         if left > 0:
             remaining_map[gid] = {"label": label, "hours": left, "suggestions": suggestions}
+
+    # Upper-division elective hours the catalog has no plannable courses for
+    # still have to show up somewhere
+    shortfall = elective_shortfall(current_completed, catalog, required_codes, cfg, elective_exclude) if catalog else 0
+    if shortfall > 0:
+        remaining_map["ud_elective_shortfall"] = {
+            "label": f"{prefix} upper-division elective",
+            "hours": shortfall,
+            "suggestions": ["Choose with your advisor"],
+        }
     generic_queue = _build_generic_queue(remaining_map)
 
     plan = {}
+    idle_terms = 0
+
+    def _work_left():
+        pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
+        return bool(pool or supporting_remaining or generic_queue)
 
     for term_index in range(1, target_terms + 1):
         semester_label = term_label(term_index, start_season, start_year)
+        if not _work_left():
+            break
         if not include_summer and semester_label.startswith("Summer"):
             plan[semester_label] = [{
                 "kind": "note",
@@ -642,26 +728,50 @@ def generate_plan(
         term_season, term_year = semester_label.split()
         term_year = int(term_year)
 
-        cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg)
+        def _fits(hrs):
+            return not hours_used or hours_used + hrs <= TARGET_HOURS_PER_TERM
 
-        cs_candidates = [
-            code for code in _next_courses_cfg(current_completed, cs_pool)
-            if _offered(code, term_season, term_year)
-        ]
+        def _labs_ready(code):
+            """This lecture's labs that still need scheduling (and can be)."""
+            return [
+                lab for lab in lab_partners.get(code, [])
+                if lab not in current_completed and lab not in newly_completed
+                and (lab in remaining_required_now or lab in supporting_remaining)
+            ]
 
-        # Add available courses without exceeding target
-        for code in cs_candidates:
-            hrs = catalog.get(code, {}).get("credits") or 3
-
-            if hours_used and hours_used + hrs > TARGET_HOURS_PER_TERM:
-                break
-
+        def _schedule(code):
+            nonlocal hours_used
             term_items.append(_course_item(code, catalog, supporting_info, config_hours))
-
-            hours_used += hrs
+            hours_used += _hrs(code)
             newly_completed.add(code)
+            if code in supporting_remaining:
+                supporting_remaining.remove(code)
 
-        i = 0
+        def _try(code):
+            """Schedule *code* (with its labs) if it fits this term."""
+            if code in newly_completed:
+                return
+            lecture = lecture_of.get(code)
+            if lecture and lecture not in current_completed and lecture not in newly_completed:
+                return  # a lab waits for its lecture
+            labs = _labs_ready(code)
+            # Lecture and lab go together, so both must be ready this term
+            if any(not _full_prereqs(lab, cfg, catalog) <= current_completed
+                   or not _offered(lab, term_season, term_year) for lab in labs):
+                return
+            if not _fits(_hrs(code) + sum(_hrs(lab) for lab in labs)):
+                return
+            _schedule(code)
+            for lab in labs:
+                _schedule(lab)
+
+        cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
+        remaining_required_now = {code for code in required_codes if code not in current_completed}
+
+        # Major and concentration courses (and electives) whose prerequisites are met
+        for code in sorted_course_codes(cs_pool):
+            if _prereqs_satisfied(code, current_completed) and _offered(code, term_season, term_year):
+                _try(code)
 
         # Add supporting courses whose prerequisites are satisfied and which
         # are actually offered this term (checked against the course's own
@@ -671,42 +781,36 @@ def generate_plan(
         # Chemistry student needs PHYS 2120's real PHYS 2110 *and* MATH 1910
         # requirements, not just whichever one CHEM_CONFIG's team happened
         # to write down.
-        while i < len(supporting_remaining):
-            code = supporting_remaining[i]
+        for code in list(supporting_remaining):
             prereqs = _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
+            if prereqs.issubset(current_completed) and _offered(code, term_season, term_year):
+                _try(code)
 
-            if not prereqs.issubset(current_completed) or not _offered(code, term_season, term_year):
-                i += 1
-                continue
-
-            hrs = supporting_info.get(code, {}).get("credits") or 3
-
-            if hours_used and hours_used + hrs > TARGET_HOURS_PER_TERM:
-                i += 1
-                continue
-
-            term_items.append(_course_item(code, catalog, supporting_info, config_hours))
-
-            hours_used += hrs
-            newly_completed.add(code)
-            supporting_remaining.pop(i)
-
-        # Fills remaining space with generic requirements
-        while generic_queue:
-            chunk = generic_queue[0]
-            if hours_used and hours_used + chunk["hours"] > TARGET_HOURS_PER_TERM:
-                break
-
-            term_items.append(generic_queue.pop(0))
-            hours_used += chunk["hours"]
+        # Fills remaining space with requirement rows, skipping any piece
+        # that doesn't fit rather than stopping at it
+        leftover = []
+        for chunk in generic_queue:
+            if _fits(chunk["hours"]):
+                term_items.append(chunk)
+                hours_used += chunk["hours"]
+            else:
+                leftover.append(chunk)
+        generic_queue[:] = leftover
 
         if not term_items:
+            # Nothing can be taken this term (e.g. a summer with no offerings,
+            # or waiting on a fall-only course) -- keep going, but stop after
+            # a full year of no progress
             plan[semester_label] = [{
                 "kind": "note",
-                "label": "No available courses meet prerequisites",
+                "label": "No courses available this term",
             }]
-            break
+            idle_terms += 1
+            if idle_terms >= 3:
+                break
+            continue
 
+        idle_terms = 0
         plan[semester_label] = term_items
 
         # Makes a course available as a prerequisite next semester
@@ -715,7 +819,7 @@ def generate_plan(
     remaining_items = []
 
     # Uses anything that could not fit in the requested number of terms
-    cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg)
+    cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
 
     for code in sorted_course_codes(cs_pool):
         remaining_items.append(_course_item(code, catalog, supporting_info, config_hours))
@@ -986,7 +1090,7 @@ def render_personal_prereq_mermaid(
 
     def node_label(code: str, info: dict) -> str:
         check = "Done: " if info.get("status") == "completed" else ""
-        title = info.get("title", "")
+        title = _mermaid_text(info.get("title", ""))
         return f"{check}{code}<br/>{title}" if title else f"{check}{code}"
 
     lines = ["graph TD"]
@@ -1017,6 +1121,12 @@ def render_personal_prereq_mermaid(
     return "\n".join(lines)
 
 
+def _mermaid_text(text) -> str:
+    """Catalog text made safe inside a Mermaid ["..."] label."""
+    text = " ".join(str(text or "").split())
+    return text.replace('"', "#quot;").replace("<", "#lt;").replace(">", "#gt;")
+
+
 # Function to convert the prerequisite graph into Mermaid format
 def render_prereq_mermaid(nodes: Dict[str, Dict[str, object]], edges: List[tuple]) -> str:
 
@@ -1026,7 +1136,8 @@ def render_prereq_mermaid(nodes: Dict[str, Dict[str, object]], edges: List[tuple
 
     # Nested function that creates a visible label for a Mermaid node
     def node_label(code, info):
-        return f"{code}<br/>{info['title']}" if info.get("title") else code
+        title = _mermaid_text(info.get("title", ""))
+        return f"{code}<br/>{title}" if title else code
 
     lines = ["graph LR"]
 

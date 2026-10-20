@@ -186,7 +186,9 @@ def build_course(detail: dict) -> tuple[str | None, dict]:
     credits = None
     rng = parse_hours_range(head_text, _CREDIT_LINE_RE) or parse_hours_range(rest_text, _CREDIT_LINE_RE)
     if rng:
-        credits = rng[0] if rng[0] == rng[1] else rng[1]
+        # Variable credit ("1 to 12 credit hours", internships): count a
+        # typical 3 when that's in range, else the minimum -- never the max
+        credits = rng[0] if rng[0] == rng[1] else (3 if rng[0] <= 3 <= rng[1] else rng[0])
 
     req = parse_requisites(rest_text)
     req["prereqs"] = [c for c in req["prereqs"] if c != code]
@@ -230,12 +232,19 @@ def _section_items(core: dict, course_code_by_id: dict) -> list[dict]:
             bucket.setdefault(target, []).append(adhoc)
         else:
             loose.append(adhoc)
+    # "right" sits inline next to its course (e.g. "MATH 1920 ... OR"), so it
+    # comes before anything placed on the lines "after" it
+    for adhocs in after.values():
+        adhocs.sort(key=lambda a: a.get("placement") != "right")
 
     def adhoc_items(adhoc):
         text = html_to_text(adhoc.get("content"))
         out = []
         if not text:
-            return out
+            # A blank line on the catalog page: it separates groups, so an
+            # "OR"/"AND" before it doesn't join across it (the catalog has a
+            # few stray trailing connectors, e.g. "BIOL 4351 OR" + blank line)
+            return [{"sep": True}] if adhoc.get("placement") != "before" else out
         # An "OR"/"AND" connector, possibly trailing a footnote marker or
         # gen-ed tag: "(Sci Lit) AND", "§ OR"
         m = re.match(r"^(?P<note>.*?)\s*\b(?P<op>OR|AND)\s*$", text.replace("\n", " "))

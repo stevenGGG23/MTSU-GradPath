@@ -1,6 +1,8 @@
 import gzip
 import json
 import os
+import re
+import secrets
 import threading
 import time
 from datetime import date
@@ -8,15 +10,16 @@ from datetime import date
 from flask import (
     Flask,
     Response,
-    flash,
+    g,
     jsonify,
-    redirect,
     render_template,
     request,
     url_for,
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from sqlalchemy import or_, update
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mtsugradpath import catalog_store
 from mtsugradpath.catalog_programs import auto_generic_hours, tbc_area_options
@@ -61,16 +64,38 @@ from mtsugradpath.planner import (
     default_start_season,
     generate_plan,
     load_catalog_for,
+    GRADE_RANK,
     meets_minimum_grade,
     render_personal_prereq_mermaid,
     render_prereq_mermaid,
     validate_plan,
 )
 
-# Create the Flask application and its databases
+# Create the Flask application
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+
+_secret = os.environ.get("SECRET_KEY", "")
+if not _secret or _secret == "replace_with_a_long_random_string":
+    raise RuntimeError(
+        "SECRET_KEY is not set. Generate one with "
+        "`python -c \"import secrets; print(secrets.token_hex(32))\"` and set it in .env "
+        "or the host's environment variables."
+    )
+app.config["SECRET_KEY"] = _secret
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+# Hosted deployments are HTTPS-only; local dev runs over plain http
+ON_HOST = bool(os.getenv("RENDER") or os.getenv("VERCEL"))
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "1" if ON_HOST else "0") == "1"
+# A planner form is a few KB; anything far bigger is abuse
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+app.config["MAX_FORM_MEMORY_SIZE"] = 64 * 1024
+# Static assets are versioned in their URLs (see static_url), so browsers can keep them
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 7 * 24 * 3600
+
+# Render and Vercel sit behind one proxy hop: trust its X-Forwarded-For /
+# -Proto so the rate limiter sees each visitor's address, not the proxy's
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # Rate limiting, keyed per client IP. Storage is in-memory (the default) --
 # with multiple gunicorn workers each worker counts independently, so the
@@ -83,10 +108,72 @@ limiter = Limiter(
     app=app,
     default_limits=["60 per minute", "1000 per hour"],
     storage_uri="memory://",
+    headers_enabled=True,
 )
 
+# The database only holds small shared state (export status, equivalencies),
+# so the site still serves plans when it's unreachable
 with app.app_context():
-    init_db()
+    try:
+        init_db()
+    except Exception:
+        app.logger.exception("Database unavailable at startup; continuing without it")
+
+
+# ── Response hardening ────────────────────────────────────────────────────────
+
+@app.before_request
+def _make_nonce():
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def _template_globals():
+    return {"csp_nonce": getattr(g, "csp_nonce", ""), "static_url": static_url}
+
+
+_STATIC_VERSIONS: dict = {}
+
+
+def static_url(filename):
+    """/static/<file>?v=<mtime>, so a deploy busts browser caches."""
+    version = _STATIC_VERSIONS.get(filename)
+    if version is None:
+        try:
+            version = str(int(os.path.getmtime(os.path.join(app.static_folder, filename))))
+        except OSError:
+            version = "0"
+        _STATIC_VERSIONS[filename] = version
+    return url_for("static", filename=filename, v=version)
+
+
+_CDN = "https://cdn.jsdelivr.net"
+
+
+@app.after_request
+def _security_headers(response):
+    headers = response.headers
+    headers.setdefault("X-Content-Type-Options", "nosniff")
+    headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    headers.setdefault("X-Frame-Options", "DENY")
+    headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.is_secure:
+        headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if (response.mimetype or "") == "text/html":
+        nonce = getattr(g, "csp_nonce", "")
+        headers.setdefault("Content-Security-Policy", "; ".join([
+            "default-src 'self'",
+            f"script-src 'self' 'nonce-{nonce}' {_CDN}",
+            f"style-src 'self' 'unsafe-inline' {_CDN}",
+            f"font-src 'self' {_CDN}",
+            "img-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]))
+    return response
 
 
 # Gzip text responses. The planner page carries every major/minor name and
@@ -94,12 +181,15 @@ with app.app_context():
 # the size, which matters most on phones.
 @app.after_request
 def _gzip(response):
+    if not (response.mimetype or "").startswith(("text/", "application/json")):
+        return response
+    response.vary.add("Accept-Encoding")
     if (
         response.status_code != 200
         or response.direct_passthrough
-        or "gzip" not in request.headers.get("Accept-Encoding", "")
+        or response.is_streamed
+        or request.accept_encodings.quality("gzip") <= 0
         or "Content-Encoding" in response.headers
-        or not (response.mimetype or "").startswith(("text/", "application/json"))
     ):
         return response
     data = response.get_data()
@@ -108,14 +198,16 @@ def _gzip(response):
     response.set_data(gzip.compress(data, compresslevel=6))
     response.headers["Content-Encoding"] = "gzip"
     response.headers["Content-Length"] = str(len(response.get_data()))
-    response.vary.add("Accept-Encoding")
     return response
+
 
 # Load the catalog export (and convert every program) at startup, so the
 # first visitor doesn't pay for it
 catalog_store.data()
 picker_majors()
 picker_minors()
+if not catalog_store.has_data():
+    app.logger.error("No catalog data loaded -- run `python scrape_courses.py` to create catalog_data/catalog.json")
 
 
 # A full catalog re-export takes a while (the catalog's firewall limits how
@@ -169,17 +261,49 @@ def _set_sync_state(**fields):
         db_session.commit()
 
 
-def _admin_auth_ok():
-    """Checks HTTP Basic Auth against SYNC_ADMIN_USER/PASSWORD.
+def _claim_sync_lock():
+    """Atomically mark an export as running; False if one already is.
 
-    If those env vars aren't set (local dev), the re-export stays open.
+    A single UPDATE ... WHERE, so two workers can't both start an export
+    (both would wipe and rewrite the same download directory).
+    """
+    now = time.time()
+    with SessionLocal() as db_session:
+        if db_session.get(SyncStatus, 1) is None:
+            db_session.add(SyncStatus(id=1, running=False))
+            try:
+                db_session.commit()
+            except Exception:
+                db_session.rollback()
+        result = db_session.execute(
+            update(SyncStatus)
+            .where(SyncStatus.id == 1)
+            .where(or_(
+                SyncStatus.running.is_(False),
+                SyncStatus.running.is_(None),
+                SyncStatus.started_at.is_(None),
+                SyncStatus.started_at < now - STALE_SYNC_SECONDS,
+            ))
+            .values(running=True, started_at=now, done=False, total=0, fresh=0, cached=0, errors="")
+        )
+        db_session.commit()
+        return result.rowcount == 1
+
+
+def _admin_auth_ok():
+    """HTTP Basic Auth against SYNC_ADMIN_USER/PASSWORD.
+
+    Fails closed: with no credentials configured, re-export is refused unless
+    ALLOW_OPEN_SYNC=1 is set (local development only).
     """
     if not (SYNC_ADMIN_USER and SYNC_ADMIN_PASSWORD):
-        return True
+        return os.getenv("ALLOW_OPEN_SYNC") == "1"
     auth = request.authorization
-    return bool(
-        auth and auth.username == SYNC_ADMIN_USER and auth.password == SYNC_ADMIN_PASSWORD
-    )
+    if not auth or auth.username is None or auth.password is None:
+        return False
+    user_ok = secrets.compare_digest(auth.username.encode(), SYNC_ADMIN_USER.encode())
+    pass_ok = secrets.compare_digest(auth.password.encode(), SYNC_ADMIN_PASSWORD.encode())
+    return user_ok and pass_ok
 
 
 def _admin_auth_challenge():
@@ -188,6 +312,47 @@ def _admin_auth_challenge():
         401,
         {"WWW-Authenticate": 'Basic realm="GradPath Admin"'},
     )
+
+
+_ERRORS = {
+    404: ("Page not found", "That page doesn't exist. Your planner selections are still saved in this tab."),
+    413: ("That's too much at once", "The form you sent was much bigger than a degree plan needs. "
+                                    "Try again with fewer courses."),
+    429: ("Too many requests", "You're going a little fast. Wait a moment and try again."),
+    500: ("Something went wrong", "GradPath hit an unexpected error building that page. Please try again; "
+                                  "if it keeps happening, let the GradPath team know which major you picked."),
+}
+
+
+def _error_page(code):
+    heading, message = _ERRORS[code]
+    try:
+        body = render_template("error.html", code=code, heading=heading, message=message,
+                               catalog_meta=catalog_store.meta(), hide_sync=True)
+    except Exception:
+        body = f"<h1>{heading}</h1><p>{message}</p>"
+    return body, code
+
+
+@app.errorhandler(404)
+def _not_found(_error):
+    return _error_page(404)
+
+
+@app.errorhandler(413)
+def _too_large(_error):
+    return _error_page(413)
+
+
+@app.errorhandler(429)
+def _too_many(_error):
+    return _error_page(429)
+
+
+@app.errorhandler(500)
+def _server_error(_error):
+    # Flask has already logged the traceback
+    return _error_page(500)
 
 
 # Function that formats credit hours with a display label
@@ -243,20 +408,68 @@ def _second_major_cfg(primary_cfg, key):
     return second_cfg if second_major_allowed(primary_cfg, second_cfg) else None
 
 
-# Courses shown in a major's "check off what you've taken" list: everything a
-# catalog-generated program names (required courses and each choice's
-# options), plus the rest of the subject when the program has upper-division
-# electives in it. Hand-curated majors list their whole subject, as before.
-def _checklist_codes(cfg):
-    codes = []
+# The "check off what you've taken" list for one major, as titled sections.
+#
+# Catalog majors follow the catalog's own sections (required courses first,
+# then each section's options), then the rest of the subject in a collapsed
+# "More BIOL courses" group when the program has upper-division electives.
+# 0-credit labs that ride along with a lecture are left out -- checking the
+# lecture counts both. Hand-curated majors list their subject by level.
+def _checklist_sections(cfg, exclude=()):
+    listed = set(exclude)
+    required = _required_codes(cfg)
+    sections = []
+
+    def take(codes):
+        out = [c for c in dict.fromkeys(codes) if c not in listed and catalog_store.course(c)]
+        listed.update(out)
+        return out
+
     if cfg.get("catalog_driven"):
-        codes = sorted(config_course_codes_all(cfg))
+        labs = {
+            lab for lab_set in cfg.get("coreq_map", {}).values() for lab in lab_set
+            if not catalog_store.credits(lab, default=0)
+        }
+        listed |= labs
+        options = cfg.get("generic_options") or {}
+        for section in cfg.get("display_sections", []):
+            codes = []
+            for row in section["rows"]:
+                if row["type"] == "course":
+                    codes.append(row["code"])
+                elif row["type"] == "generic":
+                    codes += options.get(row["id"], [])
+            codes = sorted(take(codes), key=lambda c: c not in required)
+            if codes:
+                sections.append({"title": section["label"], "codes": codes, "collapsed": False})
         if cfg.get("concentration_elective_hours"):
-            codes += catalog_store.codes_for_prefix(cfg["prefix"])
+            more = take(catalog_store.codes_for_prefix(cfg["prefix"]))
+            if more:
+                sections.append({
+                    "title": f"More {cfg['prefix']} courses",
+                    "note": "count toward upper-division electives",
+                    "codes": more,
+                    "collapsed": True,
+                })
     else:
-        for prefix in major_prefixes(cfg):
-            codes += catalog_store.codes_for_prefix(prefix)
-    return [code for code in dict.fromkeys(codes) if catalog_store.course(code)]
+        codes = take(c for prefix in major_prefixes(cfg) for c in catalog_store.codes_for_prefix(prefix))
+        by_level = {}
+        for code in codes:
+            by_level.setdefault(f"{code.split()[1][0]}000-Level", []).append(code)
+        sections = [{"title": level, "codes": by_level[level], "collapsed": False} for level in sorted(by_level)]
+    return sections
+
+
+def _course_card(code, required, min_grades):
+    info = catalog_store.course(code) or {}
+    return {
+        "code": code,
+        "title": info.get("title", ""),
+        "label": f"{code} - {info.get('title', '')}",
+        "required": code in required,
+        "desc": info.get("desc", ""),
+        "minimum_grade": min_grades.get(code),
+    }
 
 
 def _required_codes(cfg):
@@ -285,13 +498,11 @@ def _program_option(key, cfg):
 @limiter.exempt
 def courses_json():
     version = catalog_store.meta().get("fetched_at", "")
-    etag = f'"courses-{version}"'
-    if request.headers.get("If-None-Match") == etag:
-        return Response(status=304)
     resp = Response(json.dumps(catalog_store.search_index()), mimetype="application/json")
-    resp.headers["ETag"] = etag
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    resp.set_etag(f"courses-{version}")
+    resp.cache_control.public = True
+    resp.cache_control.max_age = 86400
+    return resp.make_conditional(request)
 
 
 # Function that displays the planner form and processes the submitted degree plans
@@ -314,8 +525,6 @@ def index():
     second_cfg = _second_major_cfg(degree_cfg, saved_state["second_major"])
     saved_state["second_major"] = second_cfg["key"] if second_cfg else ""
 
-    primary_codes = _checklist_codes(degree_cfg)
-    second_codes = [c for c in _checklist_codes(second_cfg) if c not in set(primary_codes)] if second_cfg else []
     display_prefixes = list(dict.fromkeys(
         major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
     ))
@@ -326,29 +535,31 @@ def index():
     if second_cfg:
         form_cfg, _ = apply_second_major_to_config(degree_cfg, second_cfg, set())
 
-    # Minimum grades that a course's prerequisites call for, shown as a tooltip
-    prerequisite_grade_requirements = {}
-    for code in primary_codes + second_codes:
-        prerequisite_grade_requirements.update((catalog_store.course(code) or {}).get("min_grades", {}))
+    # One checklist block per major; the second major skips courses the
+    # first already lists
+    primary_sections = _checklist_sections(degree_cfg)
+    shown = {c for sec in primary_sections for c in sec["codes"]}
+    second_sections = _checklist_sections(second_cfg, exclude=shown) if second_cfg else []
 
-    required = _required_codes(degree_cfg) | (_required_codes(second_cfg) if second_cfg else set())
-    major_courses = []
-    for group, codes in ((0, primary_codes), (1, second_codes)):
-        for code in codes:
-            info = catalog_store.course(code) or {}
-            number = code.split()[1]
-            major_courses.append({
-                "code": code,
-                "label": f"{code} - {info.get('title', '')}",
-                "credits": info.get("credits") or 0,
-                "minimum_grade": prerequisite_grade_requirements.get(code),
-                "level": f"{number[0]}000-Level",
-                "required": code in required,
-                "desc": info.get("desc", ""),
-                # 0 = primary major, 1 = second major (checklist sections)
-                "group": group,
-            })
-    major_courses.sort(key=lambda c: (c["group"], c["level"], c["code"]))
+    # Minimum grades that a course's prerequisites call for, shown as a tooltip
+    all_codes = shown | {c for sec in second_sections for c in sec["codes"]}
+    min_grades = {}
+    for code in all_codes:
+        min_grades.update((catalog_store.course(code) or {}).get("min_grades", {}))
+
+    checklist = []
+    for cfg, sections in ((degree_cfg, primary_sections), (second_cfg, second_sections)):
+        if cfg is None:
+            continue
+        required = _required_codes(cfg)
+        checklist.append({
+            "name": cfg["name"],
+            "sections": [
+                {**sec, "courses": [_course_card(c, required, min_grades) for c in sec["codes"]]}
+                for sec in sections
+            ],
+        })
+    course_count = len(all_codes)
 
     majors = [_program_option(key, cfg) for key, cfg in picker_majors()]
     # Old links to the generic Biology/Math/Physics configs still work; keep
@@ -380,7 +591,8 @@ def index():
 
     return render_template(
         "index.html",
-        major_courses=major_courses,
+        checklist=checklist,
+        course_count=course_count,
         degree_cfg=degree_cfg,
         degree_display_name=display_name(degree_cfg),
         second_cfg=second_cfg,
@@ -413,23 +625,48 @@ def index():
     )
 
 
+_COURSE_CODE_RE = re.compile(r"[A-Z]{2,5} \d{4}[A-Z]?")
+MAX_COMPLETED_COURSES = 200
+MAX_MINORS = 4
+
+
+def _read_course_grades(raw):
+    """{code: grade} from the hidden course_grades field, keeping only
+    well-formed entries (anything else is ignored, never a 500)."""
+    if not raw or len(raw) > 8000:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    grades = {}
+    for code, grade in list(data.items())[:MAX_COMPLETED_COURSES]:
+        if isinstance(code, str) and isinstance(grade, str):
+            code = " ".join(code.split()).upper()
+            grade = grade.strip().upper()
+            if _COURSE_CODE_RE.fullmatch(code) and grade in GRADE_RANK:
+                grades[code] = grade
+    return grades
+
+
 def _plan():
     completed_text = request.form.get("completed_courses", "")
 
-    # Convert the submitted course list into course codes
-    completed_courses = {
-        " ".join(code.split()).upper()
-        for code in completed_text.splitlines()
-        if code.strip()
-    }
+    # Convert the submitted course list into course codes. Only things shaped
+    # like a course code ("CSCI 1170") count, and a whole degree is well under
+    # MAX_COMPLETED_COURSES -- this keeps junk and oversized input out.
+    completed_courses = set()
+    for line in completed_text.splitlines():
+        code = " ".join(line.split()).upper()
+        if _COURSE_CODE_RE.fullmatch(code):
+            completed_courses.add(code)
+            if len(completed_courses) >= MAX_COMPLETED_COURSES:
+                break
 
     # Read grades for completed prerequisite courses that require a minimum grade
-    try:
-        course_grades = json.loads(request.form.get("course_grades", "{}"))
-        if not isinstance(course_grades, dict):
-            course_grades = {}
-    except (json.JSONDecodeError, TypeError):
-        course_grades = {}
+    course_grades = _read_course_grades(request.form.get("course_grades", ""))
 
     # Read selected major(s) and get the full degree configs
     degree_cfg = get_full_degree_config(request.form.get("major", "cs"))
@@ -439,11 +676,13 @@ def _plan():
     # Optional minors -- unknown ones, repeats, and ones in either major's
     # own subject are dropped
     minor_cfgs = []
-    for key in request.form.getlist("minor"):
+    for key in request.form.getlist("minor")[:MAX_MINORS * 3]:
+        if len(minor_cfgs) >= MAX_MINORS:
+            break
         minor_cfg = get_minor_config(key)
         if (
             minor_cfg
-            and minor_cfg not in minor_cfgs
+            and minor_cfg["name"] not in {m["name"] for m in minor_cfgs}
             and minor_allowed_for_major(minor_cfg, all_major_prefixes)
         ):
             minor_cfgs.append(minor_cfg)
@@ -461,6 +700,15 @@ def _plan():
         start_year = int(request.form.get("start_year") or date.today().year)
     except ValueError:
         start_year = date.today().year
+
+    # A checked lecture counts for its 0-credit lab (catalog majors don't
+    # even list those labs); labs that carry credit still get a warning
+    # below if they're missing
+    for cfg_item in (degree_cfg, second_cfg, *minor_cfgs):
+        if cfg_item:
+            for lecture, labs in cfg_item.get("coreq_map", {}).items():
+                if lecture in completed_courses:
+                    completed_courses |= {lab for lab in labs if not catalog_store.credits(lab, default=0)}
 
     # One catalog covering every course any of the chosen programs can plan
     catalog = load_catalog_for(degree_cfg, second_cfg, *minor_cfgs, completed=completed_courses)
@@ -501,12 +749,13 @@ def _plan():
 
     # Requirements that list specific courses ("Choose one: MATH 1530 or
     # BIA 2610") fill in from the courses the student checked off
-    auto_hours, auto_applied = auto_generic_hours(planning_cfg, validated_completed_courses)
+    # ("Required" here means the primary major's own courses: a course the
+    # second major requires can still fill the primary's gen-ed rows.)
+    auto_hours, auto_applied = auto_generic_hours(
+        planning_cfg, validated_completed_courses, required=_required_codes(degree_cfg)
+    )
     for gid, hours in auto_hours.items():
         generic_hours[gid] = max(_as_float(generic_hours.get(gid)), hours)
-
-    if second_cfg:
-        second_audit = build_second_major_audit(second_cfg, completed_courses, generic_hours, catalog)
 
     minor_audits = []
     for minor_cfg in minor_cfgs:
@@ -520,14 +769,25 @@ def _plan():
     # minor(s) the student picked: the minor's own courses get planned
     # instead of a generic placeholder, and the audit credits the minor's
     # progress toward that row.
+    # (Same for a second major that requires a minor.)
     audit_generic_hours = dict(generic_hours)
-    minor_bucket = degree_cfg.get("minor_bucket_id")
-    if minor_cfgs and minor_bucket:
+    minor_buckets = {cfg_item.get("minor_bucket_id") for cfg_item in (degree_cfg, second_cfg) if cfg_item} - {None}
+    if minor_cfgs and minor_buckets:
         planning_cfg = dict(planning_cfg)
         planning_cfg["supporting_generic"] = [
-            row for row in planning_cfg["supporting_generic"] if row[0] != minor_bucket
+            row for row in planning_cfg["supporting_generic"] if row[0] not in minor_buckets
         ]
-        audit_generic_hours[minor_bucket] = sum(_as_float(m["completed_hours"]) for m in minor_audits)
+        minor_progress = sum(_as_float(m["completed_hours"]) for m in minor_audits)
+        for bucket in minor_buckets:
+            audit_generic_hours[bucket] = minor_progress
+
+    if second_cfg:
+        second_audit = build_second_major_audit(second_cfg, completed_courses, audit_generic_hours, catalog)
+
+    # Courses already used to fill a choice or gen-ed row aren't also
+    # picked (or counted) as upper-division electives
+    planning_cfg = dict(planning_cfg)
+    planning_cfg["_auto_applied_codes"] = {code for codes in auto_applied.values() for code in codes}
 
     # Auto-computed elective progress wins over the (absent) form fields
     planning_generic_hours = {**generic_hours, **planning_generic_hours}
@@ -605,6 +865,10 @@ def _plan():
     for minor_audit in minor_audits:
         for entry in minor_audit["entries"]:
             all_applied_codes.update(entry.get("applied", []))
+    if second_audit:
+        for group in second_audit["groups"]:
+            for entry in group["entries"]:
+                all_applied_codes.update(entry.get("applied", []))
     # Courses that filled a choice or gen-ed row on their own
     for codes in auto_applied.values():
         all_applied_codes.update(codes)
@@ -760,10 +1024,6 @@ def prerequisites():
 # data is `python scrape_courses.py` + commit; this is for a quick refresh on
 # a running server, written to the data directory and picked up by every worker.
 def _run_sync_background():
-    _set_sync_state(
-        running=True, total=0, fresh=0, cached=0, errors=[], done=False,
-        started_at=time.time(),
-    )
     errors = []
     total = 0
     try:
@@ -774,35 +1034,47 @@ def _run_sync_background():
         catalog_store.reload()
         clear_catalog_cache()
     except Exception as exc:
-        errors.append(str(exc)[:200])
+        app.logger.exception("Catalog export failed")
+        errors.append(type(exc).__name__ + ": " + str(exc)[:160])
     finally:
         # Always clears the running flag, even if something above raised --
         # otherwise the lock never clears.
-        _set_sync_state(
-            running=False, total=total, fresh=total, cached=0,
-            errors=errors, done=True,
-        )
+        try:
+            _set_sync_state(
+                running=False, total=total, fresh=total, cached=0,
+                errors=errors, done=True,
+            )
+        except Exception:
+            app.logger.exception("Couldn't record catalog export status")
 
 
-@app.route("/sync", methods=["GET", "POST"])
-@limiter.limit("15 per minute")
+@app.route("/sync", methods=["POST"])
+@limiter.limit("5 per minute")
 def sync():
-    # Re-downloading the catalog is slow and hits MTSU's site, so it's admin-only.
+    """Re-export the catalog on a running server (admin only).
+
+    The normal way to refresh data is `python scrape_courses.py` + commit (or
+    the monthly GitHub Action); this is for an urgent fix between deploys.
+    POST with an X-Requested-With header, so a link or image on another site
+    can't trigger it with a browser's cached admin credentials:
+
+        curl -u admin:pass -X POST -H "X-Requested-With: curl" https://.../sync
+    """
+    if os.getenv("VERCEL"):
+        # Serverless functions freeze after responding; the export would never finish
+        return jsonify({"status": "unavailable", "reason": "Refresh the catalog with scrape_courses.py and redeploy."}), 501
     if not _admin_auth_ok():
         return _admin_auth_challenge()
-
-    state = _get_sync_state()
-    if state["running"] and not _sync_is_stale(state):
-        if request.method == "GET":
-            flash("A catalog export is already running.", "info")
-            return redirect(url_for("index"))
-        return jsonify({"status": "running", "total": state["total"]})
-
-    t = threading.Thread(target=_run_sync_background, daemon=True)
-    t.start()
-    if request.method == "GET":
-        flash("Catalog export started in the background.", "info")
-        return redirect(url_for("index"))
+    if not request.headers.get("X-Requested-With"):
+        return jsonify({"status": "error", "reason": "X-Requested-With header required"}), 400
+    try:
+        claimed = _claim_sync_lock()
+    except Exception:
+        app.logger.exception("Couldn't claim the catalog export lock")
+        return jsonify({"status": "error", "reason": "database unavailable"}), 503
+    if not claimed:
+        return jsonify({"status": "running", "total": _get_sync_state()["total"]})
+    threading.Thread(target=_run_sync_background, daemon=True).start()
     return jsonify({"status": "started"})
 
 
@@ -818,15 +1090,17 @@ def sync_status():
 @limiter.exempt
 def healthz():
     meta = catalog_store.meta()
+    ok = catalog_store.has_data()
     return jsonify({
-        "ok": catalog_store.has_data(),
+        "ok": ok,
         "catalog": meta.get("name"),
         "fetched_at": meta.get("fetched_at"),
         "courses": len(catalog_store.courses()),
         "majors": len(picker_majors()),
         "minors": len(picker_minors()),
-    })
+    }), (200 if ok else 503)
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    # Local development only; production runs under gunicorn (see Procfile)
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1", host="127.0.0.1", port=5000)

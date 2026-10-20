@@ -13,7 +13,8 @@ from .config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW
 _connect_args = {}
 _pool_kwargs = {}
 if not DATABASE_URL.startswith("sqlite"):
-    _connect_args = {"sslmode": "require"}
+    # connect_timeout: an unreachable host fails fast instead of hanging a worker
+    _connect_args = {"sslmode": "require", "connect_timeout": 5}
     # SQLite's default pool (SingletonThreadPool) doesn't accept pool_size /
     # max_overflow, so they're only passed for real Postgres connections.
     _pool_kwargs = {"pool_size": DB_POOL_SIZE, "max_overflow": DB_MAX_OVERFLOW}

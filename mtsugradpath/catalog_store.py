@@ -13,6 +13,7 @@ next time they check the file's modification time.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -24,6 +25,7 @@ from .config import BASE_DIR, DATA_DIR
 BUNDLED_FILE = BASE_DIR / "catalog_data" / "catalog.json"
 RUNTIME_FILE = DATA_DIR / "catalog.json"
 
+log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _state: dict = {"path": None, "mtime": None, "data": None, "by_prefix": None, "search": None, "checked": 0.0}
 
@@ -40,7 +42,7 @@ def _candidate_file() -> Path | None:
 
     def fetched(path):
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 head = fh.read(4096)
             marker = '"fetched_at": "'
             i = head.find(marker)
@@ -53,6 +55,20 @@ def _candidate_file() -> Path | None:
 
 def _empty() -> dict:
     return {"catalog": {}, "courses": {}, "programs": []}
+
+
+def _read(path) -> dict | None:
+    if not path or not Path(path).exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data.get("courses"), dict) or not isinstance(data.get("programs"), list):
+            raise ValueError("missing courses/programs")
+        return data
+    except (OSError, ValueError) as exc:
+        log.error("Couldn't read catalog file %s: %s", path, exc)
+        return None
 
 
 _CHECK_EVERY = 5.0  # seconds between checks for a newer catalog file
@@ -70,10 +86,15 @@ def _load() -> None:
     with _lock:
         if _state["data"] is not None and path == _state["path"] and mtime == _state["mtime"]:
             return
-        data = _empty()
-        if path and path.exists():
-            with open(path) as fh:
-                data = json.load(fh)
+        data = _read(path)
+        if data is None and path != BUNDLED_FILE and BUNDLED_FILE.exists():
+            # A broken runtime copy shouldn't take the site down
+            data = _read(BUNDLED_FILE)
+            path, mtime = BUNDLED_FILE, BUNDLED_FILE.stat().st_mtime
+        if data is None:
+            if _state["data"] is not None:
+                return  # keep serving what we already have
+            data = _empty()
         by_prefix = defaultdict(list)
         for code in data["courses"]:
             by_prefix[code.split()[0]].append(code)

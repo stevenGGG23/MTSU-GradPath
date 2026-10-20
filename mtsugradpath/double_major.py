@@ -28,6 +28,11 @@ def _course_number(code):
     return int(parts[1])
 
 
+def _hours_or_3(credits):
+    """Catalog credits, keeping 0 (labs); 3 only when unknown."""
+    return 3 if credits is None else credits
+
+
 def _nice(number):
     return int(number) if float(number).is_integer() else number
 
@@ -74,7 +79,7 @@ def second_major_elective_codes(second_cfg, completed_courses):
 def second_major_elective_hours_done(second_cfg, completed_courses, catalog=None):
     catalog = catalog or {}
     hours = sum(
-        (catalog.get(code) or {}).get("credits") or 3
+        _hours_or_3((catalog.get(code) or {}).get("credits"))
         for code in second_major_elective_codes(second_cfg, completed_courses)
     )
     return min(hours, second_cfg.get("concentration_elective_hours", 0))

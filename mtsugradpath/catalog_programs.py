@@ -129,6 +129,9 @@ def parse_units(items: list) -> list:
         return unit if unit["kind"] == "course" else None
 
     for item in items or []:
+        if item.get("sep"):
+            pending = None
+            continue
         if "op" in item:
             pending = item["op"] if units else None
             continue
@@ -240,6 +243,16 @@ def section_hours(sec) -> float | None:
     return None
 
 
+def _section_total(sec) -> float:
+    """Hours a section stands for: its stated hours, else what it lists
+    ("Business Courses" with five 3-hour courses and no stated hours = 15)."""
+    hours = section_hours(sec)
+    if hours is not None:
+        return hours
+    listed = sum(_unit_hours(u) for u in parse_units(sec.get("items")))
+    return listed + sum(_section_total(c) for c in sec.get("children") or [])
+
+
 def _walk(sections, depth=0, parent=None):
     for sec in sections or []:
         yield sec, depth, parent
@@ -338,7 +351,7 @@ class _Builder:
             # following:" sub-lists, where the sub-lists are part of the 18.
             # (Some programs list sub-lists *beside* the parent's hours
             # instead -- then the numbers don't add up this way.)
-            child_hours = sum(section_hours(c) or 0 for c in sec["children"])
+            child_hours = sum(_section_total(c) for c in sec["children"])
             listed_here = sum(_unit_hours(u) for u in parse_units(sec.get("items")))
             if child_hours and listed_here + child_hours <= H + max(3, 0.1 * H):
                 H = max(H - child_hours, 0)
@@ -612,6 +625,14 @@ class _Builder:
             override[code] = {p for p in prereqs if p in required_codes and p != code}
         _break_cycles(override)
 
+        # Lecture/lab pairs the program lists as separate required courses
+        # ("BIOL 1120" and "BIOL 1121"): the planner keeps them in one term
+        lab_partners: dict[str, list] = {}
+        for code in sorted(required_codes):
+            for co in (store.course(code) or {}).get("coreqs", []):
+                if co in required_codes and _is_lab(co) and not _is_lab(code):
+                    lab_partners.setdefault(code, []).append(co)
+
         name = program["name"]
         concentration = None
         m = re.match(r"^(.*?),\s*(.+?Concentration.*?),\s*([A-Z][A-Za-z.]+\.?)\s*$", name)
@@ -666,6 +687,7 @@ class _Builder:
             "offering_seasons": {},
             "odd_year_spring_only": set(),
             "coreq_map": self.coreq_map,
+            "lab_partners": lab_partners,
             "upper_division_prefix": self.prefix,
             "upper_division_min": 3000,
             "minor_bucket_id": self.minor_bucket,
@@ -681,6 +703,11 @@ class _Builder:
         if elective_hours:
             parts.append(f"{_nice(elective_hours)} hrs of electives")
         return " plus ".join(parts) if parts else "See the catalog for requirements."
+
+
+def _is_lab(code: str) -> bool:
+    title = (store.title(code) or "").lower()
+    return bool(re.search(r"\blab(oratory)?\b", title))
 
 
 def _break_cycles(graph: dict) -> None:
@@ -768,10 +795,14 @@ def _ensure_built():
         if _is_major(program):
             cfg = _convert(program, "major")
             if cfg:
+                if cfg["key"] in majors:  # two catalog entries with one name
+                    cfg["key"] = f"{cfg['key']}-{program['id']}"
                 majors[cfg["key"]] = cfg
         elif program.get("type") == "Minor" or re.search(r"\bminor\b", program.get("name", ""), re.I):
             cfg = _convert(program, "minor")
             if cfg:
+                if cfg["key"] in minors:  # cross-listed minors share a name
+                    cfg["key"] = f"{cfg['key']}-{program['id']}"
                 minors[cfg["key"]] = cfg
     _cache["majors"] = majors
     _cache["minors"] = minors
@@ -821,7 +852,7 @@ def tbc_area_options() -> dict:
 
 # ── Auto-credit for hours requirements that list specific courses ────────────
 
-def auto_generic_hours(cfg: dict, completed: set) -> tuple[dict, dict]:
+def auto_generic_hours(cfg: dict, completed: set, required: set | None = None) -> tuple[dict, dict]:
     """Hours each listed-course requirement gets from completed courses.
 
     Returns (hours_by_id, applied_codes_by_id). Each completed course is used
@@ -835,7 +866,8 @@ def auto_generic_hours(cfg: dict, completed: set) -> tuple[dict, dict]:
     tbc_ids = [gid for gid, _, _, _ in cfg.get("tbc_generic", []) if gid in tbc_options]
     for gid, _, hours, _ in cfg.get("tbc_generic", []):
         caps[gid] = hours
-    required = {c for key in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg.get(key, [])}
+    if required is None:
+        required = {c for key in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg.get(key, [])}
     used: set = set()
     hours_by_id, applied = {}, {}
     # Narrowest choices first so a course that fits only one requirement lands there

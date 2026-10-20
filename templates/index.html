@@ -33,7 +33,7 @@
             <input type="hidden" name="major" id="major_field" value="{{ saved_state.major }}">
             <div class="program-info">
               {% if degree_cfg.catalog_driven %}
-              <span class="program-chip"><i class="bi bi-journal-check me-1"></i>Requirements from the {{ catalog_meta.name or 'MTSU catalog' }}</span>
+              <span class="program-chip" title="Requirements read from the {{ catalog_meta.name or 'MTSU catalog' }}"><i class="bi bi-journal-check me-1"></i>From the {{ (catalog_meta.name or 'MTSU catalog') | replace(' Undergraduate Catalog', '') }} catalog</span>
               {% else %}
               <span class="program-chip program-chip-verified"><i class="bi bi-patch-check-fill me-1"></i>Team-verified, with course offering seasons</span>
               {% endif %}
@@ -86,29 +86,33 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#stepCs" aria-expanded="true">
-                <span class="step-badge">1</span>{{ degree_cfg.name }}{% if second_cfg %} &amp; {{ second_cfg.name }}{% endif %} courses
+                <span class="step-badge">1</span>Check off completed courses
                 <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
               </button>
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Check off every course you've already completed{% if degree_cfg.catalog_driven %}. <span class="req-dot" aria-hidden="true"></span> marks courses the program requires by name; the rest are options and electives{% else %} in {{ checklist_prefixes | join('/') }}{% endif %}.</p>
-                {% if not major_courses %}
+                <p class="form-text mt-0 mb-3">Check off every course you've already completed.{% if degree_cfg.catalog_driven %} <span class="req-dot" aria-hidden="true"></span>Required by name; the rest are options to choose from. Labs count with their lecture.{% endif %}</p>
+                {% if not course_count %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet &mdash; the catalog data file is missing. Run <code>python scrape_courses.py</code> to create it.
                 </div>
                 {% else %}
-                {% for group_index, group_courses in major_courses | groupby('group') %}
-                {% if second_cfg %}<h5 class="cs-major-heading">{{ second_cfg.name if group_index else degree_cfg.name }}</h5>{% endif %}
-                {% for level, level_courses in group_courses | groupby('level') %}
-                <h6 class="cs-level-heading">{{ level }}</h6>
+                {% for program in checklist %}
+                {% if second_cfg %}<h5 class="cs-major-heading">{{ program.name }}</h5>{% endif %}
+                {% for section in program.sections %}
+                {% if section.collapsed %}<details class="checklist-more">
+                <summary class="cs-level-heading">{{ section.title }} <span class="checklist-count">{{ section.courses | length }}</span>{% if section.note %}<span class="checklist-note"> &middot; {{ section.note }}</span>{% endif %}</summary>
+                {% else %}
+                <h6 class="cs-level-heading">{{ section.title }} <span class="checklist-count">{{ section.courses | length }}</span></h6>
+                {% endif %}
                 <div class="cs-course-grid">
-                  {% for course in level_courses %}
+                  {% for course in section.courses %}
                   <div class="form-check cs-course-check{% if course.required %} is-required{% endif %}"{% if course.desc %} title="{{ course.desc }}"{% endif %}>
                     <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
                       <span class="cs-course-code">{% if course.required %}<span class="req-dot" aria-label="Required"></span>{% endif %}{{ course.code }}</span>
-                      <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
+                      <span class="cs-course-title">{{ course.title }}</span>
                       {% if course.minimum_grade %}
                     <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
                     {% endif %}
@@ -116,6 +120,7 @@
                   </div>
                   {% endfor %}
                 </div>
+                {% if section.collapsed %}</details>{% endif %}
                 {% endfor %}
                 {% endfor %}
                 {% endif %}
@@ -236,7 +241,7 @@
 </div>
 </form>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const addCourseButton = document.getElementById('add-course');
 const courseInput = document.getElementById('course_input');
 const selectedCourses = document.getElementById('selected-courses');
@@ -325,8 +330,13 @@ if (redirecting) {
 }
 
 function normalizeCourse(code) {
-  return code.trim().toUpperCase().replace(/\s+/g, ' ');
+  // "csci1170" / "CSCI  1170" -> "CSCI 1170"
+  return code.trim().toUpperCase().replace(/\s+/g, ' ').replace(/^([A-Z]{2,5})(\d{4}[A-Z]?)$/, '$1 $2');
 }
+
+// Only real course codes are accepted, so a stray character can't end up in
+// saved state (or a selector) and break the page on the next load
+const COURSE_CODE = /^[A-Z]{2,5} \d{4}[A-Z]?$/;
 
 function updateCourseGrades() {
   const grades = {};
@@ -355,7 +365,7 @@ function updateCsSelectedCount() {
 }
 
 function syncCheckboxForCode(code, checked) {
-  const box = document.querySelector(`.cs-course-checkbox[data-code="${code}"]`);
+  const box = document.querySelector(`.cs-course-checkbox[data-code="${CSS.escape(code)}"]`);
   if (box) {
     box.checked = checked;
     box.closest('.cs-course-check').classList.toggle('is-checked', checked);
@@ -408,7 +418,13 @@ function clearSuggestions() {
 
 function addCourse(code, label = null) {
   const normalized = normalizeCourse(code);
-  if (!normalized) return;
+  if (!COURSE_CODE.test(normalized)) {
+    if (normalized && !restoring) {
+      courseInput.classList.add('is-invalid');
+      setTimeout(() => courseInput.classList.remove('is-invalid'), 900);
+    }
+    return;
+  }
   const existing = Array.from(selectedCourses.querySelectorAll('.badge')).some(badge => badge.dataset.course === normalized);
   if (existing) {
     courseInput.classList.add('is-invalid');
@@ -454,7 +470,7 @@ function removeCourse(code) {
   const normalized = normalizeCourse(code);
 
   const badge = selectedCourses.querySelector(
-    `.badge[data-course="${normalized}"]`
+    `.badge[data-course="${CSS.escape(normalized)}"]`
   );
 
   if (badge) {

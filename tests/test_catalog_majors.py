@@ -188,3 +188,93 @@ def test_pages_are_gzipped_for_browsers_that_ask():
     import gzip
     assert b"Build your academic plan" in gzip.decompress(resp.data)
     assert "Content-Encoding" not in client.get("/?major=cs").headers
+
+
+# ── Regressions from the correctness review ───────────────────────────────────
+
+def _plan_for(cfg, completed=frozenset(), terms=8, summer=False, catalog=None, **kw):
+    catalog = catalog or load_catalog_for(cfg)
+    return generate_plan(set(completed), kw.pop("hours", {}), terms, summer, start_season="Fall",
+                         start_year=2026, degree_cfg=cfg, catalog=catalog), catalog
+
+
+def test_an_empty_term_does_not_end_the_plan():
+    # Summer has no CSCI offerings; the plan must carry on into fall
+    from mtsugradpath.degree_configs import CS_CONFIG
+    done = {"CSCI 1170", "COMM 2200", "MATH 1910", "MATH 1920", "MATH 2050", "PHIL 3170"}
+    hours = {gid: 99 for gid, _, _, _ in CS_CONFIG["supporting_generic"] + CS_CONFIG["tbc_generic"]}
+    hours["general_electives"] = 99
+    catalog = load_catalog_for(CS_CONFIG)
+    plan = generate_plan(done, hours, 10, True, start_season="Spring", start_year=2027,
+                         degree_cfg=CS_CONFIG, catalog=catalog)
+    assert not any(t.startswith("Remaining") for t in plan), list(plan)
+
+
+def test_zero_credit_courses_count_zero_hours():
+    cfg = catalog_majors()["forensic-science-bs"]
+    plan, _ = _plan_for(cfg, terms=16)
+    hours = {i["code"]: i["hours"] for items in plan.values() for i in items if i.get("kind") == "course"}
+    assert hours["BIOL 1111"] == 0 and hours["CHEM 1111"] == 0
+
+
+def test_lab_lands_in_the_same_term_as_its_lecture():
+    cfg = catalog_majors()["forensic-science-bs"]
+    plan, _ = _plan_for(cfg, terms=16)
+    term_of = {i["code"]: t for t, items in plan.items() for i in items if i.get("kind") == "course"}
+    for lecture, labs in cfg["lab_partners"].items():
+        for lab in labs:
+            if lecture in term_of and lab in term_of:
+                assert term_of[lecture] == term_of[lab], (lecture, lab)
+
+
+def test_no_course_is_scheduled_twice():
+    for key in ("information-systems-bba", "marketing-bba", "finance-bba"):
+        plan, _ = _plan_for(catalog_majors()[key], terms=12)
+        codes = _courses_in(plan) + _courses_in(plan, remaining=True)
+        assert len(codes) == len(set(codes)), key
+
+
+def test_requirement_rows_are_split_into_course_sized_pieces():
+    plan, _ = _plan_for(catalog_majors()["communication-bs"], terms=12)
+    for term, items in plan.items():
+        if not term.startswith("Remaining"):
+            assert sum(i.get("hours", 0) for i in items) <= 15, term
+
+
+def test_a_minor_does_not_strand_the_majors_math():
+    from mtsugradpath.degree_configs import CS_CONFIG
+    from mtsugradpath.minors import get_minor_config
+    minor = get_minor_config("statistics-minor")
+    cfg, extra = apply_minor_to_config(CS_CONFIG, minor, set())
+    catalog = load_catalog_for(CS_CONFIG, minor)
+    plan = generate_plan(set(), extra, 16, False, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+    assert "MATH 2050" in _courses_in(plan)
+
+
+def test_minor_courses_keep_their_order():
+    from mtsugradpath.minors import get_minor_config
+    major = catalog_majors()["nursing-bsn"]
+    minor = get_minor_config("arabic-minor")
+    cfg, extra = apply_minor_to_config(major, minor, set())
+    catalog = load_catalog_for(major, minor)
+    plan = generate_plan(set(), extra, 16, False, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+    order = [i["code"] for t, items in plan.items() if not t.startswith("Remaining") for i in items if i.get("kind") == "course"]
+    term_of = {i["code"]: t for t, items in plan.items() for i in items if i.get("kind") == "course"}
+    arab = [c for c in ("ARAB 1010", "ARAB 1020", "ARAB 2010", "ARAB 2020") if c in term_of]
+    assert len({term_of[c] for c in arab}) == len(arab)  # one per term, in order
+    assert [c for c in order if c in arab] == arab
+    assert validate_plan(plan, set(), catalog, degree_cfg=cfg) == []
+
+
+def test_upper_division_elective_shortfall_is_visible():
+    plan, _ = _plan_for(catalog_majors()["commerce-bs"], terms=16)
+    labels = [i.get("label", "") for items in plan.values() for i in items if i.get("kind") == "requirement"]
+    assert any(label == "BUS upper-division elective" for label in labels)
+
+
+def test_second_major_keeps_primary_gen_ed_credit():
+    form = {"major": "history-ba", "completed_courses": "ECON 2410\nECON 2420",
+            "target_semesters": "8", "start_season": "Fall", "start_year": "2026"}
+    alone = app.test_client().post("/", data=form).get_data(as_text=True)
+    both = app.test_client().post("/", data={**form, "second_major": "accounting-bba"}).get_data(as_text=True)
+    assert "Counted: ECON 2410" in alone and "Counted: ECON 2410" in both
