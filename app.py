@@ -468,12 +468,15 @@ def _course_card(code, required, min_grades):
     info = catalog_store.course(code) or {}
     title = info.get("title", "")
     offered = catalog_store.offering_summary(code)
-    # Everything secondary lives in the hover tooltip, keeping rows to one line
+    seasons = catalog_store.offered_seasons(code)
+    # Hover details: everything about the course in one tooltip
     note = [f"{code} - {title}"]
     if info.get("credits") is not None:
-        note.append(f"{int(info['credits']) if float(info['credits']).is_integer() else info['credits']} credit hours")
-    if offered:
-        note.append(f"Offered: {offered}")
+        credits = info["credits"]
+        note.append(f"{int(credits) if float(credits).is_integer() else credits} credit hours")
+    note.append("Offered: " + (offered or " & ".join(s.lower() for s in seasons)))
+    if code in required:
+        note.append("Required by name for this program")
     if min_grades.get(code):
         note.append(f"Later courses need a {min_grades[code]} or better")
     if info.get("desc"):
@@ -483,7 +486,9 @@ def _course_card(code, required, min_grades):
         "title": title,
         "label": f"{code} - {title}",
         "required": code in required,
+        "minimum_grade": min_grades.get(code),
         "offered": offered,
+        "seasons": " ".join(s.lower() for s in seasons),
         "note": "\n".join(note),
     }
 
@@ -571,11 +576,7 @@ def index():
         checklist.append({
             "name": cfg["name"],
             "sections": [
-                {
-                    **sec,
-                    "required_courses": [_course_card(c, required, min_grades) for c in sec["codes"] if c in required],
-                    "option_courses": [_course_card(c, required, min_grades) for c in sec["codes"] if c not in required],
-                }
+                {**sec, "courses": [_course_card(c, required, min_grades) for c in sec["codes"]]}
                 for sec in sections
             ],
         })

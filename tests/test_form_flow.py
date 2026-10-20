@@ -227,3 +227,12 @@ def test_plan_hands_off_to_mtsu_schedule_planner():
     assert "Next step: pick times for Fall 2026" in html
     assert 'id="copy-next-courses"' in html
     assert 'href="https://sched.mtsu.edu/#/form"' in get_html()
+
+
+def test_checklist_has_season_filters_and_hover_details():
+    html = get_html()
+    for f in ("all", "required", "fall", "spring", "summer"):
+        assert f'data-filter="{f}"' in html
+    assert 'id="checklist-search"' in html
+    card = re.search(r'<div class="form-check cs-course-check[^"]*" title="([^"]*)" data-seasons="([^"]*)"[^>]*>\s*<input[^>]+data-code="CSCI 1170"', html)
+    assert card and "credit hours" in card.group(1) and "fall" in card.group(2)

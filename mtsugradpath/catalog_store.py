@@ -327,3 +327,19 @@ def summer_only(code: str) -> bool:
         return False
     patterns = {season: _season_pattern(sched, seen, season) for season in ("Fall", "Spring", "Summer")}
     return patterns["Fall"] == "never" and patterns["Spring"] == "never" and patterns["Summer"] not in (None, "never")
+
+
+def offered_seasons(code: str) -> list:
+    """Seasons a course runs in, from MTSU's schedules ("Fall", "Spring",
+    "Summer"). A course without enough history counts as fall and spring --
+    the same assumption the planner makes."""
+    sched = schedule()
+    seen = sched["offered"].get(code) if sched else None
+    if not seen:
+        return ["Fall", "Spring"]
+    out = []
+    for season in ("Fall", "Spring", "Summer"):
+        pattern = _season_pattern(sched, seen, season)
+        if pattern in ("every", "odd", "even") or (pattern is None and season != "Summer"):
+            out.append(season)
+    return out or ["Fall", "Spring"]

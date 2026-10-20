@@ -92,36 +92,47 @@
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-3">Check off the courses you've completed.</p>
+                <p class="form-text mt-0 mb-3">Check off every course you've already completed.{% if degree_cfg.catalog_driven %} <span class="req-dot" aria-hidden="true"></span>Required by name; the rest are options to choose from. Hover a course for details.{% endif %}</p>
                 {% if not course_count %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet &mdash; the catalog data file is missing. Run <code>python scrape_courses.py</code> to create it.
                 </div>
                 {% else %}
+                <div class="checklist-filters" role="group" aria-label="Filter courses">
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="required">Required</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="fall">Fall</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="spring">Spring</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="summer">Summer</button>
+                  </div>
+                  <input type="search" class="form-control form-control-sm checklist-search" id="checklist-search" placeholder="Filter by code or title" aria-label="Filter courses by code or title">
+                </div>
+                <p class="checklist-empty text-muted small mb-0" id="checklist-empty" hidden>No courses match this filter.</p>
                 {% for program in checklist %}
                 {% if second_cfg %}<h5 class="cs-major-heading">{{ program.name }}</h5>{% endif %}
                 {% for section in program.sections %}
-                {% set total = section.required_courses | length + section.option_courses | length %}
-                {% if section.collapsed %}<details class="checklist-section checklist-more">
-                <summary class="checklist-section-title">{{ section.title }} <span class="checklist-count">{{ total }}</span>{% if section.note %}<span class="checklist-note">{{ section.note }}</span>{% endif %}</summary>
+                {% if section.collapsed %}<details class="checklist-more">
+                <summary class="cs-level-heading">{{ section.title }} <span class="checklist-count">{{ section.courses | length }}</span>{% if section.note %}<span class="checklist-note"> &middot; {{ section.note }}</span>{% endif %}</summary>
                 {% else %}
-                <div class="checklist-section">
-                <h6 class="checklist-section-title">{{ section.title }} <span class="checklist-count">{{ total }}</span></h6>
+                <h6 class="cs-level-heading">{{ section.title }} <span class="checklist-count">{{ section.courses | length }}</span></h6>
                 {% endif %}
-                {% for group_label, group_courses in [('Required', section.required_courses), ('Choose from', section.option_courses)] if group_courses %}
-                {% if section.required_courses and section.option_courses %}<div class="checklist-subtitle">{{ group_label }}</div>{% endif %}
                 <div class="cs-course-grid">
-                  {% for course in group_courses %}
-                  <label class="cs-course-check" for="cs_{{ course.code | replace(' ', '_') }}" title="{{ course.note }}">
+                  {% for course in section.courses %}
+                  <div class="form-check cs-course-check{% if course.required %} is-required{% endif %}" title="{{ course.note }}" data-seasons="{{ course.seasons }}" data-required="{{ 1 if course.required else 0 }}" data-search="{{ (course.code ~ ' ' ~ course.title) | lower }}">
                     <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
-                    <span class="cs-course-code">{{ course.code }}</span>
-                    <span class="cs-course-title">{{ course.title }}</span>
-                    {% if course.offered %}<span class="cs-course-offered">{{ course.offered }}</span>{% endif %}
-                  </label>
+                    <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
+                      <span class="cs-course-code">{% if course.required %}<span class="req-dot" aria-label="Required"></span>{% endif %}{{ course.code }}</span>
+                      <span class="cs-course-title">{{ course.title }}</span>
+                      {% if course.offered %}<span class="cs-course-offered">{{ course.offered }}</span>{% endif %}
+                      {% if course.minimum_grade %}
+                    <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
+                    {% endif %}
+                    </label>
+                  </div>
                   {% endfor %}
                 </div>
-                {% endfor %}
-                {% if section.collapsed %}</details>{% else %}</div>{% endif %}
+                {% if section.collapsed %}</details>{% endif %}
                 {% endfor %}
                 {% endfor %}
                 {% endif %}
@@ -921,6 +932,57 @@ updateCourseGrades();
 
 restoreState();
 updateCsSelectedCount();
+
+// ── Checklist filters: All / Required / Fall / Spring / Summer + text ──
+// "Fall" etc. show courses MTSU actually offers that term (from its class
+// schedules). Filtering only hides cards; checked courses stay selected.
+(function () {
+  const buttons = document.querySelectorAll('.checklist-filters [data-filter]');
+  const search = document.getElementById('checklist-search');
+  const empty = document.getElementById('checklist-empty');
+  if (!buttons.length) return;
+  let mode = 'all';
+
+  function apply() {
+    const q = (search.value || '').trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('#stepCs .cs-course-check').forEach(card => {
+      const seasons = (card.dataset.seasons || '').split(' ');
+      const okMode = mode === 'all'
+        || (mode === 'required' && card.dataset.required === '1')
+        || seasons.includes(mode);
+      const okText = !q || (card.dataset.search || '').includes(q);
+      const visible = okMode && okText;
+      card.hidden = !visible;
+      if (visible) shown += 1;
+    });
+    // Hide section headings (and the collapsed "More ..." group) left empty
+    document.querySelectorAll('#stepCs .cs-course-grid').forEach(grid => {
+      const count = grid.querySelectorAll('.cs-course-check:not([hidden])').length;
+      grid.hidden = !count;
+      const details = grid.closest('details');
+      const heading = details ? details.querySelector('summary') : grid.previousElementSibling;
+      const pill = heading && heading.querySelector('.checklist-count');
+      if (pill) pill.textContent = count;
+      if (details) {
+        details.hidden = !count;
+        if (q && count) details.open = true;
+      } else if (heading && heading.classList.contains('cs-level-heading')) {
+        heading.hidden = !count;
+      }
+    });
+    empty.hidden = shown > 0;
+  }
+
+  buttons.forEach(button => button.addEventListener('click', () => {
+    buttons.forEach(b => b.classList.toggle('active', b === button));
+    mode = button.dataset.filter;
+    apply();
+  }));
+  search.addEventListener('input', apply);
+  // Enter in the filter box shouldn't submit the planner form
+  search.addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
+})();
 
 plannerForm.addEventListener('input', saveState);
 plannerForm.addEventListener('change', saveState);
