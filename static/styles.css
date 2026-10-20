@@ -1709,3 +1709,29 @@ footer a {
     width: fit-content;
     margin: 0.15rem 0 0;
 }
+
+.next-step-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    background: #f0fdf4;
+    color: #14532d;
+}
+
+.next-course-badge {
+    background: #ffffff;
+    color: #14532d;
+    border: 1px solid #86efac;
+    font-weight: 600;
+}
+
+@media (max-width: 576px) {
+    .next-step-actions {
+        width: 100%;
+    }
+}

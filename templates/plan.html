@@ -16,6 +16,7 @@
     </div>
     <div class="d-flex gap-2 plan-actions">
       <a class="btn btn-outline-light text-nowrap" href="/"><i class="bi bi-pencil me-1"></i>Edit completed courses</a>
+      <a class="btn btn-success text-nowrap" href="{{ schedule_planner_url }}" target="_blank" rel="noopener"><i class="bi bi-calendar-week me-1"></i>Build my schedule</a>
       <button type="button" class="btn btn-primary text-nowrap" id="download-pdf"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF</button>
     </div>
   </div>
@@ -192,6 +193,22 @@
     {% endif %}
   </div>
 
+  {% if next_courses %}
+  <div class="next-step-card mb-4 no-print">
+    <div>
+      <h5 class="mb-1"><i class="bi bi-calendar-week me-1"></i>Next step: pick times for {{ next_term }}</h5>
+      <p class="mb-2 small">MTSU's Schedule Planner shows every section's days, times and open seats and builds schedules that fit. Add these courses there:</p>
+      <div class="d-flex flex-wrap gap-2" id="next-courses">
+        {% for code in next_courses %}<span class="badge next-course-badge">{{ code }}</span>{% endfor %}
+      </div>
+    </div>
+    <div class="d-flex flex-column gap-2 next-step-actions">
+      <a class="btn btn-success text-nowrap" href="{{ schedule_planner_url }}" target="_blank" rel="noopener">Open Schedule Planner <i class="bi bi-box-arrow-up-right ms-1"></i></a>
+      <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="copy-next-courses"><i class="bi bi-clipboard me-1"></i>Copy course list</button>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="mb-4">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-calendar3-range text-primary"></i>Plan overview</h4>
     <div class="term-grid">
@@ -223,6 +240,17 @@
   <script nonce="{{ csp_nonce }}">
     // The PDF is the browser's print-to-PDF: print CSS expands every section,
     // and the document title becomes the suggested file name.
+    const copyButton = document.getElementById('copy-next-courses');
+    if (copyButton) {
+      copyButton.addEventListener('click', () => {
+        const list = {{ next_courses | tojson }}.join(', ');
+        navigator.clipboard.writeText(list).then(() => {
+          copyButton.innerHTML = '<i class="bi bi-check2 me-1"></i>Copied';
+          setTimeout(() => { copyButton.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copy course list'; }, 2000);
+        }).catch(() => {});
+      });
+    }
+
     document.getElementById('download-pdf').addEventListener('click', () => {
       const title = document.title;
       document.title = {{ ('GradPath plan - ' ~ degree_name) | tojson }};

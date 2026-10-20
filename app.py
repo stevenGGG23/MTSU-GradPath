@@ -630,6 +630,9 @@ def index():
     )
 
 
+# MTSU's own Schedule Planner: pick sections by time, days and open seats
+SCHEDULE_PLANNER_URL = "https://sched.mtsu.edu/#/form"
+
 _COURSE_CODE_RE = re.compile(r"[A-Z]{2,5} \d{4}[A-Z]?")
 MAX_COMPLETED_COURSES = 200
 MAX_MINORS = 4
@@ -1005,6 +1008,15 @@ def _plan():
         for term, term_items in plan.items()
     }
 
+    # The first term with real courses, for the hand-off to MTSU's Schedule
+    # Planner (sections, times, open seats) where students build a schedule
+    next_term, next_courses = None, []
+    for term, term_items in plan.items():
+        codes = [item["code"] for item in term_items if item.get("kind") == "course"]
+        if codes and not term.startswith("Remaining"):
+            next_term, next_courses = term, codes
+            break
+
     # Calculates the total number of planned hours for each semester
     term_hours_display = {
         term: sum(item.get("hours", 0) for item in term_items)
@@ -1035,6 +1047,9 @@ def _plan():
         second_audit=second_audit,
         minor_audits=minor_audits,
         unrecognized_courses=unrecognized_courses,
+        next_term=next_term,
+        next_courses=next_courses,
+        schedule_planner_url=SCHEDULE_PLANNER_URL,
         uncounted_courses=[c for c in uncounted_courses if c not in unrecognized_courses],
         hide_sync=True,
         catalog_meta=catalog_store.meta(),

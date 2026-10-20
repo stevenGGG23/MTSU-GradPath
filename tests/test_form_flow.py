@@ -219,3 +219,11 @@ def test_unknown_page_shows_friendly_404():
     assert resp.status_code == 404
     html = resp.get_data(as_text=True)
     assert "Page not found" in html and "Back to the planner" in html
+
+
+def test_plan_hands_off_to_mtsu_schedule_planner():
+    html = post_plan(completed=["CSCI 1170"]).get_data(as_text=True)
+    assert 'href="https://sched.mtsu.edu/#/form"' in html
+    assert "Next step: pick times for Fall 2026" in html
+    assert 'id="copy-next-courses"' in html
+    assert 'href="https://sched.mtsu.edu/#/form"' in get_html()
