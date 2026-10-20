@@ -1,8 +1,8 @@
 # MTSU GradPath
 
-A degree-progress and term-planning tool for MTSU undergraduates. It scrapes MTSU's undergraduate course catalog, audits completed coursework against a degree's requirement structure, and generates a term-by-term schedule that respects prerequisite ordering.
+A degree-progress and term-planning tool for MTSU undergraduates. Pick a major (and optionally a second major or minors), check off what you've taken, and GradPath audits your progress and builds a term-by-term plan that respects prerequisites.
 
-Currently supports 8 majors: **Computer Science, Biology, Mathematics, Chemistry, Physics, Political and Global Affairs, Aerospace (Professional Pilot Concentration), and Construction Management (Commercial Construction Management Concentration)**. Goal for the semester is to cover every undergraduate major in the catalog.
+**Every undergraduate major and minor in the 2026-2027 MTSU catalog is supported** — 223 majors and concentrations, 152 minors, and 3,475 courses — read straight from MTSU's official catalog data rather than hand-coded.
 
 Live demo: **https://mtsu-gradpath.onrender.com**
 Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
@@ -55,7 +55,7 @@ Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-3. Run it and open `http://127.0.0.1:5000`:
+3. Run it and open `http://127.0.0.1:5000`. Course and program data ship with the repo (`catalog_data/catalog.json`), so there's no sync step:
 
    ```bash
    python app.py
@@ -73,6 +73,52 @@ Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
 ---
 
+## Where the data comes from
+
+MTSU's online catalog (catalog.mtsu.edu) runs on **Acalog**, which has a public *widget API* — the same one behind the embeddable widget MTSU ITD shared (`data-acalog-data="programs"`). It returns courses and full program requirement trees as JSON, **without an API key**, as long as you use the API's own catalog id:
+
+| Catalog | id in catalog.mtsu.edu URLs (`catoid`) | id in the widget API |
+|---|---|---|
+| 2026-2027 Undergraduate | 49 | **12** |
+| 2025-2026 Undergraduate | 45 | 9 |
+
+Asking the API for catalog 49 returns an error, which is why we originally thought newer catalogs needed a token. They don't — `GET /widget-api/catalogs/` lists every catalog with both ids, and the exporter picks the newest published undergraduate one automatically.
+
+**Export pipeline** (`python scrape_courses.py`):
+
+1. `catalog_fetch.py` downloads every course and program detail (about 3,900 requests and ~40 minutes, throttled to stay under the catalog's firewall; resumable — already-downloaded items are cached in `data/raw_catalog/`).
+2. `catalog_build.py` cleans it into `catalog_data/catalog.json`: each course's title, credits, prerequisites (including "A or B" choices, "must be taken concurrently" co-requisites, and minimum grades), and each program's requirement sections in catalog order.
+3. The app loads that file once at startup. No scraping, database queries, or network calls happen while students use the site.
+
+**Turning a catalog program into a plan** happens at load time in `catalog_programs.py`:
+
+| Catalog shows | GradPath treats it as |
+|---|---|
+| A course on its own | Required course, scheduled by prerequisites |
+| Courses joined by **OR** | One choice — any completed option counts |
+| Lecture **AND** 0-credit lab | Taken together (lab warning if one is missing) |
+| "Choose five from the following" / more courses than hours | A pool: N hours from the listed courses |
+| "CSCI upper-division electives 9 credit hours" | Upper-division electives, filled with real catalog courses |
+| An empty "College of Business Core (42 hours)" | Filled from the four-year academic map |
+| True Blue Core | The 8 gen-ed areas (41 hrs), minus areas the major's own courses already cover |
+| Top-level "Electives" | Free electives — whatever is left of the total |
+
+Requirement rows that list courses (choices, pools, gen-ed areas) **fill in automatically** from the courses a student checks off.
+
+Five majors keep a team-verified, hand-curated config that adds course-offering seasons (fall-only, odd-spring-only, …) and prerequisite fixes: CS Professional, Chemistry, Political and Global Affairs B.S., Aerospace Professional Pilot, and Construction Management Commercial. They're marked with a ✓ in the major picker. Their offering-season data is also used for those subjects' courses in every other program.
+
+**Refreshing the data:**
+
+```bash
+python scrape_courses.py              # fetch anything missing, rebuild catalog_data/catalog.json
+python scrape_courses.py --refresh    # start over (new catalog year)
+python scrape_courses.py --build-only # rebuild from already-downloaded data
+```
+
+Commit the updated `catalog_data/catalog.json`. The **Refresh catalog data** GitHub Action does this monthly (or on demand from the Actions tab) and opens a pull request when anything changed, after running the tests against the new data.
+
+---
+
 ## Configuration
 
 Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
@@ -80,45 +126,37 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 | Variable | Default | Description |
 |---|---|---|
 | `SECRET_KEY` | *(required)* | Flask session signing key |
-| `DATABASE_URL` | `sqlite:///data/mtsu_courses.db` | SQLAlchemy connection string. Production uses Supabase Postgres — see `.env.example` for the connection string format |
-| `MTSU_CATALOG_URL` | `https://catalog.mtsu.edu` | Base URL for the catalog widget API |
-| `MTSU_CATALOG_IDS` | `36` | Catalog ID(s) to sync (36 = last publicly accessible undergrad catalog; 44-49 require an MTSU IT API token) |
-| `MTSU_PROGRAM_PREFIX` | `CSCI` | Default course prefix when none is selected |
-| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | SQLAlchemy connection pool size per process. `workers x (pool + overflow)` must stay under Supabase's connection limit |
-| `SYNC_ADMIN_USER` / `SYNC_ADMIN_PASSWORD` | *(unset = open)* | HTTP Basic Auth for force-resync (`/sync?force=1`). Set both in production; the normal Sync Catalog button is unaffected |
-| `WEB_CONCURRENCY` | `3` | Gunicorn worker count (set via Render env vars — see `Procfile`) |
-
-`/sync` syncs all 8 configured majors (CSCI, BIOL, MATH, CHEM, PHYS, PS, AERO, and CMT + CCM for Construction Management) in one pass, regardless of `MTSU_PROGRAM_PREFIX`.
-It also indexes course codes and titles from every configured catalog ID for the planner's "Add other completed courses" search. Detailed credits and prerequisite data remain limited to the configured major prefixes.
+| `DATABASE_URL` | `sqlite:///data/mtsu_courses.db` | Only holds small shared state (catalog re-export status, course equivalencies). Course data is **not** in the database. Production can keep using Supabase Postgres — see `.env.example` |
+| `MTSU_CATALOG_URL` | `https://catalog.mtsu.edu` | Catalog site the exporter reads from |
+| `GRADPATH_CATALOG_FILE` | *(unset)* | Load a different catalog JSON (testing) |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | SQLAlchemy connection pool size per process |
+| `SYNC_ADMIN_USER` / `SYNC_ADMIN_PASSWORD` | *(unset = open)* | HTTP Basic Auth for `/sync`, which re-exports the catalog on a running server. Set both in production |
+| `WEB_CONCURRENCY` | `3` | Gunicorn worker count (see `Procfile`) |
 
 ---
 
 ## Recent Changes
 
-- **Grade requirement tooltip** — courses that require a minimum grade (e.g. "C or better") now show a small ⓘ icon in the top-right corner of the course card. Hover over it to see the requirement; the bulky text line is gone, keeping the checklist clean.
-- **Unrecognized course bucket** — if a student enters a course that doesn't match any major requirement or generic bucket, it now surfaces as an "Unrecognized courses" banner on the results page instead of silently disappearing. The banner prompts the student to count those hours manually under free electives.
-- **Lab co-requisite warnings** — Biology (BIOL 1110/1111, BIOL 1120/1121) and Chemistry (CHEM 1110/1111, CHEM 1120/1121) now carry a `coreq_map` that `validate_plan` checks. If a lecture is scheduled without its companion lab in the same term, a prerequisite warning surfaces on the plan page.
-- **GPA calculator cleanup** — the pre-filled placeholder values (3.20 / 60) were removed from the Current GPA and GPA hours inputs so the fields are clearly empty for first-time users.
-- **Generate Plan loading state** — the submit button now shows a spinner and disables itself while the plan is being generated, preventing double-submits and giving visual feedback on slower connections.
-- **Scraper / DB code cleanup** — `scraper.py` was reorganised into clearly labelled sections with consistent docstrings. `models.py` and `db.py` had typos fixed and comments clarified.
-- **Responsive polish** — course grid collapses to a single column on phones under 480 px; GPA panel goes full-width on very narrow screens; `focus-visible` outlines and touch targets improved throughout.
+- **Every major and minor, from the official catalog** — requirements now come from MTSU's Acalog catalog data instead of hand-written configs, taking GradPath from 8 majors and 1 minor to 223 majors/concentrations and 152 minors. Each program links to its official catalog page.
+- **Fast, no sync step** — the catalog ships as a JSON file loaded into memory at startup (about a quarter second). Pages render in about 4 ms on the server and are gzipped (the planner page went from ~160 KB to ~30 KB); nothing waits on the catalog website or the database. The public "Sync Catalog" button is gone.
+- **Choices and gen-ed fill themselves in** — "Choose one: MATH 1530 or BIA 2610" rows and True Blue Core areas are credited from the courses a student checks off, so far fewer hours need typing in.
+- **Course search covers the whole catalog** — served as a cached `/courses.json` so the planner page itself stays small.
+- **Prerequisite Map for any major** — `/prerequisites?major=<key>` with a major picker.
+- **Smarter prerequisites** — "A or B" prerequisites resolve to whichever option the student took or the program requires; "must be taken concurrently" courses are co-requisites; a course checked off without a grade no longer blocks the courses after it.
+- **Tests for every program** — the suite plans every catalog major from scratch (and from partial progress) and checks there are no prerequisite violations and nothing gets stuck.
 
 ---
 
 ## Usage
 
-1. On the home page, click `Sync Catalog` to populate the database from MTSU's live catalog.
-2. Pick a major (CS, Biology, Math, Chemistry, Physics, Political and Global Affairs, Aerospace, or Construction Management).
-   Optionally search for a minor under the major grid (currently the Mathematics minor: MATH 1910, 1920, and 10 hours of MATH electives). Its courses are added to the plan, tagged `MIN`, and tracked in their own progress bar; minor hours come out of free electives rather than adding to the 120.
-3. Check off completed courses (grouped by level); use search to add supporting courses.
-4. Enter completed hours for non-major buckets (science sequences, True Blue Core, general electives, required minors, etc.).
-5. Pick a starting term/year, number of terms to plan, and whether to include summers, then submit.
-6. Review the result: completion percentage, per-category breakdown, credit-hours-per-term chart, term-by-term schedule, and any prerequisite warnings.
-7. Use `Prerequisite Map` in the nav bar to view the course dependency graph independently of a generated plan.
+1. Search for a major in the **Major** box (e.g. "nursing", "accounting", "CSCI"). Optionally add a second major and any number of minors. A ✓ marks the team-verified majors.
+2. Check off completed courses (grouped by level). A blue dot marks courses the program requires by name; the rest are choice options and electives. Use search to add anything else in the catalog.
+3. Review **Other degree requirements**: rows marked *auto* fill in from checked-off courses; enter hours for anything else.
+4. Pick a starting term/year, number of terms, and whether to include summers, then **Generate Plan**.
+5. Review completion progress, the per-section breakdown, the term-by-term schedule, and any prerequisite warnings. **View in catalog** links to the official program page.
+6. **Prerequisite Map** in the nav bar shows the course dependency graph for any major.
 
-Selections are kept in the browser tab's `sessionStorage` while you use the site — switching majors, generating a plan and clicking "Edit completed courses", or reloading all keep your checked courses, hours, and term settings. Closing the tab, or opening the link in a new tab or on another device, starts from a blank planner. Nothing is stored server-side, so no one else ever sees your selections.
-
-Run the catalog sync standalone: `python scrape_courses.py`
+Selections are kept in the browser tab's `sessionStorage` — nothing is stored server-side.
 
 ---
 
@@ -128,61 +166,59 @@ Run the catalog sync standalone: `python scrape_courses.py`
 python -m pytest tests
 ```
 
-`tests/test_planner.py` covers term generation, prerequisite gating, requirement-bucket handling, `validate_plan`, and `course_offered_in_term` against published department scheduling patterns.
+- `tests/test_catalog_majors.py` runs against the real exported catalog: every major plans from scratch with no prerequisite or offering warnings and every required course gets scheduled; a sample of majors also plans cleanly from random partial progress; every minor plans alongside CS; every major's page renders; plus spot checks (Accounting matches its catalog page, prerequisite map, course search, health check).
+- `tests/test_catalog_build.py` covers parsing catalog text (prerequisite sentences, OR groups, concurrent courses, minimum grades, credit hours, program sections).
+- `tests/test_catalog_programs.py` covers turning catalog sections into planner configs on a small made-up catalog.
+- `tests/test_plan_integrity.py`, `test_planner.py`, `test_minors.py`, `test_double_major.py`, `test_form_flow.py`, `test_session_persistence.py`, `test_sync_status.py` cover the planner, audits, double majors/minors, the web form, and session handling.
 
-`tests/test_plan_integrity.py` independently re-derives correctness (without importing the scheduler's own helper functions, so a bug in them can't also hide from its own test) across every configured major (parametrized off `DEGREE_CONFIGS`, so a newly added major is automatically covered): a full from-scratch plan for each major, 25 randomized partial-completion trials per major, and named regression tests for two real bugs that were found and fixed — a major-required course silently dropped a prerequisite from a different department's course list (e.g. PHYS 2120 needing MATH 1910), and the same gap on the supporting-course path (e.g. a Chemistry plan treating PHYS 2120 as if its only prerequisite were PHYS 2110). Both are now checked for every major, not just the two where they were originally found.
-
-`tests/test_sync_status.py` covers the catalog-sync stuck-lock fix (`/sync` recovering when a previous sync's background thread died mid-run instead of clearing its `running` flag), and `tests/test_session_persistence.py` covers that planner selections never persist server-side across requests.
+GitHub Actions runs the suite on every push and pull request.
 
 ---
 
 ## Architecture
 
 ```
-app.py                 Flask routes: / (form + plan), /prerequisites, /sync, /sync/status
-scrape_courses.py      CLI entry point for the catalog sync
+app.py                  Flask routes: / (form + plan), /prerequisites, /courses.json, /healthz, /sync (admin)
+scrape_courses.py       CLI: export the catalog to catalog_data/catalog.json
+catalog_data/
+└── catalog.json        Exported catalog (courses + programs), committed to the repo
 mtsugradpath/
-├── config.py          Env configuration
-├── db.py              SQLAlchemy engine/session
-├── models.py          ORM: Course, CourseType, Prerequisite
-├── scraper.py         Catalog widget API client + DB sync (sync_courses(prefix))
-├── degree.py          Requirement registry (DEGREE_REGISTRY) + audit logic
-├── degree_configs.py  Per-major requirement configs (DEGREE_CONFIGS: cs, biology, math, chemistry, physics, political_science, aerospace, construction_mgmt)
-├── minors.py          Optional minor configs (MINOR_CONFIGS: math) + minor audit
-└── planner.py         Term scheduling (generate_plan) + validation (validate_plan)
-templates/, static/    Jinja templates, CSS/assets
-tests/                 pytest suite
-data/                  Local SQLite file (gitignored)
+├── catalog_fetch.py    Downloads raw courses/programs from the Acalog widget API
+├── catalog_build.py    Cleans raw API data into catalog.json
+├── catalog_store.py    Loads catalog.json once per process; course lookups, search index
+├── catalog_programs.py Converts catalog programs into planner configs (majors + minors)
+├── degree_configs.py   Team-verified configs for 8 majors + the combined major registry
+├── degree.py           Degree audit (by catalog section for catalog majors)
+├── minors.py           Minors: hand-written Math minor + catalog minors, minor audit
+├── double_major.py     Folding a second major into a plan
+├── planner.py          Term scheduling (generate_plan) + independent validation (validate_plan)
+├── models.py / db.py   Small shared state (export status, course equivalencies)
+└── config.py           Env configuration
+templates/, static/     Jinja templates, CSS/assets
+tests/                  pytest suite
+.github/workflows/      Tests on push; monthly catalog refresh PR
 ```
 
-**Scheduling:** `generate_plan()` fills each term toward a target credit-hour load, in priority order: required major/concentration courses, then supporting courses (e.g. MATH/COMM/PHIL for CS), then general-requirement buckets — all gated by prerequisites and by published course-offering seasons (`_offered_in_term`, e.g. fall-only or odd-year-spring-only courses). Prerequisite and offering-season checks always resolve against a course's *own* major's config, not necessarily the major currently being planned — so a supporting course pulled in from another department (e.g. MATH 1910 on a Physics plan) is checked against MATH's own requirement and offering data, not silently skipped. `validate_plan()` independently re-derives the same checks (not by calling generate_plan's own logic) and surfaces a warning banner if any course precedes an unmet prerequisite or lands in a term it isn't offered.
-
-**Degree model:** `mtsugradpath/degree_configs.py` encodes each major's requirement structure (core courses, concentration, supporting courses, True Blue Core, and electives as the remainder) as a mix of specific required courses and partial-hour buckets for flexible/general-education requirements. Each config also carries a `prereq_override_map` for catalog quirks (e.g. lab-section prerequisites listed instead of the lecture course). A major whose own courses span more than one prefix lists the others in `extra_prefixes` (Construction Management uses CMT plus the shared CCM courses); those prefixes are synced, shown in the course checklist, and have their prerequisites resolved through that major's config.
-
-**Prerequisite Map:** `/prerequisites` renders required-course dependencies as a Mermaid.js graph (`build_prereq_graph`), scoped to required courses rather than the full CSCI catalog.
+**Scheduling:** `generate_plan()` fills each term toward 15 credit hours: required major/concentration courses first, then supporting courses, then requirement rows (choices, pools, gen-ed, free electives) — all gated by prerequisites and by known offering seasons. For catalog majors, the prerequisites enforced are the ones between the program's own required courses, with "A or B" resolved and cycles in the catalog's wording broken, so no course waits on something the plan never schedules. `validate_plan()` re-derives the same checks independently and surfaces warnings.
 
 ---
 
 ## Deployment
 
-Hosted on [Render](https://render.com) free tier (`stevenGGG23/MTSU-GradPath`, `main`, auto-deploy). Build: `pip install -r requirements.txt`. Start: `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 600 --workers ${WEB_CONCURRENCY:-3}` (see `Procfile`). Requires `SECRET_KEY` and `DATABASE_URL` (Supabase Postgres) as env vars on Render — without `DATABASE_URL` it falls back to local SQLite, which does not persist on Render's ephemeral filesystem. Set `SYNC_ADMIN_USER`/`SYNC_ADMIN_PASSWORD` on Render too, so force-resync isn't public in production.
+Hosted on [Render](https://render.com) (`stevenGGG23/MTSU-GradPath`, `main`, auto-deploy). Build: `pip install -r requirements.txt`. Start: see `Procfile`. Requires `SECRET_KEY`; set `SYNC_ADMIN_USER`/`SYNC_ADMIN_PASSWORD` so `/sync` isn't public. `DATABASE_URL` is optional now — without it the app uses a local SQLite file for its small bits of state, and all course data comes from the committed JSON. Vercel (`vercel.json`, `api/index.py`) works the same way.
 
-Migrating off the Render free tier to a host that can handle registration-period traffic (a few hundred concurrent users) is still a semester goal — free-tier CPU/RAM limits how many workers are actually usable regardless of the `--workers` flag. See Known Limitations below.
+`/healthz` reports the loaded catalog and how many majors/minors/courses it has.
 
 ---
 
 ## Known Limitations
 
-- **Worker count is untested under load.** `Procfile` now runs 3 gunicorn workers by default (tunable via `WEB_CONCURRENCY`), but that number hasn't been validated against Render free-tier resource limits or Supabase's pooler connection cap — needs real load testing before registration week.
-- **Force-resync is admin-gated; the normal sync isn't.** `/sync?force=1` (and the legacy bare `GET /sync`) require `SYNC_ADMIN_USER`/`SYNC_ADMIN_PASSWORD` when those are set. The plain "Sync Catalog" button stays open since it no-ops when a major is already loaded — full per-user accounts (per the Statement of Scope's "saved plans" section) are still a future item.
-- **Rate limiting counts per gunicorn worker, not globally.** Flask-Limiter uses in-memory storage (no Redis), so with `WEB_CONCURRENCY` workers each process enforces its own counter — the real ceiling is roughly `limit x workers`, not exact. Good enough as a backstop against a spike or scripted abuse; would need Redis for precise per-client accounting.
-- **No responsive design pass verified in-browser.** `static/styles.css` now has a `@media (max-width: 576px)` block tightening headings, cards, and the progress ring for phone widths, but it hasn't been checked against a real device/browser — worth a look before demoing.
-- **Each major re-fetches the full catalog listing.** `sync_courses(prefix)` calls `fetch_all_courses()` separately per major, so a full sync re-downloads the same catalog page list once per prefix (9 times) before filtering by prefix, instead of fetching it once and splitting locally. Per-course detail fetches are threaded (`DETAIL_FETCH_WORKERS` in `scraper.py`, default 5) and that's the main win so far; deduping the listing fetch across majors is the next speedup, not yet done.
-- Course-offering data (which terms a course is offered in) is only verified for the 5 STEM majors; Political and Global Affairs, Aerospace, and Construction Management default to "offered every semester" since department-specific scheduling patterns for those weren't available.
-- Political and Global Affairs' two required minors and Aerospace's flight-lab/CFI electives aren't tracked course-by-course — each is a nominal hour bucket the student self-reports against, the same way a science-sequence choice is handled for the STEM majors.
-- Only catalog ID 36 syncs by default (last publicly accessible undergrad catalog widget); catalog IDs 44-49 require an MTSU IT API token.
-- Planner input only lasts for the browser tab (`sessionStorage`) — it doesn't survive closing the tab or carry across devices/browsers. Saved plans tied to accounts are still a future item.
-- 8 of MTSU's ~80+ undergraduate majors are modeled (CS, Biology, Math, Chemistry, Physics, Political and Global Affairs, Aerospace, Construction Management); the rest of the catalog isn't modeled yet.
+- **Unofficial.** Requirements are read automatically from the catalog. Most programs come out within a few hours of their stated total, but some catalog layouts are ambiguous (e.g. programs whose courses also satisfy gen-ed areas without saying which). Each program links to its catalog page, and the plan page says to confirm there and with an advisor.
+- **Course-offering seasons** (fall-only, etc.) are only known for the subjects covered by the team-verified configs (CSCI, BIOL, MATH, CHEM, PHYS, CMT/CCM). Everything else is assumed offered every fall and spring. The catalog doesn't publish this; it would need class-schedule data.
+- **Programs with alternative "emphases"** (e.g. the Science minor) plan the first emphasis listed.
+- **Course notes the catalog writes in prose** ("no more than one course from the same department", "approval of the advisor") aren't enforced.
+- **Rate limiting counts per gunicorn worker**, not globally (in-memory storage).
+- **Planner input only lasts for the browser tab** (`sessionStorage`). Saved plans tied to accounts are a future item.
 
 ---
 
@@ -203,13 +239,11 @@ Originated from a course proposal (Statement of Scope, July 15, 2026) under grou
 
 ## Roadmap (Fall 2026)
 
-Per the CSCI 4700/5700 Statement of Scope (due 10/01/2026):
-
-- Cover every undergraduate major in the catalog (8 of ~80+ done: CS, Biology, Math, Chemistry, Physics, Political and Global Affairs, Aerospace, Construction Management).
-- Migrate off Render's free tier to a host that handles registration-period concurrent load (a few hundred users) with good security and GitHub auto-deploy.
-- Get an official MTSU Acalog API key (catalog IDs 44-49) to replace the public-widget scraper, which is unreliable under load.
-- Admin-only catalog sync, scheduled/automatic re-sync after each catalog update.
-- Daily PostgreSQL backups (source is always recoverable from the repo; course data is always recoverable via re-sync).
+- ~~Cover every undergraduate major in the catalog~~ — done: 223 majors/concentrations and 152 minors from the 2026-27 catalog.
+- ~~Replace the public-widget scraper~~ — done: one-time export of the full catalog through the Acalog widget API (no key needed), refreshed monthly by GitHub Actions.
+- Confirm with MTSU ITD that using the public widget API this way is OK, or switch to whatever official feed ITD provides (only `catalog_fetch.py` would change).
+- Course-offering terms for every subject (needs class-schedule data).
+- Migrate off Render's free tier to a host that handles registration-period concurrent load.
 - User guide for students/advisors.
 - Pursue MTSU adoption and hosting sponsorship.
 

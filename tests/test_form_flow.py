@@ -66,12 +66,12 @@ def test_mark_complete_js_has_null_guard():
     assert "if (!input) return" in html
 
 
-def test_get_index_shows_no_catalog_alert_when_empty():
-    """When the catalog table is empty the checklist section shows a sync prompt."""
+def test_get_index_checklist_comes_from_bundled_catalog():
+    """The course checklist renders straight from catalog_data/catalog.json --
+    no sync step needed before the planner is usable."""
     html = get_html()
-    assert "No catalog courses loaded yet" in html
-    # No actual checkbox inputs should be rendered
-    assert not re.search(r'<input[^>]+cs-course-checkbox', html)
+    assert "No catalog courses loaded yet" not in html
+    assert re.search(r'<input[^>]+cs-course-checkbox[^>]+data-code="CSCI 1170"', html)
 
 
 def test_get_index_has_gpa_tools():

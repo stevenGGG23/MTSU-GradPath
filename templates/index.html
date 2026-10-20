@@ -25,18 +25,26 @@
             <label class="program-label" for="major_input">Major</label>
             <div class="combo-row">
               <div class="combo" id="major_combo">
-                <input type="text" id="major_input" class="form-control combo-input" value="{{ degree_cfg.name }}" placeholder="Search majors, e.g. Biology or CSCI" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                <input type="text" id="major_input" class="form-control combo-input" value="{{ degree_display_name }}" placeholder="Search {{ majors | length }} majors, e.g. Nursing, Accounting or CSCI" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
                 <div class="program-menu d-none" role="listbox"></div>
               </div>
               <button type="button" class="combo-btn" id="second_add" title="Add a second major" aria-label="Add a second major"{% if second_cfg %} hidden{% endif %}>+</button>
             </div>
             <input type="hidden" name="major" id="major_field" value="{{ saved_state.major }}">
+            <div class="program-info">
+              {% if degree_cfg.catalog_driven %}
+              <span class="program-chip"><i class="bi bi-journal-check me-1"></i>Requirements from the {{ catalog_meta.name or 'MTSU catalog' }}</span>
+              {% else %}
+              <span class="program-chip program-chip-verified"><i class="bi bi-patch-check-fill me-1"></i>Team-verified, with course offering seasons</span>
+              {% endif %}
+              {% if degree_cfg.catalog_url %}<a class="program-link" href="{{ degree_cfg.catalog_url }}" target="_blank" rel="noopener">View in catalog <i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
+            </div>
 
             <div class="program-subfield" id="second_row"{% if not second_cfg %} hidden{% endif %}>
               <label class="program-label" for="second_input">Second major</label>
               <div class="combo-row">
                 <div class="combo" id="second_combo">
-                  <input type="text" id="second_input" class="form-control combo-input" value="{{ second_cfg.name if second_cfg else '' }}" placeholder="Search majors" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                  <input type="text" id="second_input" class="form-control combo-input" value="{{ second_display_name }}" placeholder="Search majors" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
                   <div class="program-menu d-none" role="listbox"></div>
                 </div>
                 <button type="button" class="combo-btn combo-btn-remove" id="second_remove" title="Remove second major" aria-label="Remove second major">&times;</button>
@@ -51,7 +59,7 @@
             <div id="minor_rows">
               <div class="combo-row minor-row">
                 <div class="combo">
-                  <input type="text" id="minor_input" class="form-control combo-input" placeholder="Search minors, e.g. Mathematics" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                  <input type="text" id="minor_input" class="form-control combo-input" placeholder="Search {{ minors | length }} minors, e.g. Mathematics" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
                   <button type="button" class="combo-clear" aria-label="Clear minor" hidden>&times;</button>
                   <div class="program-menu d-none" role="listbox"></div>
                 </div>
@@ -84,10 +92,10 @@
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Check off every {{ checklist_prefixes | join('/') }} course you've already completed.</p>
+                <p class="form-text mt-0 mb-2">Check off every course you've already completed{% if degree_cfg.catalog_driven %}. <span class="req-dot" aria-hidden="true"></span> marks courses the program requires by name; the rest are options and electives{% else %} in {{ checklist_prefixes | join('/') }}{% endif %}.</p>
                 {% if not major_courses %}
                 <div class="alert alert-info mb-0">
-                  No catalog courses loaded yet. Click <strong>Sync Catalog</strong> to enable the checklist.
+                  No catalog courses loaded yet &mdash; the catalog data file is missing. Run <code>python scrape_courses.py</code> to create it.
                 </div>
                 {% else %}
                 {% for group_index, group_courses in major_courses | groupby('group') %}
@@ -96,10 +104,10 @@
                 <h6 class="cs-level-heading">{{ level }}</h6>
                 <div class="cs-course-grid">
                   {% for course in level_courses %}
-                  <div class="form-check cs-course-check">
+                  <div class="form-check cs-course-check{% if course.required %} is-required{% endif %}"{% if course.desc %} title="{{ course.desc }}"{% endif %}>
                     <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
-                      <span class="cs-course-code">{{ course.code }}</span>
+                      <span class="cs-course-code">{% if course.required %}<span class="req-dot" aria-label="Required"></span>{% endif %}{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.label.split(' - ', 1)[1] if ' - ' in course.label else '' }}</span>
                       {% if course.minimum_grade %}
                     <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
@@ -123,7 +131,7 @@
             </h2>
             <div id="stepSearch" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">For supporting courses like MATH 1910 or COMM 2200, or anything not in the checklist.</p>
+                <p class="form-text mt-0 mb-2">Anything not in the checklist &mdash; every course in the {{ catalog_meta.name or 'catalog' }} is searchable.</p>
                 <div class="input-group position-relative">
                   <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off">
                   <button type="button" class="btn btn-primary" id="add-course">Add</button>
@@ -141,10 +149,10 @@
             </h2>
             <div id="stepRequirements" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Non-CSCI requirements aren't tracked course-by-course &mdash; enter how many hours you've completed. Use "Mark complete" for a quick fill.</p>
+                <p class="form-text mt-0 mb-2">Enter how many hours you've completed toward each requirement. Rows marked <span class="auto-pill">auto</span> also fill in from courses you checked off. Use "Mark complete" for a quick fill.</p>
 
                 <div class="requirement-group">
-                  <h6 class="requirement-group-title">Supporting courses</h6>
+                  <h6 class="requirement-group-title">{{ 'Program requirements' if degree_cfg.catalog_driven else 'Supporting courses' }}</h6>
                   {% for generic_id, label, hours, suggestions in supporting_generic %}
                   {% include "_requirement_row.html" %}
                   {% endfor %}
@@ -237,7 +245,24 @@ const courseGradesField = document.getElementById('course_grades');
 const plannerForm = document.getElementById('planner-form');
 const clearCoursesButton = document.getElementById('clear-courses');
 const suggestionsBox = document.getElementById('course_suggestions');
-const courseOptions = {{ courses | tojson | safe }};
+// Every catalog course, fetched once and cached by the browser (see /courses.json)
+let courseOptions = [];
+const courseOptionsReady = fetch('/courses.json?v=' + encodeURIComponent({{ courses_version | tojson }}))
+  .then(r => r.ok ? r.json() : [])
+  .then(list => {
+    courseOptions = list;
+    // Badges restored before the list arrived get their course titles now
+    const byCode = new Map(list.map(c => [c.code, c.label]));
+    selectedCourses.querySelectorAll('.badge').forEach(badge => {
+      const label = byCode.get(badge.dataset.course);
+      const text = badge.firstChild;
+      if (label && text && text.nodeType === Node.TEXT_NODE && text.textContent === badge.dataset.course) {
+        text.textContent = label;
+      }
+    });
+    if (courseInput.value) updateCourseSearch();
+  })
+  .catch(() => {});
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
 const majorOptions = {{ majors | tojson | safe }};
@@ -447,9 +472,13 @@ function updateCourseSearch() {
     return;
   }
 
-  const matches = courseOptions.filter(course =>
-    course.code.includes(query) || course.label.toUpperCase().includes(query)
-  );
+  const matches = [];
+  for (const course of courseOptions) {
+    if (course.code.includes(query) || course.label.toUpperCase().includes(query)) {
+      matches.push(course);
+      if (matches.length >= 40) break;
+    }
+  }
   setSuggestions(matches);
 }
 
@@ -633,9 +662,10 @@ function createCombo(wrap, { options, selected = '', exclude = () => [], onPick,
       item.setAttribute('aria-selected', option.key === current ? 'true' : 'false');
       const sub = option.concentration || option.description;
       const meta = disabled ? 'Coming soon' : (option.hours ? `${option.hours} cr hrs` : option.prefix);
+      const badge = option.verified ? '<i class="bi bi-patch-check-fill program-option-verified" title="Team-verified"></i>' : '';
       item.innerHTML = `
         <div class="program-option-text">
-          <div class="program-option-name">${highlight(option.name, found.words)}</div>
+          <div class="program-option-name">${highlight(option.name, found.words)}${badge}</div>
           ${sub ? `<div class="program-option-sub">${highlight(sub, found.words)}</div>` : ''}
         </div>
         <span class="program-option-meta">${escapeHtml(meta || '')}</span>`;

@@ -181,7 +181,9 @@ def test_app_imports_and_index_shows_minor_search():
 
 def test_index_hides_minor_for_same_subject_major():
     html = app.test_client().get("/?major=math").get_data(as_text=True)
-    assert 'class="minor-picker' not in html
+    minor_list = html.split("const minorOptions = ", 1)[1].split(";\n", 1)[0]
+    assert '"key": "math"' not in minor_list
+    assert '"prefix": "MATH"' not in minor_list
 
 
 def test_plan_page_shows_math_minor_progress():

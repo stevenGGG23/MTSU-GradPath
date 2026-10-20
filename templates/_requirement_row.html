@@ -1,6 +1,6 @@
 <div class="requirement-row">
   <div class="requirement-row-top">
-    <label for="hours_{{ generic_id }}" class="requirement-row-label">{{ label }}</label>
+    <label for="hours_{{ generic_id }}" class="requirement-row-label">{{ label }}{% if auto_generic_ids is defined and generic_id in auto_generic_ids %} <span class="auto-pill" title="Fills in from courses you check off">auto</span>{% endif %}</label>
     <div class="requirement-row-controls">
       <input
         type="number"

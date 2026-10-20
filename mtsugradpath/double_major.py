@@ -129,6 +129,19 @@ def apply_second_major_to_config(primary_cfg, second_cfg, completed_courses, cat
         **second_cfg.get("supporting_prereq_map", {}),
         **primary_cfg.get("supporting_prereq_map", {}),
     }
+    # Catalog-generated majors carry resolved prerequisites, course choices
+    # and lab pairings for their own courses; keep them for the folded-in ones.
+    cfg["prereq_override_map"] = {
+        **{code: prereqs for code, prereqs in second_cfg.get("prereq_override_map", {}).items()
+           if code not in config_course_codes(primary_cfg)},
+        **primary_cfg.get("prereq_override_map", {}),
+    }
+    cfg["generic_options"] = {
+        **{gid: opts for gid, opts in (second_cfg.get("generic_options") or {}).items()
+           if any(row[0] == gid for row in cfg["supporting_generic"])},
+        **(primary_cfg.get("generic_options") or {}),
+    }
+    cfg["coreq_map"] = {**second_cfg.get("coreq_map", {}), **primary_cfg.get("coreq_map", {})}
     return cfg, generic_extra
 
 
@@ -136,7 +149,10 @@ def build_second_major_audit(second_cfg, completed_courses, generic_hours, catal
     """Audit summary for the second major's own requirements (no gen-ed or free
     electives -- those are shared with and counted on the primary major)."""
     audit = build_audit(completed_courses, generic_hours, catalog, degree_cfg=second_cfg)
-    groups = [g for g in audit["groups"] if g["key"] in ("core", "concentration", "supporting")]
+    groups = [
+        g for g in audit["groups"]
+        if g["key"] in ("core", "concentration", "supporting") or g["key"].startswith("section_")
+    ]
     for group in groups:
         group["label"] = f"{second_cfg['name']}: {group['label'].replace(second_cfg['name'] + ' ', '')}"
 

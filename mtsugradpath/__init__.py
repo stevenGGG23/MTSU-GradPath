@@ -1,21 +1,5 @@
-"""MTSU GradPath package."""
-from .config import DATABASE_URL, BASE_CATALOG_URL, CATALOG_IDS
-from .db import SessionLocal, init_db
-from .models import Base, Course, CourseType, Prerequisite
-from .scraper import sync_courses
-from .planner import generate_plan
+"""MTSU GradPath: degree planning from MTSU's undergraduate catalog."""
 
-# Defines the main features when importing from this package
-__all__ = [
-    "DATABASE_URL",
-    "BASE_CATALOG_URL",
-    "CATALOG_IDS",
-    "SessionLocal",
-    "init_db",
-    "Base",
-    "Course",
-    "CourseType",
-    "Prerequisite",
-    "sync_courses",
-    "generate_plan",
-]
+from .config import BASE_CATALOG_URL, DATABASE_URL
+
+__all__ = ["BASE_CATALOG_URL", "DATABASE_URL"]

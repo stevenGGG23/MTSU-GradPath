@@ -53,9 +53,27 @@ MINOR_CONFIGS = {
 AVAILABLE_MINORS = MINOR_CONFIGS
 
 
+# The hand-written Math minor stands in for its catalog twin
+CATALOG_MINOR_TWINS = {"math": "Mathematics Minor"}
+
+
+def _catalog_minors():
+    from .catalog_programs import catalog_minors
+    return catalog_minors()
+
+
 def get_minor_config(key):
     """Return the minor config for *key*, or None when no minor is chosen."""
-    return MINOR_CONFIGS.get(key or "")
+    return MINOR_CONFIGS.get(key or "") or _catalog_minors().get(key or "")
+
+
+def picker_minors():
+    """(key, config) for every minor the planner offers, sorted by name."""
+    twins = set(CATALOG_MINOR_TWINS.values())
+    entries = list(MINOR_CONFIGS.items()) + [
+        (key, cfg) for key, cfg in _catalog_minors().items() if cfg["name"] not in twins
+    ]
+    return sorted(entries, key=lambda kv: kv[1]["name"].lower())
 
 
 def minor_allowed_for_major(minor_cfg, major_prefixes):
@@ -76,16 +94,22 @@ def _nice(number):
 
 
 def minor_elective_codes(minor_cfg, completed_courses):
-    """Completed courses that count toward the minor's elective hours."""
+    """Completed courses that count toward the minor's elective hours: any
+    listed elective option, plus (when the minor allows it) any course in the
+    minor's subject at or above its minimum course number."""
     required = {code for code, _, _ in minor_cfg["required_courses"]}
+    options = set(minor_cfg.get("elective_options", []))
+    prefix_rule = minor_cfg.get("elective_prefix_rule", True)
     codes = []
     for code in completed_courses:
+        if code in required:
+            continue
         number = _course_number(code)
-        if (
-            number is not None
+        if code in options or (
+            prefix_rule
+            and number is not None
             and code.split()[0] == minor_cfg["prefix"]
             and number >= minor_cfg["elective_min_number"]
-            and code not in required
         ):
             codes.append(code)
     return sorted(codes)

@@ -1,4 +1,7 @@
-"""Double majors, multiple minors, and the plan page's Sync Catalog button."""
+"""Double majors, multiple minors, and page chrome."""
+import json
+import re
+
 import pytest
 
 from app import app
@@ -66,8 +69,15 @@ def test_plan_page_has_no_sync_catalog_button():
     assert 'onclick="triggerSync()"' not in html
 
 
-def test_index_still_offers_sync_catalog():
-    assert 'id="sync-btn"' in app.test_client().get("/").get_data(as_text=True)
+def test_index_has_no_public_catalog_sync():
+    # Catalog data ships with the app; re-exporting it is an admin-only route
+    html = app.test_client().get("/").get_data(as_text=True)
+    assert 'id="sync-btn"' not in html
+    assert 'href="/prerequisites?major=cs"' in html
+
+
+def _minor_keys(html):
+    return {m["key"] for m in json.loads(re.search(r"const minorOptions = (\[.*?\]);\n", html).group(1))}
 
 
 def test_index_with_second_major_lists_both_checklists():
@@ -85,7 +95,7 @@ def test_index_drops_same_major_as_second():
 
 def test_index_hides_minors_covered_by_second_major():
     html = app.test_client().get("/?major=cs&second_major=math").get_data(as_text=True)
-    assert 'class="minor-picker' not in html
+    assert "math" not in _minor_keys(html)
 
 
 def test_plan_page_shows_second_major():
@@ -112,7 +122,8 @@ def test_minor_elective_ids_are_unique_per_minor(chem_minor):
 
 def test_second_major_row_opens_filled_when_chosen():
     html = app.test_client().get("/?major=biology&second_major=cs").get_data(as_text=True)
-    assert 'id="second_input" class="form-control combo-input" value="B.S. Computer Science"' in html
+    assert ('id="second_input" class="form-control combo-input" '
+            'value="Computer Science, Professional Computer Science Concentration, B.S."') in html
     assert 'id="second_add" title="Add a second major" aria-label="Add a second major" hidden' in html
 
 

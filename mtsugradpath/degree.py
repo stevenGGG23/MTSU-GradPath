@@ -228,6 +228,17 @@ def apply_course_equivalencies(completed_courses, equivalencies):
 # Function that builds the complete degree audit from the completed hours
 # Accepts an optional degree_cfg for multi-major support.
 def build_audit(completed_courses, generic_hours, catalog=None, degree_cfg=None, equivalencies=None):
+    # Catalog-generated majors are audited section by section, the way the
+    # catalog lays the program out
+    if degree_cfg is not None and degree_cfg.get("display_sections"):
+        return _build_audit_sections(
+            completed_courses,
+            generic_hours,
+            catalog,
+            degree_cfg,
+            equivalencies=equivalencies,
+        )
+
     # When a degree_cfg is provided, use the generic multi-major implementation
     if degree_cfg is not None:
         return _build_audit_generic(
@@ -571,6 +582,141 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, equival
     total_required = sum(g["required_hours"] for g in groups)
     total_completed = min(sum(g["completed_hours"] for g in groups), total_required)
 
+    for group in groups:
+        group["required_hours"] = _nice(group["required_hours"])
+        group["completed_hours"] = _nice(group["completed_hours"])
+        for entry in group["entries"]:
+            entry["hours"] = _nice(entry["hours"])
+            if "partial_hours" in entry:
+                entry["partial_hours"] = _nice(entry["partial_hours"])
+
+    return {
+        "groups": groups,
+        "total_required": _nice(total_required),
+        "total_completed": _nice(total_completed),
+        "percent": round(100 * total_completed / total_required, 1) if total_required else 0,
+    }
+
+
+def _build_audit_sections(completed_courses, generic_hours, catalog, cfg, equivalencies=None):
+    """Audit for a catalog-generated major: one group per catalog section,
+    then True Blue Core and free electives."""
+    completed_courses = {c.strip().upper() for c in completed_courses}
+    if equivalencies:
+        completed_courses = apply_course_equivalencies(completed_courses, equivalencies)
+    generic_hours = generic_hours or {}
+    catalog = catalog or {}
+
+    course_info = {
+        code: (hours, title)
+        for key in ("core_courses", "concentration_courses", "supporting_courses")
+        for code, hours, title in cfg[key]
+    }
+    generic_info = {gid: (label, hours, sugg) for gid, label, hours, sugg in cfg["supporting_generic"]}
+    applied_by_gid = cfg.get("_applied", {})
+    required_codes = set(course_info)
+    prefix = cfg["prefix"]
+    upper_div_min = cfg.get("upper_division_min", 3000)
+
+    # Upper-division electives in the major's subject, shared across sections
+    ud_total = cfg.get("concentration_elective_hours", 0)
+    ud_codes = sorted(
+        code for code in completed_courses
+        if _is_upper_division(code, prefix, upper_div_min) and code not in required_codes
+        and not any(code in applied for applied in applied_by_gid.values())
+    )
+    ud_pool = min(sum(_course_hours(code, catalog) for code in ud_codes), ud_total)
+
+    groups = []
+    seen_courses: set = set()
+    for index, section in enumerate(cfg["display_sections"]):
+        entries = []
+        required = done_hours = 0
+        for row in section["rows"]:
+            if row["type"] == "course":
+                code = row["code"]
+                if code in seen_courses or code not in course_info:
+                    continue
+                seen_courses.add(code)
+                hours, title = course_info[code]
+                done = code in completed_courses
+                required += hours
+                done_hours += hours if done else 0
+                entries.append({"label": f"{code} - {title}" if title else code, "hours": hours, "done": done})
+            elif row["type"] == "generic":
+                if row["id"] not in generic_info:
+                    continue
+                label, hours, sugg = generic_info[row["id"]]
+                entered = clamp_hours(generic_hours.get(row["id"], 0), hours)
+                required += hours
+                done_hours += entered
+                entry = {
+                    "label": label, "hours": hours, "done": entered >= hours,
+                    "partial_hours": entered, "generic_id": row["id"], "suggestions": sugg,
+                }
+                if applied_by_gid.get(row["id"]):
+                    entry["applied"] = applied_by_gid[row["id"]]
+                entries.append(entry)
+            elif row["type"] == "ud":
+                hours = row["hours"]
+                take = min(ud_pool, hours)
+                ud_pool -= take
+                required += hours
+                done_hours += take
+                entries.append({
+                    "label": row.get("label") or f"{prefix} upper-division electives",
+                    "hours": hours, "done": take >= hours, "partial_hours": take,
+                    "applied": ud_codes,
+                })
+        if entries:
+            groups.append({
+                "key": f"section_{index}",
+                "label": section["label"],
+                "required_hours": required,
+                "completed_hours": done_hours,
+                "entries": entries,
+            })
+
+    tbc_items = []
+    tbc_done = 0
+    for gid, label, hours, suggestions in cfg["tbc_generic"]:
+        entered = clamp_hours(generic_hours.get(gid, 0), hours)
+        tbc_done += entered
+        tbc_items.append({
+            "label": label, "hours": hours, "done": entered >= hours,
+            "partial_hours": entered, "generic_id": gid, "suggestions": suggestions,
+        })
+    tbc_required = sum(h for _, _, h, _ in cfg["tbc_generic"])
+    if tbc_items:
+        groups.append({
+            "key": "tbc",
+            "label": "True Blue Core (general education)",
+            "required_hours": tbc_required,
+            "completed_hours": tbc_done,
+            "entries": tbc_items,
+        })
+
+    fixed = sum(g["required_hours"] for g in groups)
+    elective_total = max(cfg["total_hours"] - fixed, 0)
+    if elective_total:
+        entered = clamp_hours(generic_hours.get(ELECTIVES_GENERIC_ID, 0), elective_total)
+        groups.append({
+            "key": "electives",
+            "label": "General Electives",
+            "required_hours": elective_total,
+            "completed_hours": entered,
+            "entries": [{
+                "label": "Free electives",
+                "hours": elective_total,
+                "done": entered >= elective_total,
+                "partial_hours": entered,
+                "generic_id": ELECTIVES_GENERIC_ID,
+                "suggestions": ["Any elective course"],
+            }],
+        })
+
+    total_required = sum(g["required_hours"] for g in groups)
+    total_completed = min(sum(g["completed_hours"] for g in groups), total_required)
     for group in groups:
         group["required_hours"] = _nice(group["required_hours"])
         group["completed_hours"] = _nice(group["completed_hours"])

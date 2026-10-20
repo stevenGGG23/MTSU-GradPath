@@ -3,8 +3,8 @@ import time
 from datetime import date
 from typing import List, Set, Dict
 
+from . import catalog_store
 from .config import PROGRAM_PREFIX
-from .db import SessionLocal
 from .degree import (
     CS_CORE_COURSES,
     CONCENTRATION_REQUIRED_COURSES,
@@ -18,8 +18,6 @@ from .degree import (
     clamp_hours,
 )
 from .degree_configs import CS_CONFIG, DEGREE_CONFIGS, get_full_degree_config, major_prefixes
-from .models import Course
-
 # Maps a course prefix (e.g. "MATH") to that major's own config, so a
 # cross-prefix requirement -- e.g. a Physics major's PHYS course needing a
 # MATH course -- can be checked against the offering pattern MATH's own
@@ -28,15 +26,14 @@ from .models import Course
 _PREFIX_TO_CONFIG = {p: c for c in DEGREE_CONFIGS.values() for p in major_prefixes(c)}
 
 # ── Catalog cache ──────────────────────────────────────────────────────────────
-# Keeps the most recent DB-loaded catalog for each prefix in memory so that
-# repeated plan generations (or second-major + minor combos) don't hit the DB
-# every time. The sync route calls clear_catalog_cache() to flush stale data.
+# Per-prefix planner catalogs built from the in-memory catalog export. Cheap to
+# build, but cached anyway since every plan for a major asks for the same one.
 _catalog_cache: Dict[str, tuple] = {}  # prefix -> (monotonic_time, catalog_dict)
 _CATALOG_TTL = 300  # seconds (5 min)
 
 
 def clear_catalog_cache() -> None:
-    """Flush all cached catalog data — called after a successful catalog sync."""
+    """Flush cached planner catalogs -- called after a catalog re-export."""
     _catalog_cache.clear()
 
 
@@ -50,6 +47,11 @@ def _offered_in_term(code: str, season: str, year: int, degree_cfg: dict) -> boo
         degree_cfg if code_prefix == degree_cfg.get("prefix")
         else _PREFIX_TO_CONFIG.get(code_prefix)
     )
+    # A catalog-generated major has no offering data of its own; the
+    # hand-curated config for the same subject (e.g. CS_CONFIG for any CSCI
+    # course) is the best source we have.
+    if home_cfg is not None and home_cfg.get("catalog_driven") and code_prefix in _PREFIX_TO_CONFIG:
+        home_cfg = _PREFIX_TO_CONFIG[code_prefix]
     if home_cfg is None:
         return True
     if code in home_cfg.get("odd_year_spring_only", set()):
@@ -105,6 +107,11 @@ def _effective_prereqs(
 # own major's catalog.
 def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     code_prefix = code.split()[0] if " " in code else None
+    # Catalog-generated configs carry a resolved prerequisite set for every
+    # course they plan (see catalog_programs), whatever its prefix.
+    override = cfg.get("prereq_override_map", {})
+    if code in override and (cfg.get("catalog_driven") or code_prefix != cfg.get("prefix")):
+        return set(override[code]) | set(cfg.get("prereq_map", {}).get(code, set()))
     if code_prefix == cfg.get("prefix"):
         return _effective_prereqs(
             code, catalog, cfg.get("prereq_map", {}), cfg.get("prereq_override_map", {}), cfg["prefix"]
@@ -238,52 +245,49 @@ def meets_minimum_grade(grade: str, minimum_grade: str) -> bool:
 
 # Function that loads course information from the database for a given prefix
 def load_catalog_courses(prefix: str = None) -> Dict[str, Dict[str, object]]:
+    """Planner catalog ({code: title/credits/prereqs/prereq_grades}) for one
+    course prefix, from the in-memory catalog export."""
     prefix = prefix or PROGRAM_PREFIX
 
-    # Return cached result if still fresh
     cached = _catalog_cache.get(prefix)
     if cached is not None:
         ts, data = cached
         if time.monotonic() - ts < _CATALOG_TTL:
             return data
 
-    catalog = {}
-    try:
-        with SessionLocal() as session:
-            course_rows = (
-                session.query(Course)
-                .filter(Course.prefix == prefix)
-                .order_by(Course.prefix, Course.number)
-                .all()
-            )
-
-            # Converts the course records to code-based dictionaries
-            for course in course_rows:
-                if not course.prefix or not course.number:
-                    continue
-
-                code = f"{course.prefix} {course.number}"
-                prereq_codes = set()
-                prereq_grades = {}
-
-                # Courses may have more than one stored prerequisite
-                for prereq in course.prerequisites:
-                    prereq_codes.update(parse_prereq_codes(prereq.prerequisite_text))
-                    prereq_grades.update(
-                        parse_prereq_grade_requirements(prereq.prerequisite_text)
-                )
-                catalog[code] = {
-                    "prereq_grades": prereq_grades,
-                    "title": course.title or "",
-                    "credits": course.credits or 0,
-                    "prereqs": prereq_codes,
-                }
-    # Empty the catalog for the planner to fall back if needed
-    except Exception:
-        return {}
-
+    catalog = catalog_store.planner_catalog(prefixes=[prefix])
     _catalog_cache[prefix] = (time.monotonic(), catalog)
     return catalog
+
+
+def config_course_codes_all(cfg: dict) -> Set[str]:
+    """Every course a config names: required lists, choices and minor lists."""
+    codes = set()
+    for key in ("core_courses", "concentration_courses", "supporting_courses", "required_courses"):
+        codes.update(code for code, _, _ in cfg.get(key, []))
+    codes.update(cfg.get("high_level_options", []))
+    for options in (cfg.get("generic_options") or {}).values():
+        codes.update(options)
+    codes.update(cfg.get("elective_options", []))
+    return codes
+
+
+def load_catalog_for(*cfgs, completed=()) -> Dict[str, Dict[str, object]]:
+    """Planner catalog covering every course the given configs can plan.
+
+    "A or B" prerequisites resolve to whichever option the student completed
+    or the programs require, so nobody is told to take a course they've
+    already satisfied another way.
+    """
+    prefixes, codes = set(), set()
+    for cfg in cfgs:
+        if not cfg:
+            continue
+        prefixes.add(cfg["prefix"])
+        prefixes.update(cfg.get("extra_prefixes", []))
+        codes |= config_course_codes_all(cfg)
+    prefer = set(completed) | codes
+    return catalog_store.planner_catalog(prefixes=prefixes, codes=codes, prefer=prefer)
 
 # Function to sort course codes by department prefix and course number
 def sorted_course_codes(courses: Set[str]) -> List[str]:
@@ -332,12 +336,22 @@ def build_elective_pool(
     if hours_needed <= 0:
         return set()
 
+    # A candidate is only useful if its own-subject prerequisites are things
+    # the student has done or this plan will schedule -- otherwise it would
+    # sit in "Remaining" forever waiting on a course nobody plans.
+    reachable = set(completed) | set(required_codes)
+
+    def _schedulable(code):
+        prereqs = {p for p in catalog.get(code, {}).get("prereqs", set()) if p.startswith(prefix)}
+        return prereqs <= reachable
+
     candidate_codes = {
         code for code in catalog
         if _is_upper_division(code, prefix, min_num)
         and code not in required_codes
         and code not in completed
         and (catalog.get(code, {}).get("credits") or 0) > 0  # skip 0-credit lab sections
+        and _schedulable(code)
     }
 
     # High-level language courses can be alternatives, one should be in the recommended section
@@ -538,8 +552,8 @@ def generate_plan(
     for code, hours, _ in core_courses + conc_courses + supporting_courses_list:
         config_hours[code] = hours
 
-        def _offered(code, season, year):
-            return _offered_in_term(code, season, year, cfg)
+    def _offered(code, season, year):
+        return _offered_in_term(code, season, year, cfg)
 
     def _prereqs_satisfied(code, completed):
         prereqs = _effective_prereqs(
@@ -561,7 +575,9 @@ def generate_plan(
             # Only validate grades for courses the student reported
             # as already completed. Future planned courses are assumed
             # to be completed successfully.
-            if prereq_code in completed_courses:
+            # A course reported without a grade is assumed passed with
+            # whatever grade it needed -- the planner doesn't ask for grades.
+            if prereq_code in completed_courses and course_grades.get(prereq_code):
                 if not meets_minimum_grade(
                     course_grades.get(prereq_code),
                     minimum_grade,
@@ -771,6 +787,7 @@ def validate_plan(
                     if (
                         prereq in completed_courses
                         and minimum_grade
+                        and course_grades.get(prereq)
                         and not meets_minimum_grade(
                             course_grades.get(prereq),
                             minimum_grade,
@@ -1042,3 +1059,38 @@ def render_prereq_mermaid(nodes: Dict[str, Dict[str, object]], edges: List[tuple
     ])
 
     return "\n".join(lines)
+
+
+# Function that builds the prerequisite graph for any major's required courses
+def build_program_prereq_graph(cfg: dict, catalog: Dict[str, Dict[str, object]] = None):
+    catalog = catalog or {}
+    nodes: Dict[str, Dict[str, object]] = {}
+
+    def add(code, hours, title, group):
+        if code not in nodes:
+            info = catalog.get(code, {})
+            nodes[code] = {
+                "title": title or info.get("title", ""),
+                "hours": hours or info.get("credits") or 3,
+                "group": group,
+            }
+
+    for code, hours, title in cfg["core_courses"]:
+        add(code, hours, title, "core")
+    for code, hours, title in cfg["concentration_courses"]:
+        add(code, hours, title, "concentration")
+    for code in cfg.get("high_level_options", []):
+        add(code, None, None, "language")
+    for code, hours, title in cfg["supporting_courses"]:
+        add(code, hours, title, "supporting")
+
+    supporting_prereq_map = cfg.get("supporting_prereq_map", {})
+    edges = []
+    for code in list(nodes):
+        prereqs = _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
+        for prereq in sorted(prereqs):
+            edges.append((prereq, code))
+            if prereq not in nodes:
+                info = catalog.get(prereq, {})
+                nodes[prereq] = {"title": info.get("title", ""), "hours": info.get("credits"), "group": "external"}
+    return nodes, edges

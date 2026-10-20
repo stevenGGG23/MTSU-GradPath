@@ -1,69 +1,71 @@
-import os
+import gzip
 import json
+import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from mtsugradpath.config import PROGRAM_PREFIX, SYNC_ADMIN_USER, SYNC_ADMIN_PASSWORD
-from mtsugradpath.db import init_db, SessionLocal
+from datetime import date
+
 from flask import (
     Flask,
-    render_template,
-    request,
-    redirect,
-    url_for,
+    Response,
     flash,
     jsonify,
-    Response,
+    redirect,
+    render_template,
+    request,
+    url_for,
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+from mtsugradpath import catalog_store
+from mtsugradpath.catalog_programs import auto_generic_hours, tbc_area_options
+from mtsugradpath.config import SYNC_ADMIN_PASSWORD, SYNC_ADMIN_USER
+from mtsugradpath.db import SessionLocal, init_db
 from mtsugradpath.degree import (
-    SUPPORTING_COURSES,
+    ELECTIVES_GENERIC_ID,
     SUPPORTING_GENERIC,
     TBC_GENERIC,
-    ELECTIVES_GENERIC_ID,
-    DEGREE_REGISTRY,
-    elective_required_hours,
     build_audit,
-    get_degree_config,
 )
-
-from mtsugradpath.degree_configs import get_full_degree_config, major_prefixes, DEGREE_CONFIGS
-from mtsugradpath.minors import (
-    MINOR_CONFIGS,
-    get_minor_config,
-    minor_allowed_for_major,
-    apply_minor_to_config,
-    build_minor_audit,
-    MINOR_ELECTIVE_ID_PREFIX,
+from mtsugradpath.degree_configs import (
+    DEGREE_CONFIGS,
+    display_name,
+    find_degree_config,
+    get_full_degree_config,
+    major_prefixes,
+    picker_majors,
 )
 from mtsugradpath.double_major import (
     SECOND_MAJOR_ELECTIVE_ID_PREFIX,
-    second_major_allowed,
     apply_second_major_to_config,
     build_second_major_audit,
     config_course_codes,
+    second_major_allowed,
 )
-
-from mtsugradpath.models import CatalogCourseSummary, Course, SyncStatus, CourseEquivalency
+from mtsugradpath.minors import (
+    MINOR_ELECTIVE_ID_PREFIX,
+    apply_minor_to_config,
+    build_minor_audit,
+    get_minor_config,
+    minor_allowed_for_major,
+    picker_minors,
+)
+from mtsugradpath.models import CourseEquivalency, SyncStatus
 from mtsugradpath.planner import (
-    generate_plan,
-    load_catalog_courses,
-    clear_catalog_cache,
-    parse_prereq_grade_requirements,
-    meets_minimum_grade,
-    default_start_season,
     SEASON_CYCLE,
-    validate_plan,
-    build_prereq_graph,
-    render_prereq_mermaid,
     build_personal_prereq_graph,
+    build_program_prereq_graph,
+    clear_catalog_cache,
+    config_course_codes_all,
+    default_start_season,
+    generate_plan,
+    load_catalog_for,
+    meets_minimum_grade,
     render_personal_prereq_mermaid,
+    render_prereq_mermaid,
+    validate_plan,
 )
-
-from mtsugradpath.scraper import sync_course_search_index, sync_courses
-from datetime import date
 
 # Create the Flask application and its databases
 app = Flask(__name__)
@@ -87,13 +89,42 @@ with app.app_context():
     init_db()
 
 
-# A full resync of every major takes a few minutes at most (see the timed
-# manual run in dev: ~40s for a single mid-size major). Anything still
-# "running" past this is an orphaned lock, not a real in-progress sync -- most
-# likely the worker thread running it was killed mid-sync (deploy, OOM
-# restart) before it could set running=False, and since a daemon thread dies
-# silently with its process, nothing else would ever clear the flag.
-STALE_SYNC_SECONDS = 20 * 60
+# Gzip text responses. The planner page carries every major/minor name and
+# /courses.json every course in the catalog; compressed they're a fraction of
+# the size, which matters most on phones.
+@app.after_request
+def _gzip(response):
+    if (
+        response.status_code != 200
+        or response.direct_passthrough
+        or "gzip" not in request.headers.get("Accept-Encoding", "")
+        or "Content-Encoding" in response.headers
+        or not (response.mimetype or "").startswith(("text/", "application/json"))
+    ):
+        return response
+    data = response.get_data()
+    if len(data) < 1024:
+        return response
+    response.set_data(gzip.compress(data, compresslevel=6))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(response.get_data()))
+    response.vary.add("Accept-Encoding")
+    return response
+
+# Load the catalog export (and convert every program) at startup, so the
+# first visitor doesn't pay for it
+catalog_store.data()
+picker_majors()
+picker_minors()
+
+
+# A full catalog re-export takes a while (the catalog's firewall limits how
+# fast it can be downloaded). Anything still "running" past this is an
+# orphaned lock, not a real in-progress export -- most likely the worker
+# thread running it was killed (deploy, OOM restart) before it could set
+# running=False, and since a daemon thread dies silently with its process,
+# nothing else would ever clear the flag.
+STALE_SYNC_SECONDS = 90 * 60
 
 
 def _sync_is_stale(state):
@@ -101,25 +132,28 @@ def _sync_is_stale(state):
     return started_at is None or (time.time() - started_at) > STALE_SYNC_SECONDS
 
 
-# Sync progress lives in the DB (SyncStatus, single row id=1), not a process
+# Export progress lives in the DB (SyncStatus, single row id=1), not a process
 # global -- so /sync/status is consistent across gunicorn workers.
 def _get_sync_state():
-    with SessionLocal() as db_session:
-        row = db_session.get(SyncStatus, 1)
-        if row is None:
-            return {
-                "running": False, "total": 0, "fresh": 0, "cached": 0,
-                "errors": [], "done": False, "started_at": None,
-            }
+    try:
+        with SessionLocal() as db_session:
+            row = db_session.get(SyncStatus, 1)
+    except Exception:
+        row = None
+    if row is None:
         return {
-            "running": row.running,
-            "total": row.total,
-            "fresh": row.fresh,
-            "cached": row.cached,
-            "errors": row.errors.splitlines() if row.errors else [],
-            "done": row.done,
-            "started_at": row.started_at,
+            "running": False, "total": 0, "fresh": 0, "cached": 0,
+            "errors": [], "done": False, "started_at": None,
         }
+    return {
+        "running": row.running,
+        "total": row.total,
+        "fresh": row.fresh,
+        "cached": row.cached,
+        "errors": row.errors.splitlines() if row.errors else [],
+        "done": row.done,
+        "started_at": row.started_at,
+    }
 
 
 def _set_sync_state(**fields):
@@ -138,7 +172,7 @@ def _set_sync_state(**fields):
 def _admin_auth_ok():
     """Checks HTTP Basic Auth against SYNC_ADMIN_USER/PASSWORD.
 
-    If those env vars aren't set (local dev), force-resync stays open.
+    If those env vars aren't set (local dev), the re-export stays open.
     """
     if not (SYNC_ADMIN_USER and SYNC_ADMIN_PASSWORD):
         return True
@@ -150,10 +184,11 @@ def _admin_auth_ok():
 
 def _admin_auth_challenge():
     return Response(
-        "Admin credentials required for a full catalog resync.",
+        "Admin credentials required to re-export the catalog.",
         401,
         {"WWW-Authenticate": 'Basic realm="GradPath Admin"'},
     )
+
 
 # Function that formats credit hours with a display label
 def credit_label(hours):
@@ -165,7 +200,8 @@ def credit_label(hours):
 
     return f"{hours_value} {unit}"
 
-# Function that formats credit hours into a shot hand display
+
+# Function that formats credit hours into a short hand display
 def credit_short(hours):
     if not hours:
         return ""
@@ -173,6 +209,7 @@ def credit_short(hours):
     hours_value = int(hours) if float(hours).is_integer() else hours
 
     return f"{hours_value} cr"
+
 
 # Function that reads the complete generic requirement hours from the submitted form
 # Uses the degree_cfg's generic items when provided; falls back to CS defaults.
@@ -192,16 +229,77 @@ def read_generic_hours(form, degree_cfg=None):
     return generic_hours
 
 
+def _as_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # Function that returns the second major's config, or None when none is chosen
 # or it can't be paired with the primary (same program or same subject)
 def _second_major_cfg(primary_cfg, key):
-    second_cfg = DEGREE_CONFIGS.get(key or "")
+    second_cfg = find_degree_config(key or "")
     return second_cfg if second_major_allowed(primary_cfg, second_cfg) else None
+
+
+# Courses shown in a major's "check off what you've taken" list: everything a
+# catalog-generated program names (required courses and each choice's
+# options), plus the rest of the subject when the program has upper-division
+# electives in it. Hand-curated majors list their whole subject, as before.
+def _checklist_codes(cfg):
+    codes = []
+    if cfg.get("catalog_driven"):
+        codes = sorted(config_course_codes_all(cfg))
+        if cfg.get("concentration_elective_hours"):
+            codes += catalog_store.codes_for_prefix(cfg["prefix"])
+    else:
+        for prefix in major_prefixes(cfg):
+            codes += catalog_store.codes_for_prefix(prefix)
+    return [code for code in dict.fromkeys(codes) if catalog_store.course(code)]
+
+
+def _required_codes(cfg):
+    return {
+        code
+        for key in ("core_courses", "concentration_courses", "supporting_courses")
+        for code, _, _ in cfg.get(key, [])
+    }
+
+
+def _program_option(key, cfg):
+    name = display_name(cfg)
+    return {
+        "key": key,
+        "name": name,
+        "concentration": cfg.get("department") or "",
+        "prefix": cfg["prefix"],
+        "available": cfg.get("available", True),
+        "verified": not cfg.get("catalog_driven"),
+    }
+
+
+# JSON list of every catalog course for the course search box. Served
+# separately (and cached by the browser) so the planner page itself stays small.
+@app.route("/courses.json")
+@limiter.exempt
+def courses_json():
+    version = catalog_store.meta().get("fetched_at", "")
+    etag = f'"courses-{version}"'
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status=304)
+    resp = Response(json.dumps(catalog_store.search_index()), mimetype="application/json")
+    resp.headers["ETag"] = etag
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 # Function that displays the planner form and processes the submitted degree plans
 @app.route("/", methods=["GET", "POST"])
 def index():
+    if request.method == "POST":
+        return _plan()
+
     # Selections are intentionally NOT persisted across visits -- every fresh
     # load of the planner starts blank. The only thing carried across a
     # reload is the major, and only via the ?major= query param itself (used
@@ -211,442 +309,55 @@ def index():
         "second_major": request.args.get("second_major", ""),
     }
 
-    # Determine which major(s) to display courses for on GET
-    degree_cfg_for_display = get_full_degree_config(saved_state["major"])
-    second_cfg_for_display = _second_major_cfg(degree_cfg_for_display, saved_state["second_major"])
-    saved_state["second_major"] = second_cfg_for_display["key"] if second_cfg_for_display else ""
-    primary_prefixes = major_prefixes(degree_cfg_for_display)
-    display_prefixes = list(primary_prefixes)
-    if second_cfg_for_display:
-        display_prefixes += major_prefixes(second_cfg_for_display)
+    degree_cfg = get_full_degree_config(saved_state["major"])
+    saved_state["major"] = degree_cfg["key"]
+    second_cfg = _second_major_cfg(degree_cfg, saved_state["second_major"])
+    saved_state["second_major"] = second_cfg["key"] if second_cfg else ""
+
+    primary_codes = _checklist_codes(degree_cfg)
+    second_codes = [c for c in _checklist_codes(second_cfg) if c not in set(primary_codes)] if second_cfg else []
+    display_prefixes = list(dict.fromkeys(
+        major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
+    ))
 
     # The second major's courses and electives folded in, so the requirement
     # rows and free-elective hours on the form match what will be planned
-    form_cfg = degree_cfg_for_display
-    if second_cfg_for_display:
-        form_cfg, _ = apply_second_major_to_config(degree_cfg_for_display, second_cfg_for_display, set())
+    form_cfg = degree_cfg
+    if second_cfg:
+        form_cfg, _ = apply_second_major_to_config(degree_cfg, second_cfg, set())
 
-    with SessionLocal() as db_session:
-        course_list = (
-            db_session.query(Course)
-            .filter(Course.prefix.in_(display_prefixes))
-            .order_by(Course.prefix, Course.number)
-            .all()
-        )
-        searchable_course_rows = (
-            db_session.query(Course)
-            .filter(Course.prefix.isnot(None), Course.number.isnot(None))
-            .order_by(Course.prefix, Course.number)
-            .all()
-        )
-        catalog_summaries = (
-            db_session.query(CatalogCourseSummary)
-            .order_by(
-                CatalogCourseSummary.prefix,
-                CatalogCourseSummary.number,
-                CatalogCourseSummary.catalog_id,
-            )
-            .all()
-        )
-                # Track prerequisite courses that require a minimum grade
-        prerequisite_grade_requirements = {}
+    # Minimum grades that a course's prerequisites call for, shown as a tooltip
+    prerequisite_grade_requirements = {}
+    for code in primary_codes + second_codes:
+        prerequisite_grade_requirements.update((catalog_store.course(code) or {}).get("min_grades", {}))
 
-        for course in course_list:
-            for prereq in course.prerequisites:
-                prerequisite_grade_requirements.update(
-                    parse_prereq_grade_requirements(
-                        prereq.prerequisite_text
-                    )
-                )
-        major_courses = [
-            {
-                "code": f"{course.prefix} {course.number}",
-                "label": (
-                    f"{course.prefix} {course.number}"
-                    f" - {course.title}"
-                ),
-                "credits": course.credits or 0,
-                "minimum_grade": prerequisite_grade_requirements.get(
-                    f"{course.prefix} {course.number}"
-                ),
-                "level": f"{course.number[0]}000-Level",
+    required = _required_codes(degree_cfg) | (_required_codes(second_cfg) if second_cfg else set())
+    major_courses = []
+    for group, codes in ((0, primary_codes), (1, second_codes)):
+        for code in codes:
+            info = catalog_store.course(code) or {}
+            number = code.split()[1]
+            major_courses.append({
+                "code": code,
+                "label": f"{code} - {info.get('title', '')}",
+                "credits": info.get("credits") or 0,
+                "minimum_grade": prerequisite_grade_requirements.get(code),
+                "level": f"{number[0]}000-Level",
+                "required": code in required,
+                "desc": info.get("desc", ""),
                 # 0 = primary major, 1 = second major (checklist sections)
-                "group": 0 if course.prefix in primary_prefixes else 1,
-            }
-            for course in course_list
-            if course.prefix and course.number
-        ]
+                "group": group,
+            })
+    major_courses.sort(key=lambda c: (c["group"], c["level"], c["code"]))
 
-        major_courses.sort(key=lambda c: (c["group"], c["level"], c["code"]))
+    majors = [_program_option(key, cfg) for key, cfg in picker_majors()]
+    # Old links to the generic Biology/Math/Physics configs still work; keep
+    # the current pick in the list so the picker can show its name.
+    for cfg in (degree_cfg, second_cfg):
+        if cfg and not any(m["key"] == cfg["key"] for m in majors):
+            majors.append(_program_option(cfg["key"], cfg))
 
-    # The checklist stays major-scoped; search spans the full catalog index.
-    courses_by_code = {}
-    for course in searchable_course_rows:
-        code = f"{course.prefix} {course.number}"
-        courses_by_code[code] = {
-            "code": code,
-            "label": f"{code} - {course.title or ''}".rstrip(),
-            "credits": course.credits or 0,
-        }
-
-    for summary in catalog_summaries:
-        code = f"{summary.prefix} {summary.number}"
-        existing = courses_by_code.get(code, {})
-        courses_by_code[code] = {
-            "code": code,
-            "label": f"{code} - {summary.title}",
-            "credits": existing.get("credits", 0),
-        }
-
-    # Keep configured supporting courses searchable even before a catalog sync.
-    for code, hours, title in form_cfg["supporting_courses"]:
-        courses_by_code.setdefault(
-            code,
-            {"code": code, "label": f"{code} - {title}", "credits": hours},
-        )
-
-    courses = sorted(courses_by_code.values(), key=lambda course: course["code"])
-
-    if request.method == "POST":
-        completed_text = request.form.get("completed_courses", "")
-
-        # Convert the submitted course list into course codes
-        completed_courses = {
-            code.strip().upper()
-            for code in completed_text.splitlines()
-            if code.strip()
-        }
-
-                # Read grades for completed prerequisite courses that require a minimum grade
-        try:
-            course_grades = json.loads(
-                request.form.get("course_grades", "{}")
-            )
-        except (json.JSONDecodeError, TypeError):
-            course_grades = {}
-
-        # Read selected major(s) and get the full degree configs
-        selected_major = request.form.get("major", "cs")
-        degree_cfg = get_full_degree_config(selected_major)
-        second_cfg = _second_major_cfg(degree_cfg, request.form.get("second_major"))
-        all_major_prefixes = major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
-
-        # Optional minors -- unknown ones, repeats, and ones in either major's
-        # own subject are dropped
-        minor_cfgs = []
-        for key in request.form.getlist("minor"):
-            minor_cfg = get_minor_config(key)
-            if (
-                minor_cfg
-                and minor_cfg not in minor_cfgs
-                and minor_allowed_for_major(minor_cfg, all_major_prefixes)
-            ):
-                minor_cfgs.append(minor_cfg)
-
-        try:
-            target_semesters = int(
-                request.form.get("target_semesters", 4)
-            )
-        except ValueError:
-            target_semesters = 4
-
-        include_summer = bool(request.form.get("include_summer"))
-
-        start_season = (
-            request.form.get("start_season") or default_start_season()
-        )
-
-        try:
-            start_year = int(request.form.get("start_year") or date.today().year)
-        except ValueError:
-            start_year = date.today().year
-
-        # Warm the in-process catalog cache for every program this request
-        # needs (primary, second major, minors) concurrently so all the
-        # load_catalog_courses() calls below are instant cache hits.
-        _needed_prefixes = list(dict.fromkeys(
-            [degree_cfg["prefix"]]
-            + ([second_cfg["prefix"]] if second_cfg else [])
-            + [mc["prefix"] for mc in minor_cfgs]
-        ))
-        if len(_needed_prefixes) > 1:
-            with ThreadPoolExecutor(max_workers=len(_needed_prefixes)) as _pool:
-                list(_pool.map(load_catalog_courses, _needed_prefixes))
-
-        catalog = load_catalog_courses(degree_cfg["prefix"])
-
-        # Build minimum-grade requirements for prerequisite courses
-        minimum_grades = {}
-
-        for course_info in catalog.values():
-            minimum_grades.update(
-                course_info.get("prereq_grades", {})
-            )
-
-        # Only exclude a completed course when the student explicitly provided
-        # a grade AND that grade falls below the required minimum. If no grade
-        # was supplied (the dropdown was removed from the UI), assume the course
-        # was completed satisfactorily and include it.
-        validated_completed_courses = set()
-
-        for code in completed_courses:
-            minimum_grade = minimum_grades.get(code)
-            provided_grade = course_grades.get(code)
-
-            if minimum_grade and provided_grade:
-                if meets_minimum_grade(provided_grade, minimum_grade):
-                    validated_completed_courses.add(code)
-            else:
-                validated_completed_courses.add(code)
-
-        # With a second major or minors, the plan is built from a copy of the
-        # major's config with their courses and electives folded in; the
-        # major's own audit still uses the unmodified config.
-        planning_cfg = degree_cfg
-        planning_generic_hours = {}
-        second_audit = None
-        if second_cfg:
-            # The second major's scraped courses sit in the same catalog so
-            # their titles, credits and prerequisites are known to the planner
-            catalog = {**load_catalog_courses(second_cfg["prefix"]), **catalog}
-            planning_cfg, second_generic_hours = apply_second_major_to_config(
-                degree_cfg, second_cfg, completed_courses, catalog
-            )
-            planning_generic_hours.update(second_generic_hours)
-
-        generic_hours = read_generic_hours(request.form, planning_cfg)
-
-        if second_cfg:
-            second_audit = build_second_major_audit(second_cfg, completed_courses, generic_hours, catalog)
-
-        minor_audits = []
-        for minor_cfg in minor_cfgs:
-            minor_catalog = load_catalog_courses(minor_cfg["prefix"])
-            planning_cfg, minor_generic_hours = apply_minor_to_config(
-                planning_cfg, minor_cfg, completed_courses, minor_catalog
-            )
-            planning_generic_hours.update(minor_generic_hours)
-            minor_audits.append(build_minor_audit(minor_cfg, completed_courses, minor_catalog))
-
-        # Auto-computed elective progress wins over the (absent) form fields
-        planning_generic_hours = {**generic_hours, **planning_generic_hours}
-
-        # Courses that are on the plan only because of the second major or a
-        # minor; ones the major already requires (e.g. MATH 1920 for CS) keep
-        # their normal tag.
-        major_codes = config_course_codes(degree_cfg)
-        second_only_codes = (second_audit["course_codes"] - major_codes) if second_audit else set()
-        minor_only_codes = set().union(*(m["course_codes"] for m in minor_audits)) - major_codes - second_only_codes
-
-        # Generates the plan, audits, and prerequisite warnings
-        plan = generate_plan(
-            completed_courses,
-            planning_generic_hours,
-            target_semesters,
-            include_summer,
-            start_season=start_season,
-            start_year=start_year,
-            degree_cfg=planning_cfg,
-            catalog=catalog,
-            course_grades=course_grades,
-        )
-
-        with SessionLocal() as db_session:
-            equivalencies = db_session.query(CourseEquivalency).all()
-
-        audit = build_audit(
-            validated_completed_courses,
-            generic_hours,
-            catalog,
-            degree_cfg=degree_cfg,
-            equivalencies=equivalencies
-        )
-
-        prereq_warnings = validate_plan(
-            plan,
-            completed_courses,
-            catalog,
-            degree_cfg=planning_cfg,
-            course_grades=course_grades,
-        )
-
-        # Co-requisite check: warn when a student reports a lecture complete
-        # without its companion lab.  The planner never schedules lab sections
-        # itself, so this check lives here (on completed_courses) rather than
-        # inside validate_plan (which only sees the generated schedule).
-        coreq_map = planning_cfg.get("coreq_map", {})
-        for coreq_lecture, coreq_labs in coreq_map.items():
-            if coreq_lecture in completed_courses:
-                for lab in sorted(coreq_labs):
-                    if lab not in completed_courses:
-                        prereq_warnings.append({
-                            "course": coreq_lecture,
-                            "term": None,
-                            "prereq": lab,
-                            "type": "missing_coreq",
-                        })
-
-        # Detect completed courses that don't map to any known requirement.
-        # These are courses the student entered that fall outside every degree
-        # bucket — they vanished silently before; now we surface them so the
-        # student can manually count them toward free electives.
-        all_applied_codes = set()
-        for group in audit["groups"]:
-            for entry in group["entries"]:
-                all_applied_codes.update(entry.get("applied", []))
-        all_known_codes = set()
-        for cfg_item in [degree_cfg] + ([second_cfg] if second_cfg else []):
-            for code, _, _ in cfg_item.get("core_courses", []):
-                all_known_codes.add(code)
-            for code, _, _ in cfg_item.get("concentration_courses", []):
-                all_known_codes.add(code)
-            for code, _, _ in cfg_item.get("supporting_courses", []):
-                all_known_codes.add(code)
-        for mc in minor_cfgs:
-            for code, _, _ in mc.get("required_courses", []):
-                all_known_codes.add(code)
-        unrecognized_courses = sorted(
-            code for code in completed_courses
-            if code not in all_applied_codes and code not in all_known_codes
-        )
-
-        # Build the student-specific prerequisite tree
-        personal_nodes, personal_edges = build_personal_prereq_graph(catalog, validated_completed_courses, plan, degree_cfg=planning_cfg)
-        personal_mermaid = render_personal_prereq_mermaid(personal_nodes, personal_edges)
-
-        # Maps the course codes for full display
-        # Reload courses for the selected major to build the course_map
-        with SessionLocal() as db_session2:
-            post_course_list = (
-                db_session2.query(Course)
-                .filter(Course.prefix.in_(all_major_prefixes))
-                .order_by(Course.prefix, Course.number)
-                .all()
-            )
-        post_courses = [
-            {
-                "code": f"{c.prefix} {c.number}",
-                "label": f"{c.prefix} {c.number} - {c.title}",
-                "credits": c.credits or 0,
-            }
-            for c in post_course_list
-            if c.prefix and c.number
-        ]
-        for code, hours, title in planning_cfg["supporting_courses"]:
-            post_courses.append({"code": code, "label": f"{code} - {title}", "credits": hours})
-        course_map = {c["code"]: c for c in post_courses}
-
-        # Nested function that returns the full course label for warnings
-        def warning_label(code):
-            course = course_map.get(code)
-            return course["label"] if course else code
-
-        warnings_display = [
-            {
-                "course": warning_label(w["course"]),
-                "prereq": warning_label(w["prereq"]) if w.get("prereq") else None,
-                "term": w.get("term"),
-                "type": w["type"],
-                "minimum_grade": w.get("minimum_grade"),
-            }
-            for w in prereq_warnings
-        ]
-
-        # Nested function that formats a completed course on the results page
-        def completed_label(code):
-            course = course_map.get(code)
-            if course:
-                hours = credit_label(course["credits"])
-                return f"{course['label']} — {hours}" if hours else course["label"]
-            return code
-
-        # Nested function that converts planner items into values the template accepts
-        def display_item(item):
-            kind = item["kind"]
-
-            if kind == "course":
-                title = item["label"].split(" - ", 1)[1] if " - " in item["label"] else ""
-                return {
-                    "kind": kind,
-                    "code": item["code"],
-                    "title": title,
-                    "hours": credit_short(item["hours"]),
-                    "minor": item["code"] in minor_only_codes,
-                    "second": item["code"] in second_only_codes,
-                }
-
-            if kind == "requirement":
-                return {
-                    "kind": kind,
-                    "code": None,
-                    "title": item["label"],
-                    "hours": credit_short(item["hours"]),
-                    "suggestion": item.get("suggestion"),
-                    "minor": item.get("id", "").startswith(MINOR_ELECTIVE_ID_PREFIX),
-                    "second": item.get("id", "").startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX),
-                }
-
-            return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
-
-        # Convert planner data into display structures
-        completed_display = [completed_label(code) for code in sorted(completed_courses)]
-
-        plan_display = {
-            term: [display_item(item) for item in term_items]
-            for term, term_items in plan.items()
-        }
-
-        # Calculates the total number of planned hours for each semester
-        term_hours_display = {
-            term: sum(item.get("hours", 0) for item in term_items)
-            for term, term_items in plan.items()
-            if not term.startswith("Remaining")
-        }
-
-        term_hours_display = {
-            term: (int(hours) if float(hours).is_integer() else hours)
-            for term, hours in term_hours_display.items()
-        }
-
-        max_term_hours = max(term_hours_display.values()) if term_hours_display else 0
-
-        return render_template(
-            "plan.html",
-            completed=completed_display,
-            plan=plan_display,
-            semesters=target_semesters,
-            include_summer=include_summer,
-            audit=audit,
-            term_hours=term_hours_display,
-            max_term_hours=max_term_hours,
-            warnings=warnings_display,
-            personal_mermaid=personal_mermaid,
-            degree_name=degree_cfg["name"],
-            second_audit=second_audit,
-            minor_audits=minor_audits,
-            unrecognized_courses=unrecognized_courses,
-            hide_sync=True,
-            generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
-        )
-
-    # Build degree list from DEGREE_CONFIGS (all have available=True now)
-    # Also include any non-STEM majors from DEGREE_REGISTRY that aren't in DEGREE_CONFIGS
-    degree_list = list(DEGREE_CONFIGS.items())
-    for key, reg_cfg in DEGREE_REGISTRY.items():
-        if key not in DEGREE_CONFIGS:
-            degree_list.append((key, reg_cfg))
-    majors = [
-        {
-            "key": key,
-            "name": deg["name"],
-            "concentration": deg.get("concentration") or "",
-            "prefix": deg["prefix"],
-            "available": deg.get("available", False),
-        }
-        for key, deg in degree_list
-    ]
-
-    # Compute elective hours for the current major's config (with any second
+    # Free-elective hours for the current major's config (with any second
     # major's requirements taking their share of the free electives)
     cfg_generic = form_cfg["supporting_generic"] + form_cfg["tbc_generic"]
     fixed_hours = (
@@ -663,16 +374,22 @@ def index():
         row for row in form_cfg["supporting_generic"]
         if not row[0].startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX)
     ]
+    auto_ids = sorted((form_cfg.get("generic_options") or {}).keys()) + [
+        gid for gid, _, _, _ in degree_cfg["tbc_generic"] if gid in tbc_area_options()
+    ]
 
     return render_template(
         "index.html",
-        courses=courses,
         major_courses=major_courses,
-        degree_cfg=degree_cfg_for_display,
-        second_cfg=second_cfg_for_display,
+        degree_cfg=degree_cfg,
+        degree_display_name=display_name(degree_cfg),
+        second_cfg=second_cfg,
+        second_display_name=display_name(second_cfg) if second_cfg else "",
         checklist_prefixes=display_prefixes,
         supporting_generic=manual_supporting_generic,
-        tbc_generic=degree_cfg_for_display["tbc_generic"],
+        auto_generic_ids=auto_ids,
+        generic_options={gid: opts for gid, opts in (form_cfg.get("generic_options") or {}).items()},
+        tbc_generic=degree_cfg["tbc_generic"],
         electives_generic_id=ELECTIVES_GENERIC_ID,
         electives_hours=display_elective_hours,
         season_options=SEASON_CYCLE,
@@ -681,62 +398,388 @@ def index():
         saved_state=saved_state,
         majors=majors,
         minors=[
-            {"key": key, "name": m["name"], "hours": m["total_hours"], "description": m["description"]}
-            for key, m in MINOR_CONFIGS.items()
+            {
+                "key": key,
+                "name": m["name"],
+                "hours": m["total_hours"],
+                "description": m["description"],
+                "prefix": m["prefix"],
+            }
+            for key, m in picker_minors()
             if minor_allowed_for_major(m, display_prefixes)
         ],
+        catalog_meta=catalog_store.meta(),
+        courses_version=catalog_store.meta().get("fetched_at", ""),
     )
 
-# Function that builds and displays the dependency graph
+
+def _plan():
+    completed_text = request.form.get("completed_courses", "")
+
+    # Convert the submitted course list into course codes
+    completed_courses = {
+        " ".join(code.split()).upper()
+        for code in completed_text.splitlines()
+        if code.strip()
+    }
+
+    # Read grades for completed prerequisite courses that require a minimum grade
+    try:
+        course_grades = json.loads(request.form.get("course_grades", "{}"))
+        if not isinstance(course_grades, dict):
+            course_grades = {}
+    except (json.JSONDecodeError, TypeError):
+        course_grades = {}
+
+    # Read selected major(s) and get the full degree configs
+    degree_cfg = get_full_degree_config(request.form.get("major", "cs"))
+    second_cfg = _second_major_cfg(degree_cfg, request.form.get("second_major"))
+    all_major_prefixes = major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
+
+    # Optional minors -- unknown ones, repeats, and ones in either major's
+    # own subject are dropped
+    minor_cfgs = []
+    for key in request.form.getlist("minor"):
+        minor_cfg = get_minor_config(key)
+        if (
+            minor_cfg
+            and minor_cfg not in minor_cfgs
+            and minor_allowed_for_major(minor_cfg, all_major_prefixes)
+        ):
+            minor_cfgs.append(minor_cfg)
+
+    try:
+        target_semesters = min(max(int(request.form.get("target_semesters", 4)), 1), 16)
+    except ValueError:
+        target_semesters = 4
+
+    include_summer = bool(request.form.get("include_summer"))
+
+    start_season = request.form.get("start_season") or default_start_season()
+
+    try:
+        start_year = int(request.form.get("start_year") or date.today().year)
+    except ValueError:
+        start_year = date.today().year
+
+    # One catalog covering every course any of the chosen programs can plan
+    catalog = load_catalog_for(degree_cfg, second_cfg, *minor_cfgs, completed=completed_courses)
+
+    # Build minimum-grade requirements for prerequisite courses
+    minimum_grades = {}
+    for course_info in catalog.values():
+        minimum_grades.update(course_info.get("prereq_grades", {}))
+
+    # Only exclude a completed course when the student explicitly provided
+    # a grade AND that grade falls below the required minimum. If no grade
+    # was supplied (the dropdown was removed from the UI), assume the course
+    # was completed satisfactorily and include it.
+    validated_completed_courses = set()
+    for code in completed_courses:
+        minimum_grade = minimum_grades.get(code)
+        provided_grade = course_grades.get(code)
+
+        if minimum_grade and provided_grade:
+            if meets_minimum_grade(provided_grade, minimum_grade):
+                validated_completed_courses.add(code)
+        else:
+            validated_completed_courses.add(code)
+
+    # With a second major or minors, the plan is built from a copy of the
+    # major's config with their courses and electives folded in; the
+    # major's own audit still uses the unmodified config.
+    planning_cfg = degree_cfg
+    planning_generic_hours = {}
+    second_audit = None
+    if second_cfg:
+        planning_cfg, second_generic_hours = apply_second_major_to_config(
+            degree_cfg, second_cfg, completed_courses, catalog
+        )
+        planning_generic_hours.update(second_generic_hours)
+
+    generic_hours = read_generic_hours(request.form, planning_cfg)
+
+    # Requirements that list specific courses ("Choose one: MATH 1530 or
+    # BIA 2610") fill in from the courses the student checked off
+    auto_hours, auto_applied = auto_generic_hours(planning_cfg, validated_completed_courses)
+    for gid, hours in auto_hours.items():
+        generic_hours[gid] = max(_as_float(generic_hours.get(gid)), hours)
+
+    if second_cfg:
+        second_audit = build_second_major_audit(second_cfg, completed_courses, generic_hours, catalog)
+
+    minor_audits = []
+    for minor_cfg in minor_cfgs:
+        planning_cfg, minor_generic_hours = apply_minor_to_config(
+            planning_cfg, minor_cfg, completed_courses, catalog
+        )
+        planning_generic_hours.update(minor_generic_hours)
+        minor_audits.append(build_minor_audit(minor_cfg, completed_courses, catalog))
+
+    # A major that requires "a minor (15-18 hours)" is satisfied by the
+    # minor(s) the student picked: the minor's own courses get planned
+    # instead of a generic placeholder, and the audit credits the minor's
+    # progress toward that row.
+    audit_generic_hours = dict(generic_hours)
+    minor_bucket = degree_cfg.get("minor_bucket_id")
+    if minor_cfgs and minor_bucket:
+        planning_cfg = dict(planning_cfg)
+        planning_cfg["supporting_generic"] = [
+            row for row in planning_cfg["supporting_generic"] if row[0] != minor_bucket
+        ]
+        audit_generic_hours[minor_bucket] = sum(_as_float(m["completed_hours"]) for m in minor_audits)
+
+    # Auto-computed elective progress wins over the (absent) form fields
+    planning_generic_hours = {**generic_hours, **planning_generic_hours}
+
+    # Courses that are on the plan only because of the second major or a
+    # minor; ones the major already requires (e.g. MATH 1920 for CS) keep
+    # their normal tag.
+    major_codes = config_course_codes(degree_cfg)
+    second_only_codes = (second_audit["course_codes"] - major_codes) if second_audit else set()
+    minor_only_codes = set().union(*(m["course_codes"] for m in minor_audits)) - major_codes - second_only_codes
+
+    # Generates the plan, audits, and prerequisite warnings
+    plan = generate_plan(
+        completed_courses,
+        planning_generic_hours,
+        target_semesters,
+        include_summer,
+        start_season=start_season,
+        start_year=start_year,
+        degree_cfg=planning_cfg,
+        catalog=catalog,
+        course_grades=course_grades,
+    )
+
+    try:
+        with SessionLocal() as db_session:
+            equivalencies = db_session.query(CourseEquivalency).all()
+    except Exception:
+        equivalencies = []
+
+    audit = build_audit(
+        validated_completed_courses,
+        audit_generic_hours,
+        catalog,
+        degree_cfg={**degree_cfg, "_applied": auto_applied},
+        equivalencies=equivalencies,
+    )
+
+    prereq_warnings = validate_plan(
+        plan,
+        completed_courses,
+        catalog,
+        degree_cfg=planning_cfg,
+        course_grades=course_grades,
+    )
+
+    # Co-requisite check: warn when a student reports a lecture complete
+    # without its companion lab.  The planner never schedules lab sections
+    # itself, so this check lives here (on completed_courses) rather than
+    # inside validate_plan (which only sees the generated schedule).
+    coreq_map = planning_cfg.get("coreq_map", {})
+    for coreq_lecture, coreq_labs in coreq_map.items():
+        if coreq_lecture in completed_courses:
+            for lab in sorted(coreq_labs):
+                if lab not in completed_courses:
+                    prereq_warnings.append({
+                        "course": coreq_lecture,
+                        "term": None,
+                        "prereq": lab,
+                        "type": "missing_coreq",
+                    })
+
+    # Detect completed courses that don't map to any known requirement.
+    # These are courses the student entered that fall outside every degree
+    # bucket — we surface them so the student can count them toward free
+    # electives.
+    all_applied_codes = set()
+    for group in audit["groups"]:
+        for entry in group["entries"]:
+            all_applied_codes.update(entry.get("applied", []))
+    all_known_codes = set()
+    for cfg_item in [degree_cfg, second_cfg, *minor_cfgs]:
+        if cfg_item:
+            all_known_codes |= config_course_codes_all(cfg_item)
+    for minor_audit in minor_audits:
+        for entry in minor_audit["entries"]:
+            all_applied_codes.update(entry.get("applied", []))
+    # Courses that filled a choice or gen-ed row on their own
+    for codes in auto_applied.values():
+        all_applied_codes.update(codes)
+    # Labs taken with a lecture count with it
+    for labs in coreq_map.values():
+        all_known_codes |= set(labs)
+    unrecognized_courses = sorted(
+        code for code in completed_courses
+        if code not in all_applied_codes and code not in all_known_codes
+    )
+
+    # Build the student-specific prerequisite tree
+    personal_nodes, personal_edges = build_personal_prereq_graph(
+        catalog, validated_completed_courses, plan, degree_cfg=planning_cfg
+    )
+    personal_mermaid = render_personal_prereq_mermaid(personal_nodes, personal_edges)
+
+    config_hours = {}
+    for key in ("core_courses", "concentration_courses", "supporting_courses"):
+        for code, hours, title in planning_cfg.get(key, []):
+            config_hours[code] = (hours, title)
+
+    # Nested function that returns the full course label for warnings
+    def warning_label(code):
+        if catalog_store.course(code):
+            return catalog_store.label(code)
+        title = config_hours.get(code, (None, ""))[1]
+        return f"{code} - {title}" if title else code
+
+    warnings_display = [
+        {
+            "course": warning_label(w["course"]),
+            "prereq": warning_label(w["prereq"]) if w.get("prereq") else None,
+            "term": w.get("term"),
+            "type": w["type"],
+            "minimum_grade": w.get("minimum_grade"),
+        }
+        for w in prereq_warnings
+    ]
+
+    # Nested function that formats a completed course on the results page
+    def completed_label(code):
+        info = catalog_store.course(code)
+        if info:
+            hours = credit_label(info.get("credits"))
+            label = catalog_store.label(code)
+            return f"{label} — {hours}" if hours else label
+        if code in config_hours:
+            hours, title = config_hours[code]
+            return f"{code} - {title} — {credit_label(hours)}"
+        return code
+
+    # Nested function that converts planner items into values the template accepts
+    def display_item(item):
+        kind = item["kind"]
+
+        if kind == "course":
+            title = item["label"].split(" - ", 1)[1] if " - " in item["label"] else ""
+            return {
+                "kind": kind,
+                "code": item["code"],
+                "title": title,
+                "hours": credit_short(item["hours"]),
+                "minor": item["code"] in minor_only_codes,
+                "second": item["code"] in second_only_codes,
+            }
+
+        if kind == "requirement":
+            return {
+                "kind": kind,
+                "code": None,
+                "title": item["label"],
+                "hours": credit_short(item["hours"]),
+                "suggestion": item.get("suggestion"),
+                "minor": item.get("id", "").startswith(MINOR_ELECTIVE_ID_PREFIX),
+                "second": item.get("id", "").startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX),
+            }
+
+        return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
+
+    # Convert planner data into display structures
+    completed_display = [completed_label(code) for code in sorted(completed_courses)]
+
+    plan_display = {
+        term: [display_item(item) for item in term_items]
+        for term, term_items in plan.items()
+    }
+
+    # Calculates the total number of planned hours for each semester
+    term_hours_display = {
+        term: sum(item.get("hours", 0) for item in term_items)
+        for term, term_items in plan.items()
+        if not term.startswith("Remaining")
+    }
+
+    term_hours_display = {
+        term: (int(hours) if float(hours).is_integer() else hours)
+        for term, hours in term_hours_display.items()
+    }
+
+    max_term_hours = max(term_hours_display.values()) if term_hours_display else 0
+
+    return render_template(
+        "plan.html",
+        completed=completed_display,
+        plan=plan_display,
+        semesters=target_semesters,
+        include_summer=include_summer,
+        audit=audit,
+        term_hours=term_hours_display,
+        max_term_hours=max_term_hours,
+        warnings=warnings_display,
+        personal_mermaid=personal_mermaid,
+        degree_name=degree_cfg["name"],
+        catalog_url=degree_cfg.get("catalog_url"),
+        second_audit=second_audit,
+        minor_audits=minor_audits,
+        unrecognized_courses=unrecognized_courses,
+        hide_sync=True,
+        catalog_meta=catalog_store.meta(),
+        generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
+    )
+
+
+# Function that builds and displays the dependency graph for any major
 @app.route("/prerequisites")
 def prerequisites():
-    catalog = load_catalog_courses()
-
-    nodes, edges = build_prereq_graph(catalog)
-    
+    cfg = get_full_degree_config(request.args.get("major", "cs"))
+    catalog = load_catalog_for(cfg)
+    nodes, edges = build_program_prereq_graph(cfg, catalog)
+    # Courses with no prerequisite links inside the program would just stack
+    # down the side of the graph -- list them separately
+    linked = {code for edge in edges for code in edge}
+    standalone = [
+        {"code": code, "title": info.get("title", "")}
+        for code, info in nodes.items() if code not in linked
+    ]
+    nodes = {code: info for code, info in nodes.items() if code in linked}
     mermaid_source = render_prereq_mermaid(nodes, edges)
+    return render_template(
+        "prereqs.html",
+        mermaid_source=mermaid_source,
+        degree_cfg=cfg,
+        degree_display_name=display_name(cfg),
+        majors=[_program_option(key, c) for key, c in picker_majors()],
+        node_count=len(nodes),
+        standalone=standalone,
+        catalog_meta=catalog_store.meta(),
+    )
 
-    return render_template("prereqs.html", mermaid_source=mermaid_source)
 
-# Background sync runner
-def _run_sync_background(force=False):
+# Background catalog re-export (admin only). The normal way to refresh the
+# data is `python scrape_courses.py` + commit; this is for a quick refresh on
+# a running server, written to the data directory and picked up by every worker.
+def _run_sync_background():
     _set_sync_state(
         running=True, total=0, fresh=0, cached=0, errors=[], done=False,
         started_at=time.time(),
     )
-    total = 0
-    fresh = 0   # courses actually fetched from network
-    cached = 0  # courses already in DB (no network call)
     errors = []
+    total = 0
     try:
-        try:
-            sync_course_search_index(force=force)
-        except Exception as exc:
-            errors.append(f"Course search index: {str(exc)[:120]}")
-            _set_sync_state(errors=errors[:])
+        from scrape_courses import RAW_DIR, export
 
-        prefixes = [p for cfg in DEGREE_CONFIGS.values() for p in major_prefixes(cfg)]
-        for prefix in prefixes:
-            try:
-                count = sync_courses(prefix=prefix, force=force)
-                if count < 0:
-                    # Negative = already loaded, no network call made
-                    cached += abs(count)
-                else:
-                    fresh += count
-                total += abs(count)
-                _set_sync_state(total=total)
-            except Exception as exc:
-                errors.append(f"{prefix}: {str(exc)[:120]}")
-                _set_sync_state(errors=errors[:])
-    finally:
-        # Always clears the running flag, even if something above raised
-        # outside the per-major try/except -- otherwise the lock never
-        # clears and every future sync request just reports "still running".
+        data = export(out_file=catalog_store.RUNTIME_FILE, raw_dir=RAW_DIR, refresh=True)
+        total = len(data["courses"])
+        catalog_store.reload()
         clear_catalog_cache()
+    except Exception as exc:
+        errors.append(str(exc)[:200])
+    finally:
+        # Always clears the running flag, even if something above raised --
+        # otherwise the lock never clears.
         _set_sync_state(
-            running=False, total=total,
-            fresh=fresh, cached=cached,
+            running=False, total=total, fresh=total, cached=0,
             errors=errors, done=True,
         )
 
@@ -744,44 +787,46 @@ def _run_sync_background(force=False):
 @app.route("/sync", methods=["GET", "POST"])
 @limiter.limit("15 per minute")
 def sync():
-    force = request.args.get("force") == "1" or (
-        request.is_json and request.get_json(silent=True, force=True) or {}
-    ).get("force")
-
-    # Force-resync re-scrapes every major from MTSU's catalog even when the DB
-    # is already populated -- that's the expensive/abusable path, so it's the
-    # only one gated behind admin credentials. The plain "Sync Catalog" button
-    # below (POST, no force) stays open: sync_courses() already no-ops per
-    # major when courses are already loaded, so it's cheap to leave public.
-    if request.method == "GET" and not request.args.get("force"):
-        # Legacy GET — start a force sync and redirect (backwards compat for old bookmarks)
-        if not _admin_auth_ok():
-            return _admin_auth_challenge()
-        legacy_state = _get_sync_state()
-        if not legacy_state["running"] or _sync_is_stale(legacy_state):
-            t = threading.Thread(target=_run_sync_background, kwargs={"force": True}, daemon=True)
-            t.start()
-        flash("Catalog sync started in the background. Check back in a moment.", "info")
-        return redirect(url_for("index"))
-
-    if force and not _admin_auth_ok():
+    # Re-downloading the catalog is slow and hits MTSU's site, so it's admin-only.
+    if not _admin_auth_ok():
         return _admin_auth_challenge()
 
-    # POST or GET with ?force=1 — async API
     state = _get_sync_state()
     if state["running"] and not _sync_is_stale(state):
+        if request.method == "GET":
+            flash("A catalog export is already running.", "info")
+            return redirect(url_for("index"))
         return jsonify({"status": "running", "total": state["total"]})
 
-    _set_sync_state(running=False, total=0, fresh=0, cached=0, errors=[], done=False)
-    t = threading.Thread(target=_run_sync_background, kwargs={"force": bool(force)}, daemon=True)
+    t = threading.Thread(target=_run_sync_background, daemon=True)
     t.start()
+    if request.method == "GET":
+        flash("Catalog export started in the background.", "info")
+        return redirect(url_for("index"))
     return jsonify({"status": "started"})
 
 
 @app.route("/sync/status")
-@limiter.limit("120 per minute")  # polled every ~1.5s by the JS while a sync is running
+@limiter.limit("120 per minute")
 def sync_status():
-    return jsonify(_get_sync_state())
+    state = _get_sync_state()
+    state["catalog"] = catalog_store.meta()
+    return jsonify(state)
+
+
+@app.route("/healthz")
+@limiter.exempt
+def healthz():
+    meta = catalog_store.meta()
+    return jsonify({
+        "ok": catalog_store.has_data(),
+        "catalog": meta.get("name"),
+        "fetched_at": meta.get("fetched_at"),
+        "courses": len(catalog_store.courses()),
+        "majors": len(picker_majors()),
+        "minors": len(picker_minors()),
+    })
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)

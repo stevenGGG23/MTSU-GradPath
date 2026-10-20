@@ -1476,6 +1476,7 @@ footer a {
     .gpa-tab,
     .gpa-panel,
     .plan-actions,
+    .no-print,
     .flash-messages,
     .accordion-button::after {
         display: none !important;
@@ -1529,5 +1530,91 @@ footer a {
 
     .term-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ── Catalog-driven programs ─────────────────────────────────────────────── */
+.program-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.program-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.program-chip-verified {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.program-link {
+    font-size: 0.78rem;
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.program-link:hover {
+    text-decoration: underline;
+}
+
+.program-option-verified {
+    margin-left: 0.35rem;
+    color: #059669;
+    font-size: 0.78rem;
+}
+
+.req-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 0.35rem;
+    border-radius: 50%;
+    background: #2563eb;
+    vertical-align: middle;
+}
+
+.cs-course-check.is-required {
+    border-color: #bfdbfe;
+}
+
+.auto-pill {
+    display: inline-block;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #ede9fe;
+    color: #5b21b6;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: 1px;
+}
+
+.footer-catalog {
+    font-size: 0.8rem;
+    opacity: 0.75;
+}
+
+.prereq-picker {
+    min-width: 260px;
+    max-width: 420px;
+}
+
+@media (max-width: 576px) {
+    .prereq-picker {
+        min-width: 0;
+        max-width: none;
+        width: 100%;
     }
 }

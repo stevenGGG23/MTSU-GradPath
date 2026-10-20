@@ -696,11 +696,58 @@ DEGREE_CONFIGS = {
 }
 
 
+# Hand-curated configs stand in for their catalog twin in the major picker:
+# they carry offering seasons and prerequisite fixes the catalog doesn't have.
+# Biology, Math and Physics were written against a generic (no-concentration)
+# program that the 2026-27 catalog no longer has, so they stay available by
+# key (old links, and as the home config for BIOL/MATH/PHYS scheduling data)
+# but the catalog's concentrations are what the picker lists.
+CATALOG_TWINS = {
+    "cs": "Computer Science, Professional Computer Science Concentration, B.S.",
+    "chemistry": "Chemistry, B.S.",
+    "political_science": "Political and Global Affairs, B.S.",
+    "aerospace": "Aerospace, Professional Pilot Concentration, B.S.",
+    "construction_mgmt": "Construction Management, Commercial Construction Management Concentration, B.S.",
+}
+HIDDEN_FROM_PICKER = {"biology", "math", "physics"}
+
+
 def major_prefixes(cfg: dict) -> list:
     """Every course prefix a major's own courses use, main prefix first."""
     return [cfg["prefix"], *cfg.get("extra_prefixes", [])]
 
 
+def _catalog_majors() -> dict:
+    from .catalog_programs import catalog_majors
+    return catalog_majors()
+
+
 def get_full_degree_config(key: str) -> dict:
-    """Return the full degree config for *key*, defaulting to CS."""
-    return DEGREE_CONFIGS.get(key) or CS_CONFIG
+    """Return the full degree config for *key* (hand-curated first, then the
+    catalog-generated majors), defaulting to CS."""
+    return DEGREE_CONFIGS.get(key) or _catalog_majors().get(key or "") or CS_CONFIG
+
+
+def find_degree_config(key: str):
+    """Like get_full_degree_config but None for an unknown key."""
+    return DEGREE_CONFIGS.get(key or "") or _catalog_majors().get(key or "")
+
+
+def picker_majors() -> list:
+    """(key, config) for every major the planner offers, sorted by name."""
+    twins = set(CATALOG_TWINS.values())
+    entries = [
+        (key, cfg) for key, cfg in DEGREE_CONFIGS.items() if key not in HIDDEN_FROM_PICKER
+    ]
+    entries += [
+        (key, cfg) for key, cfg in _catalog_majors().items() if cfg["name"] not in twins
+    ]
+    return sorted(entries, key=lambda kv: display_name(kv[1]).lower())
+
+
+def display_name(cfg: dict) -> str:
+    """Catalog-style program name ("Computer Science, Professional ... B.S.")."""
+    for key, name in CATALOG_TWINS.items():
+        if cfg is DEGREE_CONFIGS.get(key):
+            return name
+    return cfg["name"]

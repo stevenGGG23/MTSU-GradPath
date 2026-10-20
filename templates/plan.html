@@ -12,6 +12,7 @@
       <h2 class="mb-2">Your recommended plan</h2>
       {% set extras = ([second_audit.label] if second_audit else []) + (minor_audits | map(attribute='label') | list) %}
       <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
+      {% if catalog_url %}<p class="small mb-0 mt-1 no-print"><a class="program-link" href="{{ catalog_url }}" target="_blank" rel="noopener">Check the official requirements in the catalog <i class="bi bi-box-arrow-up-right"></i></a></p>{% endif %}
     </div>
     <div class="d-flex gap-2 plan-actions">
       <a class="btn btn-outline-light text-nowrap" href="/"><i class="bi bi-pencil me-1"></i>Edit completed courses</a>
