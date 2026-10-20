@@ -466,14 +466,25 @@ def _checklist_sections(cfg, exclude=()):
 
 def _course_card(code, required, min_grades):
     info = catalog_store.course(code) or {}
+    title = info.get("title", "")
+    offered = catalog_store.offering_summary(code)
+    # Everything secondary lives in the hover tooltip, keeping rows to one line
+    note = [f"{code} - {title}"]
+    if info.get("credits") is not None:
+        note.append(f"{int(info['credits']) if float(info['credits']).is_integer() else info['credits']} credit hours")
+    if offered:
+        note.append(f"Offered: {offered}")
+    if min_grades.get(code):
+        note.append(f"Later courses need a {min_grades[code]} or better")
+    if info.get("desc"):
+        note.append(info["desc"])
     return {
         "code": code,
-        "title": info.get("title", ""),
-        "label": f"{code} - {info.get('title', '')}",
+        "title": title,
+        "label": f"{code} - {title}",
         "required": code in required,
-        "desc": info.get("desc", ""),
-        "minimum_grade": min_grades.get(code),
-        "offered": catalog_store.offering_summary(code),
+        "offered": offered,
+        "note": "\n".join(note),
     }
 
 
@@ -560,7 +571,11 @@ def index():
         checklist.append({
             "name": cfg["name"],
             "sections": [
-                {**sec, "courses": [_course_card(c, required, min_grades) for c in sec["codes"]]}
+                {
+                    **sec,
+                    "required_courses": [_course_card(c, required, min_grades) for c in sec["codes"] if c in required],
+                    "option_courses": [_course_card(c, required, min_grades) for c in sec["codes"] if c not in required],
+                }
                 for sec in sections
             ],
         })

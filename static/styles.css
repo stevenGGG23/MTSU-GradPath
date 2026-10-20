@@ -221,53 +221,83 @@ footer a {
 }
 
 .cs-course-grid {
-    max-height: 340px;
-    overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 0.4rem;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    padding: 0.9rem;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 0.1rem 1.25rem;
 }
 
 .cs-course-check {
-    position: relative;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 0.5rem 0.6rem 0.5rem 2.1rem;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0.3rem 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+.cs-course-check:hover {
+    background: #f1f5f9;
 }
 
 .cs-course-check:has(.cs-course-checkbox:checked),
 .cs-course-check.is-checked {
     background: #eff6ff;
-    border-color: #93c5fd;
 }
 
 .cs-course-check .form-check-input {
-    margin-left: -1.6rem;
-    margin-top: 0.3rem;
-}
-
-.cs-course-check .form-check-label {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.25;
+    flex: none;
+    margin: 0;
     cursor: pointer;
 }
 
 .cs-course-code {
-    font-weight: 700;
-    font-size: 0.88rem;
+    flex: none;
+    width: 5.4rem;
+    font-weight: 600;
+    font-size: 0.84rem;
     color: #0b1733;
+    font-variant-numeric: tabular-nums;
 }
 
 .cs-course-title {
-    font-size: 0.78rem;
-    color: #64748b;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.82rem;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.checklist-section {
+    padding: 0.6rem 0 0.4rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.checklist-section:first-of-type {
+    border-top: none;
+    padding-top: 0;
+}
+
+.checklist-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.35rem;
+    font-size: 0.74rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #334155;
+}
+
+.checklist-subtitle {
+    margin: 0.35rem 0 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    color: #94a3b8;
 }
 
 .requirement-group {
@@ -1417,7 +1447,6 @@ footer a {
 @media (max-width: 480px) {
     .cs-course-grid {
         grid-template-columns: 1fr;
-        max-height: 280px;
     }
 }
 
@@ -1585,9 +1614,6 @@ footer a {
     vertical-align: middle;
 }
 
-.cs-course-check.is-required {
-    border-color: #bfdbfe;
-}
 
 .auto-pill {
     display: inline-block;
@@ -1646,14 +1672,20 @@ footer a {
 }
 
 .checklist-note {
+    margin-left: 0.25rem;
     font-weight: 400;
     text-transform: none;
     letter-spacing: 0;
+    color: #94a3b8;
+}
+
+.checklist-more > summary.checklist-section-title {
+    margin-bottom: 0;
     color: #64748b;
 }
 
-.checklist-more {
-    margin-top: 0.75rem;
+.checklist-more[open] > summary.checklist-section-title {
+    margin-bottom: 0.35rem;
 }
 
 .checklist-more > summary {
@@ -1691,8 +1723,7 @@ footer a {
     margin-bottom: 0.75rem;
 }
 
-.plan-item-offered,
-.cs-course-offered {
+.plan-item-offered {
     display: inline-block;
     margin-left: 0.4rem;
     padding: 0 0.4rem;
@@ -1705,9 +1736,10 @@ footer a {
 }
 
 .cs-course-offered {
-    display: block;
-    width: fit-content;
-    margin: 0.15rem 0 0;
+    flex: none;
+    font-size: 0.7rem;
+    color: #b45309;
+    white-space: nowrap;
 }
 
 .next-step-card {
