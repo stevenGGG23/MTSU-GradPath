@@ -253,6 +253,18 @@ def _section_total(sec) -> float:
     return listed + sum(_section_total(c) for c in sec.get("children") or [])
 
 
+def _listed_prefixes(text: str) -> list:
+    """Course prefixes listed as allowed in a requirement's text ("courses
+    with ACTG, BCED, BIA ... prefixes"), when it reads like such a list."""
+    if not re.search(r"prefix|courses (with|in|from)|chosen from|selected from", text or "", re.I):
+        return []
+    found = []
+    for token in re.findall(r"\b([A-Z]{2,4})\b(?!\s*\d)", text or ""):
+        if token not in found and store.codes_for_prefix(token):
+            found.append(token)
+    return found
+
+
 def _walk(sections, depth=0, parent=None):
     for sec in sections or []:
         yield sec, depth, parent
@@ -370,7 +382,19 @@ class _Builder:
 
         # Elective-hours sections with no listed courses: "BIOL UD elective (3 hours)"
         if not units and H:
-            if self.kind == "major" and self._is_major_elective(sec["name"] + " " + text):
+            prefixes = _listed_prefixes(text)
+            if len(prefixes) >= 2:
+                # "24 hours of business electives chosen from courses with
+                # ACTG, BCED, BIA, BLAW, BUS, ... prefixes": any course with
+                # one of those prefixes (upper-division if the text says so)
+                upper = bool(_UD_TEXT.search(text))
+                options = [
+                    code for prefix in prefixes for code in store.codes_for_prefix(prefix)
+                    if _credits(code) and (not upper or int(re.sub(r"\D", "", code.split()[1])[:4]) >= 3000)
+                ]
+                self.add_generic(label, H, options=options, rows=rows, role=role,
+                                 suggestions=[f"Any {', '.join(prefixes[:6])}{'…' if len(prefixes) > 6 else ''} course"])
+            elif self.kind == "major" and self._is_major_elective(sec["name"] + " " + text):
                 self.ud_hours += H
                 rows.append({"type": "ud", "hours": H})
             elif re.search(r"\bminor\b", sec["name"], re.I) and self.kind == "major" and not self.minor_bucket:
@@ -852,12 +876,24 @@ def tbc_area_options() -> dict:
 
 # ── Auto-credit for hours requirements that list specific courses ────────────
 
-def auto_generic_hours(cfg: dict, completed: set, required: set | None = None) -> tuple[dict, dict]:
+def auto_generic_hours(cfg: dict, completed: set, required: set | None = None,
+                       typed: dict | None = None) -> tuple[dict, dict]:
     """Hours each listed-course requirement gets from completed courses.
 
     Returns (hours_by_id, applied_codes_by_id). Each completed course is used
     at most once, and never for a course the program already requires by name.
+    Hours the student *typed* for a row come first: a course only fills what
+    the typed hours leave open, so it stays free for electives otherwise.
+    Returned hours include the typed part.
     """
+    typed = typed or {}
+
+    def _typed(gid):
+        try:
+            return max(float(typed.get(gid) or 0), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
     options = dict(cfg.get("generic_options") or {})
     caps = {gid: hours for gid, _, hours, _ in cfg.get("supporting_generic", [])}
     # Gen-ed rows fill from the True Blue Core course lists, after the
@@ -877,12 +913,13 @@ def auto_generic_hours(cfg: dict, completed: set, required: set | None = None) -
         cap = caps.get(gid)
         if cap is None:
             continue
-        total = 0
+        already = min(_typed(gid), cap)
+        total = already
         for code in options[gid]:
             if code in completed and code not in used and code not in required and total < cap:
                 used.add(code)
                 total += _credits(code)
                 applied.setdefault(gid, []).append(code)
-        if total:
+        if total > already:
             hours_by_id[gid] = min(total, cap)
     return hours_by_id, applied

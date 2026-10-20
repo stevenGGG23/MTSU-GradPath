@@ -122,14 +122,17 @@ with app.app_context():
 
 # ── Response hardening ────────────────────────────────────────────────────────
 
-@app.before_request
-def _make_nonce():
-    g.csp_nonce = secrets.token_urlsafe(16)
+def _csp_nonce():
+    """This request's script nonce, created on first use -- so responses the
+    rate limiter cuts short (429) still get one."""
+    if "csp_nonce" not in g:
+        g.csp_nonce = secrets.token_urlsafe(16)
+    return g.csp_nonce
 
 
 @app.context_processor
 def _template_globals():
-    return {"csp_nonce": getattr(g, "csp_nonce", ""), "static_url": static_url}
+    return {"csp_nonce": _csp_nonce(), "static_url": static_url}
 
 
 _STATIC_VERSIONS: dict = {}
@@ -160,7 +163,7 @@ def _security_headers(response):
     if request.is_secure:
         headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     if (response.mimetype or "") == "text/html":
-        nonce = getattr(g, "csp_nonce", "")
+        nonce = _csp_nonce()
         headers.setdefault("Content-Security-Policy", "; ".join([
             "default-src 'self'",
             f"script-src 'self' 'nonce-{nonce}' {_CDN}",
@@ -437,7 +440,8 @@ def _checklist_sections(cfg, exclude=()):
             for row in section["rows"]:
                 if row["type"] == "course":
                     codes.append(row["code"])
-                elif row["type"] == "generic":
+                elif row["type"] == "generic" and len(options.get(row["id"], [])) <= 60:
+                    # (Broad "any ACTG/BIA/... course" rows are left to search)
                     codes += options.get(row["id"], [])
             codes = sorted(take(codes), key=lambda c: c not in required)
             if codes:
@@ -752,7 +756,8 @@ def _plan():
     # ("Required" here means the primary major's own courses: a course the
     # second major requires can still fill the primary's gen-ed rows.)
     auto_hours, auto_applied = auto_generic_hours(
-        planning_cfg, validated_completed_courses, required=_required_codes(degree_cfg)
+        planning_cfg, validated_completed_courses, required=_required_codes(degree_cfg),
+        typed=generic_hours,
     )
     for gid, hours in auto_hours.items():
         generic_hours[gid] = max(_as_float(generic_hours.get(gid)), hours)
@@ -779,7 +784,9 @@ def _plan():
         ]
         minor_progress = sum(_as_float(m["completed_hours"]) for m in minor_audits)
         for bucket in minor_buckets:
-            audit_generic_hours[bucket] = minor_progress
+            # Hours typed for the minor row still count (e.g. a minor
+            # finished at another school)
+            audit_generic_hours[bucket] = max(_as_float(generic_hours.get(bucket)), minor_progress)
 
     if second_cfg:
         second_audit = build_second_major_audit(second_cfg, completed_courses, audit_generic_hours, catalog)
@@ -788,6 +795,39 @@ def _plan():
     # picked (or counted) as upper-division electives
     planning_cfg = dict(planning_cfg)
     planning_cfg["_auto_applied_codes"] = {code for codes in auto_applied.values() for code in codes}
+
+    try:
+        with SessionLocal() as db_session:
+            equivalencies = db_session.query(CourseEquivalency).all()
+    except Exception:
+        equivalencies = []
+
+    # Any real catalog course the student took that no requirement used (a
+    # fourth course for a full 9-hour pool, an extra gen-ed, ...) counts
+    # toward free electives -- the way MTSU counts it -- instead of vanishing
+    pre_audit = build_audit(
+        validated_completed_courses, audit_generic_hours, catalog,
+        degree_cfg={**degree_cfg, "_applied": auto_applied}, equivalencies=equivalencies,
+    )
+    used = {code for codes in auto_applied.values() for code in codes}
+    for group in pre_audit["groups"] + (second_audit["groups"] if second_audit else []) + minor_audits:
+        for entry in group["entries"]:
+            used.update(entry.get("applied", []))
+    for cfg_item in (degree_cfg, second_cfg, *minor_cfgs):
+        if cfg_item:
+            used |= _required_codes(cfg_item) | {code for code, _, _ in cfg_item.get("required_courses", [])}
+    for labs in planning_cfg.get("coreq_map", {}).values():
+        used |= set(labs)
+    has_free_electives = any(g["key"] == "electives" for g in pre_audit["groups"])
+    extra_courses = sorted(
+        code for code in validated_completed_courses
+        if code not in used and catalog_store.course(code)
+    )
+    if extra_courses and has_free_electives:
+        free_hours = sum(catalog_store.credits(code, default=3) for code in extra_courses)
+        for hours_map in (generic_hours, audit_generic_hours):
+            hours_map[ELECTIVES_GENERIC_ID] = max(_as_float(hours_map.get(ELECTIVES_GENERIC_ID)), free_hours)
+        auto_applied = {**auto_applied, ELECTIVES_GENERIC_ID: extra_courses}
 
     # Auto-computed elective progress wins over the (absent) form fields
     planning_generic_hours = {**generic_hours, **planning_generic_hours}
@@ -811,12 +851,6 @@ def _plan():
         catalog=catalog,
         course_grades=course_grades,
     )
-
-    try:
-        with SessionLocal() as db_session:
-            equivalencies = db_session.query(CourseEquivalency).all()
-    except Exception:
-        equivalencies = []
 
     audit = build_audit(
         validated_completed_courses,

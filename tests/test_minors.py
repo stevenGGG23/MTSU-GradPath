@@ -217,3 +217,15 @@ def test_unknown_or_same_subject_minor_is_ignored():
         resp = client.post("/", data={**data, "target_semesters": "4"})
         assert resp.status_code == 200
         assert "extra-progress-minor" not in resp.get_data(as_text=True)
+
+
+def test_typed_minor_hours_still_count_when_a_minor_is_picked():
+    from mtsugradpath.catalog_programs import catalog_majors
+    cfg = catalog_majors()["history-bs"]
+    bucket = cfg["minor_bucket_id"]
+    html = app.test_client().post("/", data={
+        "major": "history-bs", "minor": "accounting-minor", f"hours_{bucket}": "6",
+        "target_semesters": "4", "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    row = html.split("Minor (any MTSU minor)", 1)[1][:300]
+    assert "6 / 15" in row

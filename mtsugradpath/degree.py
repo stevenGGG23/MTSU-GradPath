@@ -581,6 +581,8 @@ def _build_audit_generic(completed_courses, generic_hours, catalog, cfg, equival
             "partial_hours": elective_entered,
             "generic_id": ELECTIVES_GENERIC_ID,
             "suggestions": ["Any elective course"],
+            **({"applied": cfg["_applied"][ELECTIVES_GENERIC_ID]}
+               if cfg.get("_applied", {}).get(ELECTIVES_GENERIC_ID) else {}),
         }],
     })
 
@@ -720,6 +722,8 @@ def _build_audit_sections(completed_courses, generic_hours, catalog, cfg, equiva
                 "partial_hours": entered,
                 "generic_id": ELECTIVES_GENERIC_ID,
                 "suggestions": ["Any elective course"],
+                **({"applied": applied_by_gid[ELECTIVES_GENERIC_ID]}
+                   if applied_by_gid.get(ELECTIVES_GENERIC_ID) else {}),
             }],
         })
 

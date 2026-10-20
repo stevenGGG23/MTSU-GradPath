@@ -87,3 +87,18 @@ def test_gzip_respects_q_zero():
 def test_static_css_is_versioned():
     html = client().get("/").get_data(as_text=True)
     assert re.search(r'href="/static/styles\.css\?v=\d+"', html)
+
+
+def test_rate_limited_page_still_has_a_valid_csp(monkeypatch):
+    from app import limiter
+    monkeypatch.setattr(limiter, "enabled", True)
+    c = client()
+    resp = None
+    for _ in range(80):
+        resp = c.get("/prerequisites", environ_base={"REMOTE_ADDR": "203.0.113.9"})
+        if resp.status_code == 429:
+            break
+    assert resp.status_code == 429
+    csp = resp.headers["Content-Security-Policy"]
+    nonce = re.search(r"'nonce-([^']+)'", csp).group(1)
+    assert nonce and f'nonce="{nonce}"' in resp.get_data(as_text=True)

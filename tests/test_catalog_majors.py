@@ -267,9 +267,22 @@ def test_minor_courses_keep_their_order():
 
 
 def test_upper_division_elective_shortfall_is_visible():
-    plan, _ = _plan_for(catalog_majors()["commerce-bs"], terms=16)
+    # More upper-division ACTG hours than the catalog has ACTG courses for:
+    # the missing hours must still show up as a placeholder
+    cfg = dict(catalog_majors()["accounting-bba"], concentration_elective_hours=150)
+    plan, _ = _plan_for(cfg, terms=16)
     labels = [i.get("label", "") for items in plan.values() for i in items if i.get("kind") == "requirement"]
-    assert any(label == "BUS upper-division elective" for label in labels)
+    assert any(label == "ACTG upper-division elective" for label in labels)
+
+
+def test_prefix_list_requirement_accepts_any_listed_prefix():
+    """Commerce's 24 hours are 'business electives chosen from ACTG, BCED,
+    BIA, BLAW, BUS, ECON, ...' -- not just BUS."""
+    cfg = catalog_majors()["commerce-bs"]
+    row = next(r for r in cfg["supporting_generic"] if r[1] == "Commerce Major")
+    options = set(cfg["generic_options"][row[0]])
+    assert {"ACTG 3110", "FIN 3810", "MGMT 3620"} & options
+    assert len({c.split()[0] for c in options}) >= 8
 
 
 def test_second_major_keeps_primary_gen_ed_credit():
@@ -278,3 +291,57 @@ def test_second_major_keeps_primary_gen_ed_credit():
     alone = app.test_client().post("/", data=form).get_data(as_text=True)
     both = app.test_client().post("/", data={**form, "second_major": "accounting-bba"}).get_data(as_text=True)
     assert "Counted: ECON 2410" in alone and "Counted: ECON 2410" in both
+
+
+def test_courses_beyond_a_full_requirement_count_as_free_electives():
+    """A 9-hour cognate pool filled by three courses: a fourth and fifth
+    checked-off option used to vanish (not counted, not flagged)."""
+    resp = app.test_client().post("/", data={
+        "major": "political-and-global-affairs-public-policy-and-management-concentration-ba",
+        "completed_courses": "LSTS 4120\nSOC 3300\nECON 2410\nPSY 4380\nSOC 4100",
+        "target_semesters": "8", "start_season": "Fall", "start_year": "2026",
+    })
+    html = resp.get_data(as_text=True)
+    free = html.split("Free electives", 1)[1].split("audit-item-suggestions", 1)[0]
+    assert "PSY 4380" in free and "SOC 4100" in free
+    assert "Unrecognized" not in html
+
+
+def test_course_not_in_the_catalog_is_still_flagged():
+    html = app.test_client().post("/", data={
+        "major": "accounting-bba", "completed_courses": "ZZZZ 9999",
+        "target_semesters": "4", "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    assert "Unrecognized" in html and "ZZZZ 9999" in html
+
+
+@pytest.mark.parametrize("key", PICKER_KEYS)
+def test_finishing_everything_reads_100_percent(key):
+    """Check off every required course, enough upper-division electives, and
+    fill every hours row: the audit must read 100% and nothing is left to plan."""
+    import re
+    from mtsugradpath.degree import ELECTIVES_GENERIC_ID
+    from mtsugradpath.degree_configs import get_full_degree_config
+
+    cfg = get_full_degree_config(key)
+    required = [c for k in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg[k]]
+    completed = list(required)
+    need = cfg.get("concentration_elective_hours", 0)
+    for code in catalog_store.codes_for_prefix(cfg["prefix"]):
+        if need <= 0:
+            break
+        number = int(re.sub(r"\D", "", code.split()[1])[:4])
+        credits = catalog_store.credits(code, default=0) or 0
+        if number >= cfg.get("upper_division_min", 3000) and code not in required and credits > 0:
+            completed.append(code)
+            need -= credits
+    form = {"major": key, "completed_courses": "\n".join(completed),
+            "target_semesters": "12", "start_season": "Fall", "start_year": "2026",
+            f"hours_{ELECTIVES_GENERIC_ID}": "200"}
+    for gid, _, hours, _ in cfg["supporting_generic"] + cfg["tbc_generic"]:
+        form[f"hours_{gid}"] = str(hours)
+    html = app.test_client().post("/", data=form).get_data(as_text=True)
+    done, total = map(float, re.search(r"([\d.]+) / ([\d.]+) credit hours", html).groups())
+    assert done == total, f"{key}: {done}/{total}"
+    assert not re.findall(r'class="plan-item-code">([^<]+)<', html)
+    assert "plan warning" not in html.lower()
