@@ -4,6 +4,15 @@ A degree-progress and term-planning tool for MTSU undergraduates. Pick a major (
 
 **Every undergraduate major and minor in the 2026-2027 MTSU catalog is supported** — 223 majors and concentrations, 152 minors, and 3,475 courses — read straight from MTSU's official catalog data rather than hand-coded.
 
+### Data sources
+
+| What | Pulled from | Refreshed automatically |
+|---|---|---|
+| Courses, majors, minors, concentrations and their requirements | MTSU Undergraduate Catalog — **https://catalog.mtsu.edu** (via its public Acalog widget API, `https://catalog.mtsu.edu/widget-api/`) | Monthly (1st of the month) |
+| Which terms each course is offered (fall / spring / summer, alternate years, posted future terms) | MTSU class schedule — **https://ssb.mtsu.edu/pls/PROD/bwckschd.p_disp_dyn_sched** (public, no login; same data as RaiderNet's class lookup) | Weekly (Mondays) |
+
+Picking actual sections (days, times, open seats) is handed off to MTSU's own Schedule Planner at **https://sched.mtsu.edu/#/form** via the *Build my schedule* button.
+
 Live demo: **https://mtsu-gradpath.onrender.com**
 Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 
@@ -201,9 +210,32 @@ Selections are kept in the browser tab's `sessionStorage` — nothing is stored 
 python -m pytest tests
 ```
 
-- `tests/test_catalog_majors.py` runs against the real exported catalog: every major plans from scratch with no prerequisite or offering warnings and every required course gets scheduled; a sample of majors also plans cleanly from random partial progress; every minor plans alongside CS; every major's page renders; plus spot checks (Accounting matches its catalog page, prerequisite map, course search, health check).
-- `tests/test_self_updating.py` proves the site follows MTSU's data: removing Calculus I from CS in the catalog removes it from the site, a new program appears in the picker, offering patterns come from the class schedule, and a shrunken (broken) refresh is refused.
-- `tests/test_production.py` covers security headers, input limits, malformed input, and the admin re-export route.
+### Test results
+
+Everything below passed on the current version (October 2026). The automated suite also runs on every push through GitHub Actions, and the data-refresh workflow re-checks every major before publishing new data.
+
+| What was checked | Scope | Result |
+|---|---|---|
+| **Automated test suite** (`pytest`) | 1,072 tests | **1,071 passed, 0 failed** (1 skipped by design) |
+| Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
+| Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
+| Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
+| Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
+| Plans from random partial progress keep prerequisite order and never re-plan finished courses | 32 majors × 5 random students | All passed |
+| Plan page renders without warnings | 45 majors | 45 / 45 |
+| Catalog parsing, requirement conversion, offering-term inference, self-updating (e.g. removing Calculus I from CS in the catalog removes it from the site), security headers, input limits | 70+ focused tests | All passed |
+| **Randomized fuzzing** — random majors, second majors, minors, completed courses and typed hours | 4,000+ generated plans | 0 crashes, 0 plan warnings, no course planned twice or re-planned after completion, no audit over 100% |
+| **Real-browser trials** (headless Chrome clicking through the site) — checklist, typed-in courses, step-3 hours, minors, summers, back-and-forth navigation | 135 sessions, ~100 majors, ~1,070 courses selected, ~210 hour entries | Every selection showed up correctly in *Requirement details*; selections restored on return; 0 JavaScript or security-policy errors |
+| **Load test** (gunicorn as in the `Procfile`, 2 CPUs) | Up to 40 simultaneous requests | ~170–200 requests/s, 95% under 0.5 s, 0 errors |
+| Independent code reviews | Correctness review and security/production review | All confirmed findings fixed and covered by tests |
+
+Problems found during this testing (for example, 0-credit labs counted as 3 credits, plans stopping at the first empty term, a course past a full requirement disappearing) were fixed, and each now has a test so it can't come back.
+
+### What the test files cover
+
+- `tests/test_catalog_majors.py` runs against the real exported catalog: every major plans from scratch with no prerequisite or offering warnings and every required course gets scheduled; every major reaches 100% when complete; a sample of majors also plans cleanly from random partial progress; every minor plans alongside CS; every major's page renders; plus spot checks (Accounting matches its catalog page, prerequisite map, course search, health check).
+- `tests/test_self_updating.py` proves the site follows MTSU's data: removing Calculus I from CS in the catalog removes it from the site, a new program appears in the picker, a renamed program keeps old links working, offering patterns come from the class schedule, and a shrunken (broken) refresh is refused.
+- `tests/test_production.py` covers security headers, input limits, malformed input, Row-Level Security on Supabase tables, an unreachable database, and the admin re-export route.
 - `tests/test_catalog_build.py` covers parsing catalog text (prerequisite sentences, OR groups, concurrent courses, minimum grades, credit hours, program sections).
 - `tests/test_catalog_programs.py` covers turning catalog sections into planner configs on a small made-up catalog.
 - `tests/test_plan_integrity.py`, `test_planner.py`, `test_minors.py`, `test_double_major.py`, `test_form_flow.py`, `test_session_persistence.py`, `test_sync_status.py` cover the planner, audits, double majors/minors, the web form, and session handling.
@@ -375,5 +407,5 @@ Originated from a course proposal (Statement of Scope, July 15, 2026) under grou
 ## Team
 
 **Data/Scraper:** Abigaid Ortiz, Will Reilly, Zackary Butler
-**Infrastructure/Features:** Kevin Yassa, Mina Eshak, Brett Wilt
+**Infrastructure/Features:** Kevin Yassa, Mina Eshak
 **Hosting:** Steven Gobran

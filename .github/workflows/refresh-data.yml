@@ -80,7 +80,14 @@ jobs:
           fi
           git diff --cached --stat
           git commit -m "Refresh catalog/schedule data from MTSU (automated)"
-          git push
+          # Someone may have pushed to main while this ran: replay the data
+          # commit on top of the latest main (it only touches catalog_data/)
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main && git push && exit 0
+            echo "Push attempt $attempt failed; retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
 
       - name: Spot checks
         id: spot
