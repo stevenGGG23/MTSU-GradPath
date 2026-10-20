@@ -143,3 +143,24 @@ def test_postgres_tables_get_row_level_security(monkeypatch):
     db._lock_down_public_tables()
     assert 'ALTER TABLE public."sync_status" ENABLE ROW LEVEL SECURITY' in executed
     assert 'ALTER TABLE public."courses" ENABLE ROW LEVEL SECURITY' in executed
+
+
+def test_unreachable_database_is_not_retried_on_every_plan(monkeypatch):
+    import app as app_module
+
+    calls = []
+
+    class Broken:
+        def __enter__(self):
+            calls.append(1)
+            raise ConnectionError("database is gone")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(app_module, "SessionLocal", lambda: Broken())
+    monkeypatch.setitem(app_module._equiv_cache, "at", -10**9)
+    for _ in range(3):
+        resp = client().post("/", data=PLAN)
+        assert resp.status_code == 200
+    assert len(calls) == 1

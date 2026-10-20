@@ -164,6 +164,10 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Schedule Planner hand-off** — *Build my schedule* opens MTSU's Schedule Planner with the next term's courses ready to copy, to pick sections by time, days and open seats.
+- **Checklist filters and hover details** — filter by All / Required / Fall / Spring / Summer or text; hovering a course shows credits, offering terms, required status and minimum grade.
+- **Hands-off refresh hardened** — a real catalog change can't block the automatic refresh, old links follow renamed programs, and an unreachable database is no longer retried on every request.
+- **Supabase locked down** — the app enables Row-Level Security on every table at startup (Supabase's public API can't read or change them).
 - **Real offering terms for every course** — from MTSU's public class schedule: fall-only, no-summer, and alternate-year courses are planned only when they actually run, and posted future terms are used exactly. Courses are tagged *Fall only*, *Odd-year springs*, etc.
 - **Self-updating** — every major comes from the catalog (the five hand-coded ones are retired; old links still work), and a GitHub Action refreshes the schedule weekly and the catalog monthly, publishing only after the full test suite passes.
 - **Every selection counts** — courses beyond a full requirement count toward free electives instead of disappearing; hours typed in step 3 always show in the audit.
@@ -180,10 +184,11 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 ## Usage
 
 1. Search for a major in the **Major** box (e.g. "nursing", "accounting", "CSCI"). Optionally add a second major and up to four minors.
-2. Check off completed courses, grouped by the catalog's own sections. A blue dot marks courses the program requires by name; the rest are choice options and electives. Tags like *Fall only* show courses that don't run every term. Use search to add anything else in the catalog.
+2. Check off completed courses, grouped by the catalog's own sections. Hover a course for its credits, when it's offered, whether it's required, and any minimum grade. Filter the list with **All / Required / Fall / Spring / Summer** or by typing a code or title. Use search (step 2) to add anything else in the catalog.
 3. Review **Other degree requirements**: rows marked *auto* fill in from checked-off courses; enter hours for anything else.
 4. Pick a starting term/year, number of terms, and whether to include summers, then **Generate Plan**.
 5. Review completion progress, the per-section breakdown, the term-by-term schedule, and any prerequisite warnings. **View in catalog** links to the official program page.
+6. **Build my schedule** (or *Build Schedule* in the nav) opens MTSU's Schedule Planner (`sched.mtsu.edu`) to pick sections by days, times and open seats; the plan page lists the next term's courses with a button to copy them.
 6. **Prerequisite Map** in the nav bar shows the course dependency graph for any major.
 
 Selections are kept in the browser tab's `sessionStorage` — nothing is stored server-side.
@@ -256,13 +261,88 @@ It's POST-only and needs the `X-Requested-With` header, so another site can't tr
 
 ---
 
+## Capacity
+
+Measured with `gunicorn` exactly as in the `Procfile` (threaded workers), on a **2-CPU** machine that was also running the load generator:
+
+| Request | Simultaneous requests | Throughput | Median | 95th percentile | Errors |
+|---|---|---|---|---|---|
+| Planner page (`GET /`) | 10 | ~180 / s | 48 ms | 103 ms | 0 |
+| Planner page (`GET /`) | 40 | ~200 / s | 197 ms | 379 ms | 0 |
+| Generate a plan (`POST /`) | 10 | ~160 / s | 58 ms | 111 ms | 0 |
+| Generate a plan (`POST /`) | 40 | ~170 / s | 231 ms | 447 ms | 0 |
+
+A student actively using the site makes roughly one request every 15–30 seconds, so **one small 2-CPU server handles about 2,500–3,500 students using it at the same moment** with responses under half a second. The course list (`/courses.json`) and static files are cached by the browser, so they barely add load. On Vercel each request runs in its own serverless instance and capacity scales out automatically — the limit becomes the plan's usage allowance, not the code. No database is involved in serving pages, so there's no database bottleneck either.
+
+## Do we still need a database (Supabase)?
+
+**No.** Course and program data, offering terms, page caching and the automatic refresh don't touch a database:
+
+- **Refreshing** runs in GitHub Actions and writes plain files (`catalog_data/*.json`) that are committed to the repo.
+- **Pages** are built from that data held in memory (about 4 ms each), gzipped, and cached by the browser.
+
+The database only holds two optional things: the status of the admin `/sync` re-export, and a course-equivalency table that's currently empty. Without `DATABASE_URL` the app uses a small local SQLite file for those. To retire Supabase: **first remove `DATABASE_URL` from the host's environment variables**, redeploy, then delete the Supabase project. (If `DATABASE_URL` is left pointing at a deleted project the site still works — it notices the database is unreachable and stops trying for ten minutes at a time — but there's no reason to keep it.) A database would only be needed again for new features like student accounts or saved plans.
+
+## Costs
+
+Prices as of late 2026 — confirm on the providers' pricing pages before budgeting.
+
+| Item | Needed? | Cost |
+|---|---|---|
+| **Hosting — Vercel Pro** (recommended) | Yes. Vercel's free Hobby plan is meant for personal, non-commercial projects | **$20/month** platform fee, which includes one team seat and $20 of monthly usage credit (1 TB data transfer and 10 million edge requests included); extra seats $20/month each |
+| *or* Hosting — Render | Alternative to Vercel | Starter $7/month (0.5 CPU, 512 MB) is enough for light use; **Standard $25/month** (1 CPU, 2 GB) recommended for registration weeks |
+| Domain name | Optional | ~$10–20/year for a name like `gradpath.app` — or **free** if MTSU provides a subdomain such as `gradpath.mtsu.edu` |
+| Database (Supabase) | **No** | $0 — can be deleted (see above) |
+| GitHub repo + automatic data refresh | Yes | $0 — Actions are free for public repos; a private repo's free monthly minutes easily cover the ~80 minutes the refresh uses per month |
+| Uptime monitor on `/healthz` | Recommended | $0 on free tiers (e.g. UptimeRobot) |
+
+**Total: about $20–25/month plus an optional ~$15/year domain — or $0 if MTSU hosts it on its own servers and subdomain.**
+
+## Handing GradPath over to MTSU
+
+Everything needed to run the site is in this repository; nothing depends on a team member's personal machine or account once these steps are done.
+
+1. **Transfer the GitHub repository.** Repo → *Settings* → *General* → *Danger Zone* → **Transfer ownership** → MTSU's GitHub organization (or an MTSU-owned account). History, issues and the GitHub Actions workflows move with it, and the old URL redirects. Afterwards, in the new location:
+   - *Settings* → *Actions* → *General* → *Workflow permissions*: allow **Read and write** (the refresh commits data and opens issues). No secrets need to be added — the workflows use GitHub's built-in token.
+   - *Watch* the repo (or set notifications) so whoever maintains it gets the refresh workflow's issues by email.
+2. **Transfer the hosting.**
+   - **Vercel:** project → *Settings* → *General* → **Transfer Project** → MTSU's Vercel team. You must be an owner of the current team and a member of MTSU's team, and MTSU's team needs a payment method. Domains and environment variables move with it, with no downtime. Then reconnect the transferred GitHub repo under *Settings* → *Git*.
+   - **Render:** have MTSU create a new Web Service in its own Render account from the transferred repo (build `pip install -r requirements.txt`, start command from `Procfile`), set the environment variables below, point the domain at it, then delete the old service.
+3. **Environment variables** on the new host:
+   - `SECRET_KEY` — generate a **new** one (`python -c "import secrets; print(secrets.token_hex(32))"`).
+   - `SYNC_ADMIN_USER` / `SYNC_ADMIN_PASSWORD` — new credentials for the admin re-export (Render only; it's disabled on Vercel).
+   - `DATABASE_URL` — leave **unset** (no database needed).
+4. **Domain:** add the domain in the host's dashboard and create the DNS record it shows (for `gradpath.mtsu.edu`, MTSU's DNS team adds a CNAME). HTTPS certificates are automatic on both Vercel and Render.
+5. **Retire the old pieces:** delete the Supabase project, and remove the old Render/Vercel projects from team members' personal accounts once the new one is live.
+6. **Ongoing upkeep — almost none:**
+   - The class schedule refreshes every Monday and the catalog on the 1st of each month, automatically, and only publishes data that passes its checks.
+   - If a refresh fails (MTSU's site down, or a format change), nothing is published, the site keeps its last good data, and a GitHub issue is opened. If MTSU renames a course or program that a spot-check test pins, the data still publishes and an issue asks for that test to be updated.
+   - Once a year (around May), check that `/healthz` shows the new catalog year. It switches automatically when MTSU publishes the new catalog.
+   - If MTSU ever replaces its public catalog API or class schedule with an official feed, only `mtsugradpath/catalog_fetch.py` and `schedule_fetch.py` need to change.
+
+## Status and next steps
+
+**Production-ready today:** every undergraduate major and minor from the official catalog; real offering terms; prerequisite-aware plans; automatic weekly/monthly data refresh with safety checks; hardened against common web attacks; 1,000+ automated tests including every major planned end to end; measured capacity of thousands of simultaneous students on a small server.
+
+**Next steps:**
+
+1. **Run the refresh once by hand** to confirm it works end to end: *Actions* → *Refresh catalog and schedule* → *Run workflow* (leave "full catalog" unchecked; ~5 minutes). A green run plus a "Refresh catalog/schedule data" commit proves it.
+2. **Get MTSU ITD's OK** on using the public catalog API and class schedule this way (or an official feed).
+3. **Hosting:** move to Vercel Pro (or Render Standard) before registration weeks — or to MTSU's servers with a `gradpath.mtsu.edu` subdomain. Test a preview deploy on the new host first.
+4. **Retire Supabase** (remove `DATABASE_URL`, then delete the project).
+5. **Spot-check majors** with advisors in each department and report anything that doesn't match the catalog.
+6. **Later features:** saved plans and accounts, older catalog years for students who started earlier, a Degree Works import, and a short user guide.
+
+---
+
 ## Known Limitations
 
 - **Unofficial.** Requirements are read automatically from the catalog. Most programs come out within a few hours of their stated total, but some catalog layouts are ambiguous (e.g. programs whose courses also satisfy gen-ed areas without saying which). Each program links to its catalog page, and the plan page says to confirm there and with an advisor.
 - **Offering terms are inferred from the last three years.** A department can change its rotation; the next posted term is always used exactly, and the weekly refresh picks up changes as schedules are posted.
 - **Programs with alternative "emphases"** (e.g. the Science minor) plan the first emphasis listed.
 - **Course notes the catalog writes in prose** ("no more than one course from the same department", "approval of the advisor") aren't enforced.
-- **Rate limiting counts per gunicorn worker**, not globally (in-memory storage).
+- **Rate limiting counts per gunicorn worker** (or per serverless instance on Vercel), not globally — in-memory storage. A stricter global limit would need Redis or the host's firewall rules.
+- **Only the newest catalog year.** A student who started under an older catalog sees the newest requirements.
 - **Planner input only lasts for the browser tab** (`sessionStorage`). Saved plans tied to accounts are a future item.
 
 ---
@@ -288,9 +368,9 @@ Originated from a course proposal (Statement of Scope, July 15, 2026) under grou
 - ~~Replace the public-widget scraper~~ — done: one-time export of the full catalog through the Acalog widget API (no key needed), refreshed automatically.
 - ~~Course-offering terms for every subject~~ — done: from MTSU's public class schedule, refreshed weekly.
 - Confirm with MTSU ITD that using the public catalog API and class schedule this way is OK, or switch to whatever official feed ITD provides (only `catalog_fetch.py` / `schedule_fetch.py` would change).
-- Migrate off Render's free tier to a host that handles registration-period concurrent load.
+- Move off Render's free tier (Vercel Pro or Render Standard, or MTSU hosting) — see [Costs](#costs).
 - User guide for students/advisors.
-- Pursue MTSU adoption and hosting sponsorship.
+- Pursue MTSU adoption and hosting sponsorship — see [Handing GradPath over to MTSU](#handing-gradpath-over-to-mtsu).
 
 ## Team
 

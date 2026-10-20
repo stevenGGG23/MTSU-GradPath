@@ -649,6 +649,34 @@ def index():
 # MTSU's own Schedule Planner: pick sections by time, days and open seats
 SCHEDULE_PLANNER_URL = "https://sched.mtsu.edu/#/form"
 
+# Course equivalencies (old code -> current code) rarely change; read them at
+# most every few minutes. A failure is remembered too, so a database that's
+# gone (or a DATABASE_URL left pointing at a deleted project) costs one
+# timeout per interval instead of one per plan.
+_EQUIV_TTL = 600
+_equiv_cache = {"at": -_EQUIV_TTL, "rows": []}
+
+
+class _Equivalency:
+    def __init__(self, old, new):
+        self.old_course_code, self.new_course_code = old, new
+
+
+def _course_equivalencies():
+    now = time.monotonic()
+    if now - _equiv_cache["at"] < _EQUIV_TTL:
+        return _equiv_cache["rows"]
+    rows = []
+    try:
+        with SessionLocal() as db_session:
+            rows = [_Equivalency(r.old_course_code, r.new_course_code)
+                    for r in db_session.query(CourseEquivalency).all()]
+    except Exception:
+        app.logger.warning("Course equivalencies unavailable (database unreachable?)")
+    _equiv_cache.update(at=now, rows=rows)
+    return rows
+
+
 _COURSE_CODE_RE = re.compile(r"[A-Z]{2,5} \d{4}[A-Z]?")
 MAX_COMPLETED_COURSES = 200
 MAX_MINORS = 4
@@ -816,11 +844,7 @@ def _plan():
     planning_cfg = dict(planning_cfg)
     planning_cfg["_auto_applied_codes"] = {code for codes in auto_applied.values() for code in codes}
 
-    try:
-        with SessionLocal() as db_session:
-            equivalencies = db_session.query(CourseEquivalency).all()
-    except Exception:
-        equivalencies = []
+    equivalencies = _course_equivalencies()
 
     # Any real catalog course the student took that no requirement used (a
     # fourth course for a full 9-hour pool, an extra gen-ed, ...) counts
