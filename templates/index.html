@@ -92,7 +92,7 @@
             </h2>
             <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-3">Check off every course you've already completed.{% if degree_cfg.catalog_driven %} <span class="req-dot" aria-hidden="true"></span>Required by name; the rest are options to choose from. Hover a course for details.{% endif %}</p>
+                <p class="form-text mt-0 mb-3">Check off every course you've already completed. Hover over a course for details.</p>
                 {% if not course_count %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet &mdash; the catalog data file is missing. Run <code>python scrape_courses.py</code> to create it.
@@ -122,12 +122,9 @@
                   <div class="form-check cs-course-check{% if course.required %} is-required{% endif %}" title="{{ course.note }}" data-seasons="{{ course.seasons }}" data-required="{{ 1 if course.required else 0 }}" data-search="{{ (course.code ~ ' ' ~ course.title) | lower }}">
                     <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
-                      <span class="cs-course-code">{% if course.required %}<span class="req-dot" aria-label="Required"></span>{% endif %}{{ course.code }}</span>
+                      <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.title }}</span>
                       {% if course.offered %}<span class="cs-course-offered">{{ course.offered }}</span>{% endif %}
-                      {% if course.minimum_grade %}
-                    <i class="bi bi-info-circle-fill grade-req-icon" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Requires {{ course.minimum_grade }} or better" aria-label="Requires {{ course.minimum_grade }} or better" tabindex="0"></i>
-                    {% endif %}
                     </label>
                   </div>
                   {% endfor %}

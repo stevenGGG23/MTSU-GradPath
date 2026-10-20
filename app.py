@@ -478,7 +478,7 @@ def _course_card(code, required, min_grades):
     if code in required:
         note.append("Required by name for this program")
     if min_grades.get(code):
-        note.append(f"Later courses need a {min_grades[code]} or better")
+        note.append(f"Requires a {min_grades[code]} or better (a later course needs it)")
     if info.get("desc"):
         note.append(info["desc"])
     return {
