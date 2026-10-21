@@ -14,30 +14,19 @@ A degree-progress and term-planning tool for MTSU undergraduates. Pick a major (
 Picking actual sections (days, times, open seats) is handed off to MTSU's own Schedule Planner at **https://sched.mtsu.edu/#/form** via the *Build my schedule* button.
 
 Live demo: **https://mtsu-gradpath.onrender.com**
-Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
+Video walkthrough: **https://youtu.be/ePZ4cazj3Gw** 
 
-<table width="100%" cellpadding="8">
-  <tr>
-    <td width="50%" valign="top" align="center">
-      <img src="static/demo-course-selection.png" width="100%" alt="Course selection form" /><br/>
-      <sub><b>Course selection &amp; completed-course checklist</b></sub>
-    </td>
-    <td width="50%" valign="top" align="center">
-      <img src="static/demo-plan-overview.png" width="100%" alt="Plan overview and completion progress" /><br/>
-      <sub><b>Completion progress &amp; requirement breakdown</b></sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top" align="center">
-      <img src="static/demo-plan-schedule.png" width="100%" alt="Term-by-term generated schedule" /><br/>
-      <sub><b>Term-by-term generated schedule</b></sub>
-    </td>
-    <td width="50%" valign="top" align="center">
-      <img src="static/demo-prerequisite-map.png" width="100%" alt="Prerequisite dependency graph" /><br/>
-      <sub><b>Prerequisite dependency graph</b></sub>
-    </td>
-  </tr>
-</table>
+
+### Screenshots
+
+| | |
+|---|---|
+| ![Planner: pick a major and minors, check off completed courses, filter by Required / Fall / Spring / Summer](docs/screenshots/01-planner.png) | ![Prerequisite map: arrows show which courses unlock which](docs/screenshots/02-prerequisite-map.png) |
+| **1. Planner** — pick a major (and optional second major or minors), check off completed courses, filter by *Required / Fall / Spring / Summer*, hover any course for details. | **2. Prerequisite map** — every required course for the major; an arrow from A to B means A unlocks B. |
+| ![MTSU Schedule Planner, opened by the Build Schedule button](docs/screenshots/03-mtsu-schedule-planner.png) | ![Results page: percent complete and progress by requirement section](docs/screenshots/04-plan-progress.png) |
+| **3. Build my schedule** — hands off to MTSU's own Schedule Planner (`sched.mtsu.edu`) to pick sections by days, times and open seats. | **4. Results** — percent complete, credit hours by requirement section, and buttons to edit, build a schedule, or download a PDF. |
+| ![GPA calculator side panel next to the personal prerequisite path](docs/screenshots/05-gpa-calculator.png) | ![Term-by-term plan with the next-step card for the Schedule Planner](docs/screenshots/06-semester-plan.png) |
+| **5. GPA calculator** — side panel for "what if" grades and reaching a target GPA, next to the student's personal prerequisite path. | **6. Term-by-term plan** — courses placed by prerequisites and the terms MTSU actually offers them; the next term's courses are ready to copy into the Schedule Planner. |
 
 ---
 
@@ -248,6 +237,73 @@ GitHub Actions runs the suite on every push and pull request.
 ---
 
 ## Architecture
+
+### How everything fits together
+
+```mermaid
+flowchart TB
+    subgraph MTSU["MTSU data (public, no login)"]
+        CAT["Undergraduate Catalog<br/>catalog.mtsu.edu<br/>Acalog widget API (JSON)"]
+        SCH["Class schedule<br/>ssb.mtsu.edu<br/>Banner dynamic schedule"]
+    end
+
+    subgraph GH["GitHub repo + Actions"]
+        REFRESH["GitHub Actions: Refresh catalog and schedule<br/>weekly Mon (schedule), monthly 1st (catalog)"]
+        EXPORT["scrape_courses.py<br/>catalog_fetch + catalog_build<br/>schedule_fetch"]
+        GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
+        REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
+        ISSUE["GitHub issue + email<br/>site keeps last good data"]
+        TESTS["GitHub Actions: Tests<br/>1,071 tests on every push"]
+    end
+
+    subgraph HOST["Hosting (auto-deploy)"]
+        VERCEL["Vercel (Hobby now, Pro later)<br/>serverless Python function api/index.py<br/>scales out automatically"]
+        RENDER["Render (alternative)<br/>gunicorn, threaded workers (Procfile)"]
+    end
+
+    subgraph APP["Flask app"]
+        STORE["catalog_store<br/>loads the JSON into memory once<br/>no database, no network calls per request"]
+        CONVERT["catalog_programs<br/>catalog requirements to planner rules<br/>223 majors, 152 minors"]
+        PLAN["planner + audit<br/>prerequisites, offering terms,<br/>15 credit hours per term"]
+        ROUTES["Routes: / (form + plan), /prerequisites,<br/>/courses.json, /healthz, /sync (admin)"]
+        HARDEN["Security + speed: CSP nonces, rate limit,<br/>64 KB request cap, gzip, cached assets"]
+    end
+
+    subgraph USER["Student's browser"]
+        PAGE["HTML + JavaScript (Bootstrap)<br/>checklist, filters, search, GPA panel"]
+        LOCAL["sessionStorage<br/>selections stay in the tab only"]
+        MERMAID["Mermaid prerequisite map"]
+    end
+
+    SP["MTSU Schedule Planner<br/>sched.mtsu.edu<br/>pick sections and times"]
+
+    DB[("Optional database<br/>SQLite or Supabase (RLS on)<br/>admin sync status only, not needed")]
+    MON["Uptime monitor<br/>/healthz shows data age and stale flag"]
+
+    CAT -->|"courses + programs"| EXPORT
+    SCH -->|"sections per term"| EXPORT
+    REFRESH --> EXPORT --> GATE
+    GATE -->|"yes: bot commits data"| REPO
+    GATE -->|"no"| ISSUE
+    REPO --> TESTS
+    REPO -->|"deploy"| VERCEL
+    REPO -->|"deploy"| RENDER
+    VERCEL --> ROUTES
+    RENDER --> ROUTES
+    ROUTES --> HARDEN
+    STORE --> CONVERT --> PLAN --> ROUTES
+    REPO -.->|"catalog_data/*.json bundled with the code"| STORE
+    ROUTES <-->|"HTTPS: pages, plans, courses.json (browser-cached)"| PAGE
+    PAGE --- LOCAL
+    PAGE --- MERMAID
+    PAGE -->|"Build my schedule"| SP
+    ROUTES -.-> DB
+    MON -.->|"polls"| ROUTES
+```
+
+**In words:** GitHub Actions downloads MTSU's catalog (monthly) and class schedule (weekly), turns them into two JSON files, checks that every major still plans correctly, and commits them. Every push to `main` redeploys the site on Vercel (and Render). When the app starts, it loads those JSON files into memory, so a student's request never waits on MTSU's servers or a database — pages and plans are built in a few milliseconds and sent to the browser, where selections stay in the tab. Picking actual class sections is handed off to MTSU's Schedule Planner.
+
+### Files
 
 ```
 app.py                  Flask routes: / (form + plan), /prerequisites, /courses.json, /healthz, /sync (admin)
