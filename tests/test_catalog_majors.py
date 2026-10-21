@@ -366,3 +366,140 @@ def test_course_beyond_a_full_degree_is_reported_not_hidden():
     }).get_data(as_text=True)
     assert "Not counted toward this degree" in html
     assert html.split("uncounted-alert", 1)[1].split("</div>\n  </div>", 1)[0].count("LSTS 4903") == 1
+
+
+# ── Reading the catalog the way a student would ──────────────────────────────
+# These don't reuse the converter's logic. They read each catalog page with
+# plain rules a person would use, and fail if the converter disagrees -- so a
+# new page layout MTSU introduces can't quietly turn required courses into a
+# vague "choose from" row (what happened to Professional Pilot).
+
+import re as _re
+
+from mtsugradpath.catalog_programs import _SKIP_SECTION, _credits, _walk
+
+_PICK_WORDS = _re.compile(
+    r"\b(choose|chosen|select|one of|two of|three of|four of|at least|from the following|options?|or)\b", _re.I)
+
+
+def _plainly_required(program):
+    """Courses on their own line in a requirement list: no pick-list wording
+    in the section, not joined to another course by "or", and listed before
+    any "Choose ..." line."""
+    out = set()
+    roots = [s for s in program["sections"] if not _SKIP_SECTION.match(s["name"])]
+    for sec, _, _ in _walk(roots):
+        name, hours, items = sec["name"], sec.get("hours"), sec.get("items") or []
+        if _re.match(r"(curriculum|academic map|freshman|sophomore|junior|senior|subtotal|true blue)", name, _re.I):
+            continue
+        if _PICK_WORDS.search(name) or _PICK_WORDS.search(sec.get("text") or "") or _re.search(
+                r"elective|track|emphasis|area|minor|option|maximum|up to", name, _re.I):
+            continue
+        if not hours:
+            continue
+        # Only the courses above a "Choose ..." line count toward the size test
+        head = []
+        for item in items:
+            text = (item.get("text") or item.get("note") or "").strip()
+            if text and not text.startswith("(") and _PICK_WORDS.search(text) and not _re.search(r"\bOR\s*$", text):
+                break
+            head.append(item)
+        if sum(_credits(i["course"]) for i in head if "course" in i) > hours[1] + 6:
+            continue  # lists far more than its hours: a pick-list
+        tokens = []
+        for item in items:
+            if "course" in item or "op" in item or item.get("sep"):
+                tokens.append(item)
+                continue
+            text = (item.get("text") or item.get("note") or "").strip()
+            if _re.search(r"\bOR\s*$", text):
+                tokens.append({"op": "OR"})
+            elif text.startswith("(") or len(text) <= 3 or text.endswith(":") and not _PICK_WORDS.search(text):
+                continue  # an aside: "(may be counted in the True Blue Core)", "*", "Strings:"
+            elif _PICK_WORDS.search(text):
+                break  # "Choose ...": the rest is a pick-list
+            else:
+                tokens.append({"sep": True})
+        # A separator right before "OR" doesn't end the choice ("LEAD 3010 / OR / MGMT 4200")
+        tokens = [t for k, t in enumerate(tokens)
+                  if not (t.get("sep") and k + 1 < len(tokens) and tokens[k + 1].get("op") == "OR")]
+        group, has_or, linked = [], False, False
+        for token in tokens + [{"sep": True}]:
+            if "course" in token:
+                if group and not linked:
+                    out.update(c for c in group if not has_or)
+                    group, has_or = [], False
+                group.append(token["course"])
+                linked = False
+            elif "op" in token:
+                linked, has_or = True, has_or or token["op"] == "OR"
+            else:
+                out.update(c for c in group if not has_or)
+                group, has_or, linked = [], False, False
+    return {c for c in out if _credits(c)}
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_every_catalog_major_requires_the_courses_its_page_plainly_lists(key):
+    cfg = catalog_majors()[key]
+    program = next(p for p in catalog_store.programs() if p["name"] == cfg["name"])
+    planned = {code for k in ("core_courses", "concentration_courses", "supporting_courses") for code, _, _ in cfg[k]}
+    labs = {lab for labs in cfg.get("coreq_map", {}).values() for lab in labs}
+    in_a_choice = {code for options in cfg["generic_options"].values() for code in options
+                   if len(options) <= 4}  # a short "A or B" choice, not a big pick-list
+    missing = _plainly_required(program) - planned - labs - in_a_choice
+    assert not missing, f"{cfg['name']}: listed as required on the catalog page but not planned as required: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_every_catalog_major_plan_keeps_prerequisites_in_order(key):
+    """From nothing over 8 semesters: no course lands in the same term as, or
+    before, a catalog prerequisite that's also on the plan."""
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+    term_of = {item["code"]: t for t, (term, items) in enumerate(plan.items()) if not term.startswith("Remaining")
+               for item in items if item.get("kind") == "course"}
+    late = []
+    for code, t in term_of.items():
+        info = catalog_store.course(code) or {}
+        late += [(code, p) for p in info.get("prereqs", []) if p in term_of and term_of[p] >= t]
+        for group in info.get("prereq_any", []):
+            placed = [term_of[g] for g in group if g in term_of]
+            if placed and min(placed) >= t:
+                late.append((code, " or ".join(group)))
+    assert not late, f"{cfg['name']}: scheduled with or before a prerequisite: {late[:5]}"
+
+
+def test_professional_pilot_plans_its_flight_courses_by_name():
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    required = {code for k in ("core_courses", "concentration_courses", "supporting_courses") for code, _, _ in cfg[k]}
+    assert len([c for c in required if c.startswith("AERO")]) >= 15
+    biggest_pick_list = max((hours for _, _, hours, _ in cfg["supporting_generic"]), default=0)
+    assert biggest_pick_list < 15
+
+
+def test_skipped_summers_do_not_use_up_semesters():
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs") or catalog_majors()[MAJOR_KEYS[0]]
+    plan, _ = _plan_for(cfg, terms=8)
+    real = [t for t in plan if not t.startswith(("Summer", "Remaining"))]
+    assert len(real) == 8
+
+
+def test_gen_ed_is_spread_through_the_plan_not_left_for_the_end():
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs") or catalog_majors()[MAJOR_KEYS[0]]
+    plan, _ = _plan_for(cfg, terms=8)
+    first_year = [i["label"] for t in list(plan)[:2] for i in plan[t]]
+    assert any("Written Communication" in label for label in first_year)
+    remaining = next((items for t, items in plan.items() if t.startswith("Remaining")), [])
+    assert not any(i.get("id", "").startswith("tbc_") for i in remaining)
+
+
+def test_plan_flags_a_prerequisite_from_outside_the_plan():
+    html = app.test_client().post("/", data={
+        "major": "accounting-bba", "target_semesters": "8", "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    # ACTG 3000 needs ENGL 1010, which the plan covers with a gen-ed row
+    assert 'class="plan-item-offered plan-item-prereq" title="Prerequisite (catalog):' in html

@@ -106,6 +106,38 @@ def _clause(text: str, label_re: str) -> str:
     return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
 
+_OR_CODE = re.compile(r"\bor\s+(?:[A-Z]{2,4}\s*)?\d{4}", re.I)
+
+
+def _comma_groups(part: str) -> list:
+    """Split one "and"-part of a prerequisite sentence at its commas:
+    [(codes, is_choice)].
+
+    "MATH 1530, MATH 1710, MATH 1810, or MATH 1910" (a serial-comma list
+    ending in "or") is one choice; "MATH 1910 or MATH 1920, CSCI 1170" is a
+    choice and then a required course; "AERO 1010, AERO 1020" is two
+    required courses."""
+    out: list = []
+    run: list = []  # chunks since the last choice: [(text, codes)]
+    for chunk in re.split(r",\s*", part):
+        codes = _codes_in(chunk)
+        if not codes:
+            continue
+        if re.match(r"\s*or\b", chunk, re.I):
+            if run:
+                out.append(([c for _, cs in run for c in cs] + codes, True))
+                run = []
+            elif out and out[-1][1]:
+                out[-1][0].extend(codes)  # "..., or PHYS 2010, or PHYS 2110"
+            else:
+                out.append((codes, True))
+        else:
+            run.append((chunk, codes))
+    # Chunks on their own: "MATH 1910 or MATH 1920" / "CSCI 1170"
+    out.extend((codes, len(codes) > 1 and bool(_OR_CODE.search(text))) for text, codes in run)
+    return out
+
+
 def parse_requisites(text: str) -> dict:
     """Split a course description into prerequisite/corequisite structure.
 
@@ -126,6 +158,10 @@ def parse_requisites(text: str) -> dict:
     concurrent = re.compile(r"concurrent|simultaneous", re.I)
     hard_parts, soft_codes = [], []
     for segment in re.split(r";", prereq_text):
+        # "ENGR 3510 (may be taken concurrently)": that one course may share the term
+        maybe_now = re.compile(r"((?:[A-Z]{2,4}\s*)?\d{4})\s*\(\s*(?:may|can)\s+be\s+taken\s+concurrently[^)]*\)", re.I)
+        soft_codes += [c for m2 in maybe_now.finditer(segment) for c in _codes_in(m2.group(1))]
+        segment = maybe_now.sub("", segment)
         m = re.search(r"(?:must be\s+)?taken concurrently with|concurrent(?:ly)? enrollment in|concurrently with", segment, re.I)
         if m:
             hard_parts.append(segment[: m.start()])
@@ -144,14 +180,12 @@ def parse_requisites(text: str) -> dict:
 
     all_of: list[str] = []
     any_of: list[list[str]] = []
-    for part in re.split(r";|,?\s+\band\b\s+|,\s+(?=[A-Z]{2,4}\s*\d{4})", prereq_text_hard):
-        codes = _codes_in(part)
-        if not codes:
-            continue
-        if len(codes) > 1 and re.search(r"\bor\b", part, re.I):
-            any_of.append(codes)
-        else:
-            all_of.extend(c for c in codes if c not in all_of)
+    for part in re.split(r";|,?\s+\band\b\s+", prereq_text_hard):
+        for codes, is_choice in _comma_groups(part):
+            if is_choice and len(codes) > 1:
+                any_of.append(codes)
+            else:
+                all_of.extend(c for c in codes if c not in all_of)
 
     all_of = [c for c in all_of if c not in soft_codes]
     any_of = [g for g in any_of if not set(g) & set(soft_codes)]

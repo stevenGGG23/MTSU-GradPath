@@ -103,10 +103,27 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 # here: the goal is a backstop against a traffic spike or scripted abuse, not
 # precise per-client accounting, and adding Redis just for exact counts isn't
 # worth it at this scale.
+#
+# The limit is per visitor address. A campus network or computer lab can put
+# a whole class behind one public address, so it's set well above what one
+# student needs (a page load is 2 requests; images/CSS aren't counted):
+# 300/min covers ~40 students on one network all generating plans at once.
+# Override with RATE_LIMIT, e.g. RATE_LIMIT="600 per minute;10000 per hour".
+RATE_LIMIT = os.getenv("RATE_LIMIT", "300 per minute;5000 per hour")
+
+
+def _client_ip():
+    # Render serves through Cloudflare, which passes the visitor's own
+    # address in CF-Connecting-IP (it overwrites any value a client sends)
+    if os.getenv("RENDER"):
+        return request.headers.get("CF-Connecting-IP") or get_remote_address()
+    return get_remote_address()
+
+
 limiter = Limiter(
-    get_remote_address,
+    _client_ip,
     app=app,
-    default_limits=["60 per minute", "1000 per hour"],
+    default_limits=[RATE_LIMIT],
     storage_uri="memory://",
     headers_enabled=True,
 )
@@ -1024,6 +1041,7 @@ def _plan():
                 "hours": credit_short(item["hours"]),
                 "minor": item["code"] in minor_only_codes,
                 "offered": catalog_store.offering_summary(item["code"]),
+                "check_prereq": prereq_notes.get(item["code"]),
                 "second": item["code"] in second_only_codes,
             }
 
@@ -1039,6 +1057,23 @@ def _plan():
             }
 
         return {"kind": kind, "code": None, "title": item["label"], "hours": ""}
+
+    # Courses whose catalog prerequisites aren't done or planned earlier --
+    # usually a gen-ed course the plan covers with a "GEN" row, an ACT-score
+    # alternative, or "permission of instructor"; the tag shows the catalog's
+    # own wording so the student can check
+    prereq_notes = {}
+    seen = set(completed_courses)
+    for term, term_items in plan.items():
+        codes = {item["code"] for item in term_items if item.get("kind") == "course"}
+        if not term.startswith("Remaining"):
+            for code in codes:
+                info = catalog_store.course(code) or {}
+                missing = [p for p in info.get("prereqs", []) if p not in seen and catalog_store.course(p)]
+                missing += [" or ".join(g) for g in info.get("prereq_any", []) if not seen.intersection(g)]
+                if missing and info.get("prereq_text"):
+                    prereq_notes[code] = "Prerequisite (catalog): " + info["prereq_text"]
+        seen |= codes
 
     # Convert planner data into display structures
     completed_display = [completed_label(code) for code in sorted(completed_courses)]

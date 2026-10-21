@@ -136,3 +136,27 @@ def test_simultaneous_completion_only_softens_the_named_course():
     req = _req("Prerequisites: AERO 3203 and AERO 3215 or simultaneous completion of AERO 3215 . Flight")
     assert req["prereqs"] == ["AERO 3203"]
     assert req["coreqs"] == ["AERO 3215"]
+
+
+def test_a_serial_comma_or_list_is_one_choice():
+    # AERO 3020: "AERO 1010, AERO 1020, and MATH 1530, MATH 1710, MATH 1810,
+    # or MATH 1910, and CHEM 1010, or CHEM 1110, ..." -- any one math course
+    req = _req("Prerequisites: AERO 1010 , AERO 1020 , and MATH 1530 , MATH 1710 , MATH 1810 , or MATH 1910 , "
+               "and CHEM 1010 , or CHEM 1110 , or PHYS 2010 , or PHYS 2110 , all with minimum grades of C (2.0). Text")
+    assert req["prereqs"] == ["AERO 1010", "AERO 1020"]
+    assert req["prereq_any"] == [["MATH 1530", "MATH 1710", "MATH 1810", "MATH 1910"],
+                                 ["CHEM 1010", "CHEM 1110", "PHYS 2010", "PHYS 2110"]]
+
+
+def test_an_or_pair_followed_by_a_comma_keeps_the_next_course_required():
+    req = _req("Prerequisites: MATH 1910 or MATH 1920, CSCI 1170. Text")
+    assert req["prereqs"] == ["CSCI 1170"]
+    assert req["prereq_any"] == [["MATH 1910", "MATH 1920"]]
+    # "or permission" isn't a course choice
+    assert _req("Prerequisites: Junior standing, CSCI 3080, or permission of instructor. Text")["prereqs"] == ["CSCI 3080"]
+
+
+def test_may_be_taken_concurrently_only_softens_that_course():
+    req = _req("Prerequisites: CHEM 1110 and MATH 1730 (may be taken concurrently). Text")
+    assert req["prereqs"] == ["CHEM 1110"]
+    assert req["coreqs"] == ["MATH 1730"]

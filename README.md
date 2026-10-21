@@ -207,9 +207,11 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 1,072 tests | **1,071 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 1,533 tests | **1,532 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
+| **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
+| Every major planned over 8 semesters — no course in the same term as, or before, a prerequisite on the plan | All 223 | 223 / 223 |
 | Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
 | Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
 | Plans from random partial progress keep prerequisite order and never re-plan finished courses | 32 majors × 5 random students | All passed |
@@ -253,7 +255,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>1,071 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>1,533 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]
@@ -348,7 +350,7 @@ curl https://<host>/sync/status
 
 It's POST-only and needs the `X-Requested-With` header, so another site can't trigger it with a browser's saved admin login. On Vercel it's disabled (serverless functions can't run the 40-minute export).
 
-**Production hardening already in place:** security headers (CSP with per-request script nonces, `X-Frame-Options`, `nosniff`, HSTS over HTTPS), Subresource Integrity on the Bootstrap CDN files, a 64 KB request size limit, course-code validation on every submitted field, rate limiting keyed on the real client IP behind Render's proxy (`ProxyFix`), gzip, versioned static assets, friendly 404/413/429/500 pages, threaded gunicorn workers with a 60 s timeout (`Procfile`), and a startup that survives the database being unreachable.
+**Production hardening already in place:** security headers (CSP with per-request script nonces, `X-Frame-Options`, `nosniff`, HSTS over HTTPS), Subresource Integrity on the Bootstrap CDN files, a 64 KB request size limit, course-code validation on every submitted field, rate limiting of 300 requests/minute and 5,000/hour per visitor (sized so a whole class on one campus network can use it at once; change it with the `RATE_LIMIT` environment variable), keyed on each visitor's own IP (Cloudflare's `CF-Connecting-IP` on Render, `ProxyFix` elsewhere), gzip, versioned static assets, friendly 404/413/429/500 pages, threaded gunicorn workers with a 60 s timeout (`Procfile`), and a startup that survives the database being unreachable.
 
 ---
 

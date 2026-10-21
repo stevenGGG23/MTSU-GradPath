@@ -119,9 +119,15 @@ def parse_units(items: list) -> list:
       course  {"code", "with": [other codes taken together], "notes": [...]}
       choice  {"options": [course/text units]}
       text    {"text", "hours": [lo, hi]}
+      pool    {"text", "hours", "options": [course units]} -- a "Choose from
+              the following (4 hours)" line partway down a list and the
+              courses after it; the courses above it stay required
     """
     units: list = []
     pending = None  # "OR" / "AND"
+    pool = None  # open "choose from the following" list
+    bundle = None  # option collecting the courses after "text OR"
+    ends_with_or = False
 
     def last_course(unit):
         if unit["kind"] == "choice":
@@ -129,13 +135,29 @@ def parse_units(items: list) -> list:
         return unit if unit["kind"] == "course" else None
 
     for item in items or []:
+        if item.get("sep") or "op" in item:
+            bundle = None
+        m = _CODE_AT_START.match(item.get("text") or "")
+        if m and store.course(m.group(1)):
+            # "AGBS 4150 - Agricultural Policy (3 hours)" written as text
+            item = {"course": m.group(1)}
         if item.get("sep"):
             pending = None
+            if pool is not None and pool["options"]:
+                pool = None
             continue
         if "op" in item:
             pending = item["op"] if units else None
             continue
         if "note" in item:
+            hours = _choose_hours(item["note"])
+            if hours:
+                # "Choose 6 hours from:" heading the courses below it
+                pool = {"kind": "pool", "text": item["note"].rstrip(": "), "hours": [hours, hours], "options": [],
+                        "count": _choose_count(item["note"])}
+                units.append(pool)
+                pending = None
+                continue
             if units:
                 units[-1].setdefault("notes", []).append(item["note"])
             continue
@@ -147,10 +169,38 @@ def parse_units(items: list) -> list:
                 # "(3 credit hours may be counted in the True Blue Core)"
                 if units:
                     units[-1].setdefault("notes", []).append(item["text"] or "")
+                if re.search(r"\bOR\s*$", item["text"]):
+                    pending = "OR"  # "JOUR 3580 (1 hour) OR JOUR 4000"
                 continue
-            unit = {"kind": "text", "text": item["text"], "hours": item["hours"]}
+            ends_with_or = bool(re.search(r"\bOR\s*$", item["text"]))
+            # "MUAP 2000-2999 ( ) OR": drop the empty "( )" left where the
+            # catalog page had a footnote, and the trailing OR
+            clean = re.sub(r"\s*\(\s*\)|\s*\bOR\s*$", "", item["text"]).strip() or item["text"]
+            unit = {"kind": "text", "text": clean, "hours": item["hours"]}
+            pool = None
+            if _CHOOSE_START.match(item["text"]):
+                inline = list(dict.fromkeys(_CODE_IN_TEXT.findall(item["text"])))
+                if inline:
+                    # "Choose one: MATH 1010, MATH 1630, ... or MATH 1910" names
+                    # its own options; the courses after it are separate
+                    units.append({"kind": "pool", "text": item["text"], "hours": item["hours"],
+                                  "options": [{"kind": "course", "code": c, "with": []} for c in inline]})
+                    pending = None
+                    continue
+                if len(item["text"]) < 120:
+                    pool = {"kind": "pool", "text": item["text"], "hours": item["hours"], "options": []}
+                    units.append(pool)
+                    pending = None
+                    continue
         else:
             text = item.get("text", "")
+            hours = _choose_hours(text) if not _CODE_IN_TEXT.search(text) else None
+            if hours:
+                pool = {"kind": "pool", "text": text.rstrip(": "), "hours": [hours, hours], "options": [],
+                        "count": _choose_count(text)}
+                units.append(pool)
+                pending = None
+                continue
             if pending == "OR" and units and len(text) < 120:
                 unit = {"kind": "text", "text": text, "hours": None}
             else:
@@ -159,29 +209,134 @@ def parse_units(items: list) -> list:
                 pending = None
                 continue
 
+        if pending is None and unit["kind"] == "course":
+            # "PHYS 2110 PHYS 2111" with no AND between: the lab goes with it
+            host = (pool["options"][-1] if pool is not None and pool["options"]
+                    else last_course(units[-1]) if units and pool is None else None)
+            if host is not None and _is_lab_of(unit["code"], host["code"]):
+                host["with"].append(unit["code"])
+                host.setdefault("loose", []).append(unit["code"])
+                continue
+        if pool is not None and pool.get("or_chain") and pending is None:
+            # "Choose from: A or B or C" then a course with no "or" in front:
+            # the list is over ("HIST 2010 or ... HIST 2065", then "HIST 3010")
+            pool = None
+        if pool is not None:
+            if pending == "AND" and pool["options"] and unit["kind"] == "course":
+                pool["options"][-1]["with"].append(unit["code"])
+            elif unit["kind"] == "course":
+                if pending == "OR":
+                    pool["or_chain"] = True
+                pool["options"].append(unit)
+            pending = None
+            continue
         if pending == "AND" and units and unit["kind"] == "course":
             target = last_course(units[-1])
             if target is not None:
                 target["with"].append(unit["code"])
                 pending = None
                 continue
+        if pending is None and bundle is not None and unit["kind"] == "course":
+            # "MUAP 2000-2999 (4 hours) OR MUS 1510 MUS 1550 MUS 2530 MUS 2540":
+            # the courses after the OR, up to the next break, are one option
+            bundle["with"].append(unit["code"])
+            continue
+        bundle = None
         if pending == "OR" and units:
             prev = units[-1]
             if prev["kind"] == "choice":
                 prev["options"].append(unit)
             else:
                 units[-1] = {"kind": "choice", "options": [prev, unit]}
+            if prev["kind"] == "text" and unit["kind"] == "course":
+                bundle = unit
             pending = None
             continue
         units.append(unit)
-        pending = None
+        pending = "OR" if unit["kind"] == "text" and ends_with_or else None
+    # A "choose" line with nothing listed under it is just an hours line
+    # (its options are in a sub-list)
+    # A lab paired above that ended up as a plain required course goes back
+    # to its own row (it's planned as its own 0-credit line); inside a
+    # choice it stays with its lecture
+    split = []
+    for unit in units:
+        loose = unit.pop("loose", None) if unit["kind"] == "course" else None
+        if loose:
+            unit["with"] = [c for c in unit["with"] if c not in loose]
+            split.append(unit)
+            split.extend({"kind": "course", "code": c, "with": []} for c in loose)
+        else:
+            split.append(unit)
+    units[:] = split
+    for unit in units:
+        for opt in unit.get("options", []):
+            opt.pop("loose", None)
+            for inner in opt.get("options", []):
+                inner.pop("loose", None)
+    for i, unit in enumerate(units):
+        unit.pop("or_chain", None)
+        count = unit.pop("count", None)
+        if unit["kind"] == "pool" and not unit["options"]:
+            units[i] = {"kind": "text", "text": unit["text"], "hours": unit["hours"]}
+        elif unit["kind"] == "pool" and count:
+            # "Choose one:" from 4-credit lecture+lab pairs is 4 hours, not 3
+            each = sorted(h for h in (_unit_hours(o) for o in unit["options"]) if h)
+            if each:
+                hours = sum(each[:count])
+                unit["hours"] = [hours, hours]
     return units
+
+
+_CODE_AT_START = re.compile(r"^\s*([A-Z]{2,4} \d{4}[A-Z]?)\s+[-–]\s+\w")
+_CODE_IN_TEXT = re.compile(r"\b([A-Z]{2,4} \d{4}[A-Z]?)\b")
+_CHOOSE_START = re.compile(r"^\s*(choose|chosen|select|pick|complete one|take one|one of|two of|three of|from the following|at least)\b", re.I)
+_CHOOSE_HEADING = re.compile(
+    r"(^|[-–:]\s*|\band\s+)(choose|select|take|pick)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\b"
+    r"|^\s*(choose|select)\s+\d+.*\bfrom\b",
+    re.I,
+)
+
+
+def _choose_hours(text: str):
+    """Hours in a pick-list heading partway down a list -- "Choose one:",
+    "Take two of the following:", "Choose 9 hours (3 courses) from the
+    following:", "Guided Electives - choose three courses from the
+    following" -- else None."""
+    if not text or len(text) > 120 or not _CHOOSE_HEADING.search(text):
+        return None
+    if re.search(r"\bup to\b|\bmay\b", text, re.I):
+        return None  # "Students may complete up to ..." is optional
+    return section_hours({"name": text})
+
+
+def _choose_count(text: str):
+    """2 for "Choose two:" / "Take two of the following" (a course count with
+    no hours stated), else None."""
+    if re.search(r"\bhours?\b", text, re.I):
+        return None
+    m = re.search(r"\b(choose|select|take|pick)\s+(\d+|" + "|".join(_NUM_WORDS) + r")\b", text, re.I)
+    if not m:
+        return None
+    raw = m.group(2).lower()
+    return _NUM_WORDS[raw] if raw in _NUM_WORDS else int(raw)
+
+
+def _is_lab_of(code: str, lecture: str) -> bool:
+    """PHYS 2111 is the lab of PHYS 2110."""
+    a, b = code.split(), lecture.split()
+    return (len(a) == len(b) == 2 and a[0] == b[0] and a[1].isdigit() and b[1].isdigit()
+            and b[1].endswith("0") and int(a[1]) == int(b[1]) + 1)
+
+
+def _counts_in_core(unit) -> bool:
+    return any(re.search(r"True Blue Core|\bTBC\b", n or "") for n in unit.get("notes", []))
 
 
 def _unit_codes(unit) -> list:
     if unit["kind"] == "course":
         return [unit["code"], *unit["with"]]
-    if unit["kind"] == "choice":
+    if unit["kind"] in ("choice", "pool"):
         return [c for opt in unit["options"] for c in _unit_codes(opt)]
     return []
 
@@ -193,7 +348,7 @@ def _unit_hours(unit) -> float:
         hours = [_unit_hours(o) for o in unit["options"]]
         hours = [h for h in hours if h]
         return min(hours) if hours else 0
-    if unit["kind"] == "text" and unit.get("hours"):
+    if unit["kind"] in ("text", "pool") and unit.get("hours"):
         return unit["hours"][0]
     return 0
 
@@ -354,7 +509,7 @@ class _Builder:
             self.tbc_overlap[area] = self.tbc_overlap.get(area, 0) + _credits(code)
 
     # ── one section ──
-    def convert_section(self, sec, role, curriculum_extra):
+    def convert_section(self, sec, role, curriculum_extra, parent=None):
         rows: list = []
         label = _clean_label(sec["name"])
         H = section_hours(sec)
@@ -372,7 +527,7 @@ class _Builder:
         unit_text = " ".join(u.get("text", "") for u in units if u["kind"] == "text")
 
         listed = sum(_unit_hours(u) for u in units)
-        has_courses = any(u["kind"] in ("course", "choice") for u in units)
+        has_courses = any(u["kind"] in ("course", "choice", "pool") for u in units)
         choose_hint = bool(_CHOOSE_WORDS.search(text) or _CHOOSE_WORDS.search(sec["name"]))
 
         # A paragraph that merely mentions hours ("Interdisciplinary minors
@@ -412,10 +567,19 @@ class _Builder:
 
         # "Choose/select ... from" wording makes a pool even when the listed
         # courses alone don't reach the hours (more options may follow in
-        # sibling lists); otherwise listing well over the hours does
+        # sibling lists); otherwise listing well over the hours does. Courses
+        # marked "(may be counted in the True Blue Core)" don't count toward
+        # the section's own hours, and "16-20 hours" allows up to 20.
+        own_hours = sum(_unit_hours(u) for u in units if not _counts_in_core(u))
+        top = H + (sec["hours"][1] - sec["hours"][0]) if sec.get("hours") and H is not None else H
+        # A pick-list lists well over its hours (9 hours from 38 courses); a
+        # requirement list that only runs a little over -- track alternatives,
+        # ensembles "may be taken for 0 credit" -- is still a requirement list
         is_pool = has_courses and H is not None and (
-            (choose_hint and (listed > H + 0.5 or not any(u["kind"] == "text" for u in units)))
-            or listed > H + 2
+            (choose_hint and (listed > H + 0.5 or not any(u["kind"] in ("text", "pool") for u in units)))
+            or own_hours > max(top + 2, top * 1.4)
+            # "Approved BIA Electives (9 hours)" listing four courses: pick three
+            or (re.search(r"\belectives?\b", sec["name"], re.I) and own_hours > top + 0.5)
         )
         if is_pool:
             options = [c for u in units for c in _unit_codes(u) if _credits(c)]
@@ -453,6 +617,11 @@ class _Builder:
                             self.overlap_counted.add(key)
                             self.tbc_overlap[area] = self.tbc_overlap.get(area, 0) + h
                         break
+            elif unit["kind"] == "pool":
+                h = unit["hours"][0]
+                codes = [c for c in _unit_codes(unit) if _credits(c)]
+                self.add_generic(f"{label}: choose {_nice(h)} hours", h, options=codes, rows=rows, role=role,
+                                 suggestions=[store.label(c) for c in codes[:3]] + (["…"] if len(codes) > 3 else []))
             elif unit["kind"] == "text" and unit.get("hours"):
                 h = unit["hours"][0]
                 if self.kind == "major" and self._is_major_elective(unit["text"]):
@@ -468,8 +637,16 @@ class _Builder:
                         self.text_generic.add(gid)
 
         # Listed less than the section's hours -> the rest is an hours requirement
-        if H is not None and has_courses and listed < H - 1.5:
-            rest = H - listed
+        # -- unless sections beside it carry those hours: "Major Requirements
+        # (45)" = Core 15 + Methods 3 + Concentration 27 + Comparative 6 +
+        # Electives 6 adds up to 12 too many exactly when the concentration's
+        # 27 includes the two lists after it
+        rest = H - listed if H is not None else 0
+        if parent is not None and parent.get("hours") and rest > 1.5:
+            siblings = sum(section_hours(c) or 0 for c in parent.get("children", []))
+            if abs(siblings - parent["hours"][0] - rest) < 0.5:
+                rest = 0
+        if H is not None and has_courses and listed < H - 1.5 and rest > 1.5:
             words = text or unit_text
             if self.kind == "major" and self._is_major_elective(sec["name"] + " " + words):
                 self.ud_hours += rest
@@ -616,7 +793,7 @@ class _Builder:
                 role = "supporting"
             else:
                 role = "core"
-            rows = self.convert_section(sec, role, curriculum_extra)
+            rows = self.convert_section(sec, role, curriculum_extra, parent)
             if rows:
                 self.display.append({"label": _clean_label(name), "role": role, "rows": rows})
 

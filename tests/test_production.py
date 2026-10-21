@@ -94,7 +94,7 @@ def test_rate_limited_page_still_has_a_valid_csp(monkeypatch):
     monkeypatch.setattr(limiter, "enabled", True)
     c = client()
     resp = None
-    for _ in range(80):
+    for _ in range(400):
         resp = c.get("/prerequisites", environ_base={"REMOTE_ADDR": "203.0.113.9"})
         if resp.status_code == 429:
             break
@@ -164,3 +164,31 @@ def test_unreachable_database_is_not_retried_on_every_plan(monkeypatch):
         resp = client().post("/", data=PLAN)
         assert resp.status_code == 200
     assert len(calls) == 1
+
+
+def test_rate_limit_fits_a_classroom_on_one_network(monkeypatch):
+    """A lab full of students shares one public address: 40 of them loading
+    the page and generating a plan in the same minute must all get through."""
+    from app import limiter
+    monkeypatch.setattr(limiter, "enabled", True)
+    limiter.reset()
+    c = client()
+    for _ in range(40):
+        assert c.get("/", environ_base={"REMOTE_ADDR": "198.51.100.7"}).status_code == 200
+        assert c.get("/courses.json", environ_base={"REMOTE_ADDR": "198.51.100.7"}).status_code == 200
+        assert c.post("/", data=PLAN, environ_base={"REMOTE_ADDR": "198.51.100.7"}).status_code == 200
+    limiter.reset()
+
+
+def test_render_counts_each_visitor_separately(monkeypatch):
+    """Behind Cloudflare, two students arriving through the same edge server
+    still get their own allowance."""
+    import app as app_module
+    monkeypatch.setenv("RENDER", "true")
+    with app_module.app.test_request_context("/", headers={"CF-Connecting-IP": "203.0.113.50"},
+                                             environ_base={"REMOTE_ADDR": "172.68.0.1"}):
+        assert app_module._client_ip() == "203.0.113.50"
+    monkeypatch.delenv("RENDER")
+    with app_module.app.test_request_context("/", headers={"CF-Connecting-IP": "203.0.113.50"},
+                                             environ_base={"REMOTE_ADDR": "172.68.0.1"}):
+        assert app_module._client_ip() == "172.68.0.1"  # header ignored off Render

@@ -139,6 +139,11 @@ def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     if code in override and (cfg.get("catalog_driven") or code_prefix != cfg.get("prefix")):
         return set(override[code]) | set(cfg.get("prereq_map", {}).get(code, set()))
     universe = plan_universe(cfg)
+    if cfg.get("catalog_driven") and code in catalog:
+        # Elective picks on a catalog major: every prerequisite the plan also
+        # schedules, whatever its prefix (MUS 3130 waits for MUTH 2120)
+        return _trim_to_plan(set(catalog[code].get("prereqs", set())) | set(cfg.get("prereq_map", {}).get(code, ())),
+                             code, cfg, universe)
     if code_prefix == cfg.get("prefix"):
         return _trim_to_plan(_effective_prereqs(
             code, catalog, cfg.get("prereq_map", {}), cfg.get("prereq_override_map", {}), cfg["prefix"]
@@ -178,6 +183,7 @@ PREREQUISITE_MAP = {
 }
 
 TARGET_HOURS_PER_TERM = 15
+MAX_HOURS_PER_TERM = 17  # only when a plan would otherwise run past its last term
 
 # When supporting course prerequisites are outside the CSCI catalog information
 SUPPORTING_PREREQUISITE_MAP = {
@@ -540,7 +546,7 @@ def _course_item(
 def _build_generic_queue(remaining_map: Dict[str, Dict[str, object]]) -> List[Dict[str, object]]:
     queue = []
 
-    for generic_id in sorted(remaining_map):
+    for generic_id in remaining_map:
         info = remaining_map[generic_id]
         label = info["label"]
         hours = info["hours"]
@@ -688,7 +694,9 @@ def generate_plan(
         + sum(h for _, _, h, _ in cfg_generic)
     )
     elective_total = max(cfg["total_hours"] - fixed_hours, 0)
-    all_generic = cfg_generic + [(ELECTIVES_GENERIC_ID, "General elective", elective_total, ["Any elective course"])]
+    # Queue order is scheduling order: gen-ed (Written Communication first),
+    # then the program's own pick-lists, then free electives last
+    all_generic = cfg["tbc_generic"] + cfg["supporting_generic"]
 
     remaining_map = {}
     for gid, label, hours, suggestions in all_generic:
@@ -706,7 +714,31 @@ def generate_plan(
             "hours": shortfall,
             "suggestions": ["Choose with your advisor"],
         }
+    entered = clamp_hours(generic_hours.get(ELECTIVES_GENERIC_ID, 0), elective_total)
+    if elective_total - entered > 0:
+        remaining_map[ELECTIVES_GENERIC_ID] = {"label": "General elective", "hours": elective_total - entered,
+                                               "suggestions": ["Any elective course"]}
     generic_queue = _build_generic_queue(remaining_map)
+
+    # How many terms each course's chain of later courses needs: a course
+    # that unlocks four more in sequence has to start early, one that
+    # unlocks nothing can wait for a term with room
+    chain_codes = required_codes | supporting_codes
+    dependents: Dict[str, Set[str]] = {}
+    for code in chain_codes:
+        for pre in _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set()):
+            if pre in chain_codes:
+                dependents.setdefault(pre, set()).add(code)
+    chain_len: Dict[str, int] = {}
+
+    def _chain(code, path=()):
+        if code in chain_len:
+            return chain_len[code]
+        if code in path:
+            return 1  # a prerequisite loop; _break_cycles normally prevents these
+        length = 1 + max((_chain(d, path + (code,)) for d in dependents.get(code, ())), default=0)
+        chain_len[code] = length
+        return length
 
     plan = {}
     idle_terms = 0
@@ -715,7 +747,11 @@ def generate_plan(
         pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
         return bool(pool or supporting_remaining or generic_queue)
 
-    for term_index in range(1, target_terms + 1):
+    # Skipped summers don't use up any of the terms asked for
+    term_index = 0
+    terms_done = 0
+    while terms_done < target_terms:
+        term_index += 1
         semester_label = term_label(term_index, start_season, start_year)
         if not _work_left():
             break
@@ -725,6 +761,8 @@ def generate_plan(
                 "label": "No classes planned this term (summer skipped)",
             }]
             continue
+        terms_done += 1
+        terms_left = target_terms - terms_done + 1  # including this one
 
         term_items = []
         hours_used = 0
@@ -736,8 +774,17 @@ def generate_plan(
         term_season, term_year = semester_label.split()
         term_year = int(term_year)
 
+        # A term may go up to MAX_HOURS_PER_TERM only when the plan is behind
+        # (the work left won't fit the remaining terms at the usual load)
+        work_left = (
+            sum(_hrs(c) for c in set(_remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)))
+            + sum(_hrs(c) for c in supporting_remaining)
+            + sum(chunk["hours"] for chunk in generic_queue)
+        )
+        term_cap = MAX_HOURS_PER_TERM if work_left > terms_left * TARGET_HOURS_PER_TERM else TARGET_HOURS_PER_TERM
+
         def _fits(hrs):
-            return not hours_used or hours_used + hrs <= TARGET_HOURS_PER_TERM
+            return not hours_used or hours_used + hrs <= term_cap
 
         def _labs_ready(code):
             """This lecture's labs that still need scheduling (and can be)."""
@@ -776,34 +823,63 @@ def generate_plan(
         cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
         remaining_required_now = {code for code in required_codes if code not in current_completed}
 
-        # Major and concentration courses (and electives) whose prerequisites are met
-        for code in sorted_course_codes(cs_pool):
-            if _prereqs_satisfied(code, current_completed) and _offered(code, term_season, term_year):
-                _try(code)
+        def _ready(code):
+            if code in supporting_remaining and code not in cs_pool:
+                # Supporting courses: prereqs from the course's own catalog
+                # entry plus any the config adds (e.g. PHYS 2120 needs
+                # PHYS 2110 *and* MATH 1910)
+                prereqs = _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
+                ok = prereqs.issubset(current_completed)
+            else:
+                ok = _prereqs_satisfied(code, current_completed)
+            return ok and _offered(code, term_season, term_year)
 
-        # Add supporting courses whose prerequisites are satisfied and which
-        # are actually offered this term (checked against the course's own
-        # major's config -- see _offered()). Prereqs come from the course's
-        # own home major (via _full_prereqs), not just this major's
-        # possibly-incomplete supporting_prereq_map entry for it -- e.g. a
-        # Chemistry student needs PHYS 2120's real PHYS 2110 *and* MATH 1910
-        # requirements, not just whichever one CHEM_CONFIG's team happened
-        # to write down.
-        for code in list(supporting_remaining):
-            prereqs = _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
-            if prereqs.issubset(current_completed) and _offered(code, term_season, term_year):
+        # Courses on a long prerequisite chain first (they set the
+        # graduation date), then the rest by course number
+        candidates = sorted(
+            set(cs_pool) | set(supporting_remaining),
+            key=lambda c: (-_chain(c), c.split()[-1], c),
+        )
+
+        # Leave room each term for an even share of the gen-ed and other
+        # requirement rows, so they don't all pile up at the end. A course
+        # whose chain needs every remaining term goes in regardless.
+        generic_left = sum(chunk["hours"] for chunk in generic_queue)
+        reserve = min(generic_left, -(-generic_left // terms_left)) if terms_left else 0
+        course_room = TARGET_HOURS_PER_TERM - reserve
+
+        def _fill_generic():
+            """Requirement rows in queue order, skipping any that don't fit.
+            Free electives only take room no other row can use."""
+            nonlocal hours_used
+            leftover = []
+            for chunk in generic_queue:
+                if chunk["id"] == ELECTIVES_GENERIC_ID and any(
+                    c["id"] != ELECTIVES_GENERIC_ID and c not in term_items for c in generic_queue
+                ) and hours_used >= TARGET_HOURS_PER_TERM - 3:
+                    leftover.append(chunk)
+                elif _fits(chunk["hours"]):
+                    term_items.append(chunk)
+                    hours_used += chunk["hours"]
+                else:
+                    leftover.append(chunk)
+            generic_queue[:] = leftover
+
+        for code in candidates:
+            if not _ready(code):
+                continue
+            critical = _chain(code) >= terms_left - 1
+            if critical or hours_used + _hrs(code) <= course_room:
+                _try(code)
+        _fill_generic()
+        # Room left over (few requirement rows remain): more courses, then rows
+        for code in candidates:
+            if code not in newly_completed and _ready(code):
                 _try(code)
 
         # Fills remaining space with requirement rows, skipping any piece
         # that doesn't fit rather than stopping at it
-        leftover = []
-        for chunk in generic_queue:
-            if _fits(chunk["hours"]):
-                term_items.append(chunk)
-                hours_used += chunk["hours"]
-            else:
-                leftover.append(chunk)
-        generic_queue[:] = leftover
+        _fill_generic()
 
         if not term_items:
             # Nothing can be taken this term (e.g. a summer with no offerings,

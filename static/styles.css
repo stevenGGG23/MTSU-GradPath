@@ -1701,6 +1701,12 @@ footer a {
     white-space: nowrap;
 }
 
+.plan-item-prereq {
+    background: #e0e7ff;
+    color: #3730a3;
+    cursor: help;
+}
+
 .cs-course-offered {
     display: block;
     width: fit-content;

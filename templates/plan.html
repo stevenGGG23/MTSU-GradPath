@@ -226,6 +226,7 @@
               {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
               <span class="plan-item-title">{{ item.title }}</span>
               {% if item.offered %}<span class="plan-item-offered" title="From MTSU's class schedules for recent terms">{{ item.offered }}</span>{% endif %}
+              {% if item.check_prereq %}<span class="plan-item-offered plan-item-prereq" title="{{ item.check_prereq }}">check prereq</span>{% endif %}
               {% if item.suggestion %}<span class="plan-item-suggestion">e.g. {{ item.suggestion }}</span>{% endif %}
             </div>
             {% if item.hours %}<span class="plan-item-hours">{{ item.hours }}</span>{% endif %}

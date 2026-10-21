@@ -186,3 +186,85 @@ def test_physiology_requires_general_chemistry(tmp_path):
         pytest.skip("catalog export missing")
     required = {c for k in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg[k]}
     assert {"CHEM 1110", "CHEM 1120", "MATH 1910"} <= required
+
+
+# ── Catalog list layouts (each one a shape a real MTSU page uses) ────────────
+
+def _codes(units, kind=None):
+    return [u.get("code") for u in units if kind is None or u["kind"] == kind]
+
+
+def test_choose_line_partway_down_a_list_keeps_the_courses_above_it_required():
+    # Aerospace, Professional Pilot Concentration: 16 required AERO courses,
+    # then "Choose from the following" (4 hours) and the options
+    units = cp.parse_units([
+        {"course": "AERO 1230"}, {"course": "AERO 2010"}, {"sep": True},
+        {"text": "Choose from the following", "hours": [4, 4]},
+        {"course": "AERO 3080"}, {"course": "AERO 3202"}, {"course": "AERO 3205"},
+    ])
+    assert _codes(units, "course") == ["AERO 1230", "AERO 2010"]
+    pool = units[-1]
+    assert pool["kind"] == "pool" and pool["hours"] == [4, 4]
+    assert [o["code"] for o in pool["options"]] == ["AERO 3080", "AERO 3202", "AERO 3205"]
+
+
+def test_choose_heading_without_hours_counts_its_courses():
+    # "Choose two:" (Computer Science, AI concentration) and "Choose one of
+    # the following:" over 4-credit lecture+lab pairs (Speech-Language Pathology)
+    two = cp.parse_units([{"course": "CSCI 4350"}, {"sep": True}, {"note": "Choose two:"},
+                          {"course": "CSCI 3350"}, {"course": "CSCI 4330"}, {"course": "CSCI 4410"}])
+    assert two[0] == {"kind": "course", "code": "CSCI 4350", "with": []}
+    assert two[1]["kind"] == "pool" and two[1]["hours"] == [6, 6]
+    one = cp.parse_units([{"note": "Choose one of the following:"},
+                          {"course": "EXMP 1000"}, {"op": "AND"}, {"course": "EXMP 1001"}, {"op": "OR"},
+                          {"course": "MATH 1910"}])
+    assert one[0]["kind"] == "pool" and one[0]["hours"] == [4, 4]
+
+
+def test_or_list_under_a_choose_line_ends_at_the_next_plain_course():
+    # History: "Choose from: HIST 2010 or HIST 2020 or ..." then HIST 3010 or 3011 (required)
+    units = cp.parse_units([
+        {"text": "Choose from", "hours": [6, 6]},
+        {"course": "OTHR 2000"}, {"op": "OR"}, {"course": "OTHR 2100"}, {"op": "OR"}, {"course": "OTHR 2200"},
+        {"text": "NOTE: Six credit hours may be counted in the True Blue Core."},
+        {"course": "EXMP 3000"}, {"op": "OR"}, {"course": "EXMP 3100"},
+    ])
+    assert units[0]["kind"] == "pool" and len(units[0]["options"]) == 3
+    assert units[1]["kind"] == "choice" and _codes(units[1]["options"]) == ["EXMP 3000", "EXMP 3100"]
+
+
+def test_choose_line_that_names_its_own_courses_does_not_swallow_the_next_ones():
+    # Agribusiness: "Choose one: MATH 1010, MATH 1630, ..." then "INFS 2200 or INFS 3100"
+    units = cp.parse_units([
+        {"text": "Choose one: MATH 1530 , MATH 1910", "hours": [3, 4]},
+        {"course": "OTHR 2000"}, {"op": "OR"}, {"course": "OTHR 2100"},
+    ])
+    assert units[0]["kind"] == "pool" and _codes(units[0]["options"]) == ["MATH 1530", "MATH 1910"]
+    assert units[1]["kind"] == "choice"
+
+
+def test_lab_written_right_after_its_lecture_stays_with_it_in_a_choice():
+    # Chemistry: "PHYS 2010 and PHYS 2011 or PHYS 2110 PHYS 2111"
+    units = cp.parse_units([
+        {"course": "EXMP 1000"}, {"op": "AND"}, {"course": "EXMP 1001"}, {"op": "OR"},
+        {"course": "EXMP 2000"}, {"course": "EXMP 2001"},
+    ])
+    assert len(units) == 1 and units[0]["kind"] == "choice"
+    assert units[0]["options"][1] == {"kind": "course", "code": "EXMP 2000", "with": ["EXMP 2001"]}
+    # On its own line in a required list the lab keeps its own row
+    plain = cp.parse_units([{"course": "EXMP 2000"}, {"course": "EXMP 2001"}])
+    assert _codes(plain) == ["EXMP 2000", "EXMP 2001"]
+
+
+def test_courses_counted_in_the_gen_ed_core_do_not_make_a_list_look_like_a_pick_list(example_catalog):
+    # Chemistry "Supporting Courses (16-20 hours)" lists 28 hours because
+    # MATH 1910 and the physics sequence also count in the True Blue Core
+    section = {"name": "Supporting Courses (7-8 hours)", "hours": [7, 8], "items": [
+        {"course": "MATH 1910"}, {"note": "(may be counted in the True Blue Core)"},
+        {"course": "EXMP 1000"}, {"course": "EXMP 2000"}, {"course": "MATH 1530"},
+    ]}
+    b = cp._Builder({**MAJOR, "sections": []}, "x", "major")
+    b.prefix = "EXMP"
+    b.convert_section(section, "supporting", [])
+    assert {"MATH 1910", "EXMP 1000", "EXMP 2000", "MATH 1530"} <= set(b.required)
+    assert not b.generic
