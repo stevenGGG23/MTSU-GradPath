@@ -385,12 +385,32 @@ Prices as of late 2026 — confirm on the providers' pricing pages before budget
 | **Hosting — Vercel Hobby** (now) | Yes — what GradPath runs on today | **$0** (see [Vercel: Hobby vs Pro](#vercel-hobby-vs-pro) for its limits) |
 | **Hosting — Vercel Pro** (when needed) | When the upgrade triggers below are hit, or when MTSU adopts it officially | **$20/month** platform fee, which includes one team seat and $20 of monthly usage credit (1 TB data transfer and 10 million edge requests included); extra seats $20/month each |
 | *or* Hosting — Render | Alternative to Vercel | Starter $7/month (0.5 CPU, 512 MB) is enough for light use; **Standard $25/month** (1 CPU, 2 GB) recommended for registration weeks |
-| Domain name | Optional | ~$10–20/year for a name like `gradpath.app` — or **free** if MTSU provides a subdomain such as `gradpath.mtsu.edu` |
+| Domain name | Optional | ~$10–25/year (see [Domain prices](#domain-prices) below) — or **free** if MTSU provides a subdomain such as `gradpath.mtsu.edu` |
 | Database (Supabase) | **No** | $0 — can be deleted (see above) |
 | GitHub repo + automatic data refresh | Yes | $0 — Actions are free for public repos; a private repo's free monthly minutes easily cover the ~80 minutes the refresh uses per month |
 | Uptime monitor on `/healthz` | Recommended | $0 on free tiers (e.g. UptimeRobot) |
 
-**Total today: $0** on Vercel Hobby. **After upgrading: about $20/month** (Vercel Pro) plus an optional ~$15/year domain — or $0 if MTSU hosts it on its own servers and subdomain.
+**Total today: $0** on Vercel Hobby. **After upgrading: about $20/month** (Vercel Pro) plus an optional ~$24/year domain (`mtsu-gradpath.org`, $9.99 the first year) — or $0 if MTSU hosts it on its own servers and subdomain.
+
+### Domain prices
+
+Checked on GoDaddy for `mtsu-gradpath` (October 2026):
+
+![GoDaddy search results and prices for mtsu-gradpath domains](docs/screenshots/07-godaddy-domain-prices.png)
+
+| Domain | First year | Regular yearly price (what you pay after the first year) |
+|---|---|---|
+| **mtsu-gradpath.org** | $9.99 | $23.99 |
+| mtsupath.com | $0.01 (only with a 3-year term) | $22.99 |
+| mtsu-gradpath.co | $0.01 (only with a 3-year term) | $59.99 |
+| mtsu-gradpath.online | $0.01 (only with a 2-year term) | $54.99 |
+| mtsu-gradpath.club | $4.99 | $29.99 |
+| mtsu-gradpath.it.com | $6.99 | $49.99 |
+
+- **Budget for the regular price, not the first-year deal.** The cheap first-year prices are promotions, and some only apply when paying for several years up front. `mtsu-gradpath.org` is the best fit: about **$24/year** after a $9.99 first year.
+- **Skip the extras** (domain privacy upsells, website builder, logo maker) — Vercel and Render provide HTTPS and hosting.
+- **"MTSU" is the university's name.** Using it in a domain should have MTSU's OK; the cleanest option is asking MTSU for a free subdomain like `gradpath.mtsu.edu`, which also looks official to students.
+- Prices change often; check before buying.
 
 ## Vercel: Hobby vs Pro
 
