@@ -173,6 +173,8 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Tested live on Vercel Hobby** — ~70 ms per page or plan, and 150 simultaneous students all served (2–3 s while it scales up). Free Hobby plan for now; [upgrade to Pro](#when-to-upgrade-to-pro) when usage or official adoption calls for it.
+- **Automatic refresh confirmed** — the first scheduled-style run downloaded MTSU's class schedule, passed its checks, and published the new data to both Render and Vercel with no one touching it.
 - **Schedule Planner hand-off** — *Build my schedule* opens MTSU's Schedule Planner with the next term's courses ready to copy, to pick sections by time, days and open seats.
 - **Checklist filters and hover details** — filter by All / Required / Fall / Spring / Summer or text; hovering a course shows credits, offering terms, required status and minimum grade.
 - **Hands-off refresh hardened** — a real catalog change can't block the automatic refresh, old links follow renamed programs, and an unreachable database is no longer retried on every request.
@@ -227,6 +229,7 @@ Everything below passed on the current version (October 2026). The automated sui
 | **Randomized fuzzing** — random majors, second majors, minors, completed courses and typed hours | 4,000+ generated plans | 0 crashes, 0 plan warnings, no course planned twice or re-planned after completion, no audit over 100% |
 | **Real-browser trials** (headless Chrome clicking through the site) — checklist, typed-in courses, step-3 hours, minors, summers, back-and-forth navigation | 135 sessions, ~100 majors, ~1,070 courses selected, ~210 hour entries | Every selection showed up correctly in *Requirement details*; selections restored on return; 0 JavaScript or security-policy errors |
 | **Load test** (gunicorn as in the `Procfile`, 2 CPUs) | Up to 40 simultaneous requests | ~170–200 requests/s, 95% under 0.5 s, 0 errors |
+| **Live test on Vercel Hobby** (the free plan the site runs on) — simulated students loading the planner, generating plans, and all arriving at once | 40 page loads and plans at normal pace + 150 simultaneous requests | Pages and plans in **~70 ms** (95% under 120 ms); **150 / 150** simultaneous requests served, with a 2–3 s wait while Vercel scaled up; no crashes |
 | Independent code reviews | Correctness review and security/production review | All confirmed findings fixed and covered by tests |
 
 Problems found during this testing (for example, 0-credit labs counted as 3 credits, plans stopping at the first empty term, a course past a full requirement disappearing) were fixed, and each now has a test so it can't come back.
@@ -304,7 +307,9 @@ Measured with `gunicorn` exactly as in the `Procfile` (threaded workers), on a *
 | Generate a plan (`POST /`) | 10 | ~160 / s | 58 ms | 111 ms | 0 |
 | Generate a plan (`POST /`) | 40 | ~170 / s | 231 ms | 447 ms | 0 |
 
-A student actively using the site makes roughly one request every 15–30 seconds, so **one small 2-CPU server handles about 2,500–3,500 students using it at the same moment** with responses under half a second. The course list (`/courses.json`) and static files are cached by the browser, so they barely add load. On Vercel each request runs in its own serverless instance and capacity scales out automatically — the limit becomes the plan's usage allowance, not the code. No database is involved in serving pages, so there's no database bottleneck either.
+A student actively using the site makes roughly one request every 15–30 seconds, so **one small 2-CPU server handles about 2,500–3,500 students using it at the same moment** with responses under half a second.
+
+**On the live site (Vercel Hobby, the free plan):** pages and plans came back in about **70 ms**, and when **150 simulated students hit it at the same instant, all 150 were served** — the first ones waited 2–3 seconds while Vercel started extra copies of the app, then it was fast again. Details and the Hobby-vs-Pro comparison are in [Vercel: Hobby vs Pro](#vercel-hobby-vs-pro). The course list (`/courses.json`) and static files are cached by the browser, so they barely add load. On Vercel each request runs in its own serverless instance and capacity scales out automatically — the limit becomes the plan's usage allowance, not the code. No database is involved in serving pages, so there's no database bottleneck either.
 
 ## Do we still need a database (Supabase)?
 
