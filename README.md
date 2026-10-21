@@ -321,14 +321,61 @@ Prices as of late 2026 — confirm on the providers' pricing pages before budget
 
 | Item | Needed? | Cost |
 |---|---|---|
-| **Hosting — Vercel Pro** (recommended) | Yes. Vercel's free Hobby plan is meant for personal, non-commercial projects | **$20/month** platform fee, which includes one team seat and $20 of monthly usage credit (1 TB data transfer and 10 million edge requests included); extra seats $20/month each |
+| **Hosting — Vercel Hobby** (now) | Yes — what GradPath runs on today | **$0** (see [Vercel: Hobby vs Pro](#vercel-hobby-vs-pro) for its limits) |
+| **Hosting — Vercel Pro** (when needed) | When the upgrade triggers below are hit, or when MTSU adopts it officially | **$20/month** platform fee, which includes one team seat and $20 of monthly usage credit (1 TB data transfer and 10 million edge requests included); extra seats $20/month each |
 | *or* Hosting — Render | Alternative to Vercel | Starter $7/month (0.5 CPU, 512 MB) is enough for light use; **Standard $25/month** (1 CPU, 2 GB) recommended for registration weeks |
 | Domain name | Optional | ~$10–20/year for a name like `gradpath.app` — or **free** if MTSU provides a subdomain such as `gradpath.mtsu.edu` |
 | Database (Supabase) | **No** | $0 — can be deleted (see above) |
 | GitHub repo + automatic data refresh | Yes | $0 — Actions are free for public repos; a private repo's free monthly minutes easily cover the ~80 minutes the refresh uses per month |
 | Uptime monitor on `/healthz` | Recommended | $0 on free tiers (e.g. UptimeRobot) |
 
-**Total: about $20–25/month plus an optional ~$15/year domain — or $0 if MTSU hosts it on its own servers and subdomain.**
+**Total today: $0** on Vercel Hobby. **After upgrading: about $20/month** (Vercel Pro) plus an optional ~$15/year domain — or $0 if MTSU hosts it on its own servers and subdomain.
+
+## Vercel: Hobby vs Pro
+
+**Plan: stay on the free Hobby plan for now, and move to Pro when one of the upgrade triggers below is hit.**
+
+### Measured on the live Vercel site (October 21, 2026, Hobby plan)
+
+| Test | Result |
+|---|---|
+| Planner page, normal use (20 requests) | median **70 ms**, 95th percentile 120 ms, 0 errors |
+| Generate a plan, normal use (20 requests) | median **70 ms**, 95th percentile 89 ms, max 440 ms |
+| Sudden spike — 150 requests at the same instant | **150 / 150 succeeded**; median 2.1 s, 95th percentile 3.4 s while Vercel started extra copies of the app ("cold starts"), then fast again |
+| First request after the site has been idle | ~3.9 s (one cold start), then ~0.2 s |
+
+The same code on a fixed 2-CPU server (see [Capacity](#capacity)) handled ~170–200 requests per second with 0 errors.
+
+### Hobby vs Pro, side by side
+
+| | **Hobby (free) — current** | **Pro ($20/month)** |
+|---|---|---|
+| Students using it **at the same moment** | Several thousand — scales automatically to Vercel's ceiling of 30,000 concurrent executions | Several thousand — **same** 30,000 ceiling |
+| Speed in normal use | ~70 ms per page or plan | Same |
+| Sudden spikes (e.g. registration opens) | ~2–3 s wait on the first requests while it scales up | Same scaling behaviour |
+| **Monthly budget** | 1 million function requests and 4 CPU-hours per month — roughly **50,000–100,000 student visits per month** (estimate*) | No hard cap — usage past the included $20 credit is billed |
+| **If the budget runs out** | **The whole site is paused until next month** | Keeps running; spend alerts at 75% of the credit |
+| Allowed for an official university service | No — Hobby is for personal, non-commercial use | Yes |
+| Who can manage it | One personal account | A team — MTSU staff can own it; projects can be transferred in |
+| Max memory / time per request | 2 GB / 300 s | 4 GB / 800 s (GradPath uses far less) |
+| Builds at once | 1 | 12 |
+
+\* Estimate, not a measured limit: assumes about 10 requests per student visit (pages, a plan or two, static files) and the measured server cost per request. Check current figures on [vercel.com/docs/limits](https://vercel.com/docs/limits).
+
+**In short: Pro doesn't make GradPath handle more people at once — Hobby already handles thousands. Pro removes the monthly cap that would shut the site off during a busy month, and it's the plan an official MTSU service is supposed to be on.**
+
+### When to upgrade to Pro
+
+Upgrade as soon as any of these is true:
+
+- **Usage reaches about 75% of a Hobby limit** in a month (Vercel dashboard → *Usage*: function invocations, Active CPU, or data transfer). For example, it's halfway through the month and already past 50%.
+- **A registration period is coming** and real student traffic is expected — a paused site during registration is the worst-case failure.
+- **MTSU adopts GradPath officially**, or a department links to it — that's no longer personal, non-commercial use.
+- **The project moves to an MTSU-owned team account** (see [Handing GradPath over to MTSU](#handing-gradpath-over-to-mtsu)).
+
+Upgrading is a plan change on the Vercel team (*Settings* → *Billing*) — no code changes, no downtime, same URL.
+
+**Cheap way to stretch either plan further:** `vercel.json` currently sends every request — including CSS, images and the course list — through the Python function. Letting Vercel serve `/static/` directly would roughly halve function requests. Test it on a preview deployment before switching.
 
 ## Handing GradPath over to MTSU
 
@@ -360,7 +407,7 @@ Everything needed to run the site is in this repository; nothing depends on a te
 
 1. **Run the refresh once by hand** to confirm it works end to end: *Actions* → *Refresh catalog and schedule* → *Run workflow* (leave "full catalog" unchecked; ~5 minutes). A green run plus a "Refresh catalog/schedule data" commit proves it.
 2. **Get MTSU ITD's OK** on using the public catalog API and class schedule this way (or an official feed).
-3. **Hosting:** move to Vercel Pro (or Render Standard) before registration weeks — or to MTSU's servers with a `gradpath.mtsu.edu` subdomain. Test a preview deploy on the new host first.
+3. **Hosting:** stay on Vercel Hobby (free) for now and upgrade to Pro when a [trigger](#when-to-upgrade-to-pro) is hit — at the latest before a registration period with real student traffic — or move to MTSU's servers with a `gradpath.mtsu.edu` subdomain.
 4. **Retire Supabase** (remove `DATABASE_URL`, then delete the project).
 5. **Spot-check majors** with advisors in each department and report anything that doesn't match the catalog.
 6. **Later features:** saved plans and accounts, older catalog years for students who started earlier, a Degree Works import, and a short user guide.
@@ -400,7 +447,7 @@ Originated from a course proposal (Statement of Scope, July 15, 2026) under grou
 - ~~Replace the public-widget scraper~~ — done: one-time export of the full catalog through the Acalog widget API (no key needed), refreshed automatically.
 - ~~Course-offering terms for every subject~~ — done: from MTSU's public class schedule, refreshed weekly.
 - Confirm with MTSU ITD that using the public catalog API and class schedule this way is OK, or switch to whatever official feed ITD provides (only `catalog_fetch.py` / `schedule_fetch.py` would change).
-- Move off Render's free tier (Vercel Pro or Render Standard, or MTSU hosting) — see [Costs](#costs).
+- Host on Vercel Hobby now; upgrade to Vercel Pro when usage or official adoption calls for it — see [Vercel: Hobby vs Pro](#vercel-hobby-vs-pro).
 - User guide for students/advisors.
 - Pursue MTSU adoption and hosting sponsorship — see [Handing GradPath over to MTSU](#handing-gradpath-over-to-mtsu).
 
