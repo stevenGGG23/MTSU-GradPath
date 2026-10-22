@@ -1009,13 +1009,98 @@ footer a {
         gap: 0.35rem;
     }
 
+    /* Plan rows stay one row (tag | course | hours); the course text wraps
+       inside its own column instead of pushing the tag and hours onto
+       separate lines */
     .plan-item-row {
-        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.6rem;
         padding: 0.6rem 0.85rem;
     }
 
+    .plan-item-tag {
+        margin-top: 0.1rem;
+    }
+
+    .plan-item-main {
+        flex: 1 1 0;
+        gap: 0.15rem 0.4rem;
+    }
+
     .plan-item-hours {
-        margin-left: 2.65rem; /* aligns under plan-item-main, past the tag column */
+        margin-top: 0.1rem;
+    }
+
+    .plan-item-main .plan-item-offered {
+        margin-left: 0;
+    }
+
+    /* Header buttons: stacked full-width instead of one row off the screen */
+    .plan-actions {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .plan-actions .btn {
+        width: 100%;
+    }
+
+    /* Credit-hours chart: bars share the width so a normal plan fits
+       without sideways scrolling (long plans still scroll inside the box) */
+    .term-chart {
+        gap: 0.5rem;
+        padding: 1rem 0.75rem 0.75rem;
+    }
+
+    .term-bar-col {
+        flex: 1 0 40px;
+        width: auto;
+    }
+
+    .term-bar-track {
+        height: 90px;
+        width: 22px;
+    }
+
+    /* Long course names wrap instead of running off the card */
+    .completed-badges .badge {
+        white-space: normal;
+        text-align: left;
+        line-height: 1.3;
+    }
+
+    /* Requirement details: hour badges line up on the right */
+    #auditAccordion .accordion-button {
+        padding: 0.85rem 1rem;
+        gap: 0.5rem;
+    }
+
+    #auditAccordion .accordion-button .badge {
+        margin-left: auto !important;
+        flex-shrink: 0;
+    }
+
+    #auditAccordion .accordion-button::after {
+        margin-left: 0;
+    }
+
+    #auditAccordion .accordion-body {
+        padding: 0.75rem 1rem;
+    }
+
+    /* Prerequisite graph: keep it readable and let it scroll sideways
+       inside its box rather than shrinking to fit the phone */
+    .prereq-graph-wrap {
+        padding: 0.75rem;
+    }
+
+    .personal-mermaid {
+        min-height: 0;
+        margin: 0;
+    }
+
+    .personal-mermaid svg {
+        min-width: 640px;
     }
 }
 

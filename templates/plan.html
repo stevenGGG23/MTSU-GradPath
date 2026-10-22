@@ -183,7 +183,7 @@
   <div class="mb-4">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-check2-all text-primary"></i>Completed courses</h4>
     {% if completed %}
-    <div class="d-flex flex-wrap gap-2">
+    <div class="d-flex flex-wrap gap-2 completed-badges">
       {% for course in completed %}
       <span class="badge bg-secondary">{{ course }}</span>
       {% endfor %}
