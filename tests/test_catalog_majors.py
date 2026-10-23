@@ -503,3 +503,35 @@ def test_plan_flags_a_prerequisite_from_outside_the_plan():
     }).get_data(as_text=True)
     # ACTG 3000 needs ENGL 1010, which the plan covers with a gen-ed row
     assert 'class="plan-item-offered plan-item-prereq" title="Prerequisite (catalog):' in html
+
+
+_PART = _re.compile(r"^(.*\S)\s+(VI|IV|V|I{1,3}|[1-6])$")
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_every_catalog_major_takes_numbered_sequences_in_order(key):
+    """Calculus I before II, Flight Lab I before II, Physics I before II --
+    never the same term -- from scratch and from random partial progress."""
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    required = sorted({code for k in ("core_courses", "concentration_courses", "supporting_courses") for code, _, _ in cfg[k]})
+    rng = random.Random(key)
+    for trial in range(3):
+        done = set(rng.sample(required, k=len(required) // 4)) if trial and required else set()
+        plan = generate_plan(done, {}, 8, trial == 2, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+        term_of = {item["code"]: t for t, (term, items) in enumerate(plan.items()) if not term.startswith("Remaining")
+                   for item in items if item.get("kind") == "course"}
+        out_of_order = [(earlier, code) for code in term_of for earlier in catalog_store.previous_part(code)
+                        if earlier in term_of and term_of[earlier] >= term_of[code]]
+        assert not out_of_order, f"{cfg['name']}: {out_of_order}"
+
+
+def test_flight_labs_are_never_in_the_same_term():
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    for done in (set(), {"AERO 1010", "AERO 1020", "AERO 2230"}):
+        plan, _ = _plan_for(cfg, completed=done, terms=8)
+        term_of = {i["code"]: t for t, (term, items) in enumerate(plan.items()) for i in items if i.get("kind") == "course"}
+        labs = [term_of[c] for c in ("AERO 2201", "AERO 3203", "AERO 3204", "AERO 3261") if c in term_of]
+        assert labs == sorted(labs) and len(set(labs)) == len(labs)

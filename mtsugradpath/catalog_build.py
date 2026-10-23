@@ -148,7 +148,10 @@ def parse_requisites(text: str) -> dict:
     """
     # "BIOL 3250 / BIOL 3251" is a lecture/lab pair -- the lecture stands for both
     text = _PAIR_RE.sub(r"\1", text)
-    prereq_text = _clause(text, r"\bPrerequisites?(?!\s+or)")
+    # "HIST 1010 is NOT a prerequisite for HIST 1020" / "a prerequisite to
+    # True Blue Core courses" mention the word without being the course's
+    # own prerequisite line
+    prereq_text = _clause(text, r"\bPrerequisites?(?!\s+(?:or|for|to)\b)")
     coreq_text = _clause(text, r"\b(?:Pre-?\s*or\s*corequisites?|Corequisites?)")
     # "Prerequisites: X; corequisite: Y" -- the coreq part isn't a prereq
     prereq_text = re.split(r";?\s*\b(?:pre-?\s*or\s*)?co-?requisites?\b", prereq_text, flags=re.I)[0]

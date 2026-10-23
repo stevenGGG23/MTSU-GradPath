@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import defaultdict
@@ -27,7 +28,8 @@ RUNTIME_FILE = DATA_DIR / "catalog.json"
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
-_state: dict = {"path": None, "mtime": None, "data": None, "by_prefix": None, "search": None, "checked": 0.0}
+_state: dict = {"path": None, "mtime": None, "data": None, "by_prefix": None, "search": None,
+               "sequence": None, "checked": 0.0}
 
 
 def _candidate_file() -> Path | None:
@@ -98,7 +100,7 @@ def _load() -> None:
         by_prefix = defaultdict(list)
         for code in data["courses"]:
             by_prefix[code.split()[0]].append(code)
-        _state.update(path=path, mtime=mtime, data=data, by_prefix=dict(by_prefix), search=None)
+        _state.update(path=path, mtime=mtime, data=data, by_prefix=dict(by_prefix), search=None, sequence=None)
         # Converted program configs depend on this data
         from . import catalog_programs
         catalog_programs.reset_cache()
@@ -167,16 +169,58 @@ def search_index() -> list:
     return _state["search"]
 
 
+_PART_TITLE = re.compile(r"^(.*\S)\s+(VI|IV|V|I{1,3}|[1-6])$")
+_ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
+
+
+def previous_part(code: str) -> list:
+    """The course(s) one step earlier in a numbered sequence: same subject,
+    same title, part number one lower -- "Calculus II" -> "Calculus I",
+    "Professional Pilot Flight Lab II" -> "... Flight Lab I". Built from
+    the catalog's titles, so new sequences are picked up automatically."""
+    data()
+    if _state["sequence"] is None:
+        parts: dict = {}
+        for other, info in courses().items():
+            m = _PART_TITLE.match((info.get("title") or "").strip())
+            if m:
+                n = _ROMAN.get(m.group(2)) or int(m.group(2))
+                key = (other.split()[0], m.group(1).lower())
+                parts.setdefault(key, {}).setdefault(n, []).append(other)
+        def independent(earlier, later):
+            # "HIST 1010 is NOT a prerequisite for HIST 1020": either order
+            desc = (course(earlier) or {}).get("desc") or ""
+            return bool(re.search(r"not\s+a\s+prerequisite\s+for\s+" + re.escape(later), desc, re.I))
+
+        sequence = {}
+        for by_part in parts.values():
+            for n, codes in by_part.items():
+                for c in codes:
+                    earlier = [e for e in by_part.get(n - 1, []) if not independent(e, c)]
+                    if earlier:
+                        sequence[c] = earlier
+        _state["sequence"] = sequence
+    return _state["sequence"].get(code, [])
+
+
 def resolve_prereqs(code: str, prefer: set | None = None) -> set:
     """A course's prerequisites as one set: every required code, plus one
     pick from each "A or B" group -- the option in *prefer* if there is one
-    (e.g. one the student completed or the program requires), else the first."""
+    (e.g. one the student completed or the program requires), else the first.
+
+    Part II of a numbered sequence also waits for part I, even where the
+    catalog's prerequisite line doesn't name it (Flight Lab II asks for a
+    "Private Pilot Certificate", which Flight Lab I earns). Like any other
+    prerequisite, the planner only enforces it when both are on the plan."""
     info = course(code) or {}
     result = set(info.get("prereqs", []))
     prefer = prefer or set()
     for group in info.get("prereq_any", []):
         picked = next((c for c in group if c in prefer), None)
         result.add(picked or group[0])
+    earlier = previous_part(code)
+    if earlier and not result & set(earlier):
+        result.add(next((c for c in earlier if c in prefer), earlier[0]))
     return result
 
 

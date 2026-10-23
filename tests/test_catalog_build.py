@@ -160,3 +160,9 @@ def test_may_be_taken_concurrently_only_softens_that_course():
     req = _req("Prerequisites: CHEM 1110 and MATH 1730 (may be taken concurrently). Text")
     assert req["prereqs"] == ["CHEM 1110"]
     assert req["coreqs"] == ["MATH 1730"]
+
+
+def test_a_sentence_mentioning_prerequisite_for_is_not_a_prerequisite_line():
+    # "HIST 1010 is NOT a prerequisite for HIST 1020" -- the surveys go in either order
+    assert parse_requisites("A survey to 1715. HIST 1010 is NOT a prerequisite for HIST 1020 . TBC: CCE")["prereqs"] == []
+    assert parse_requisites("Prerequisite: For Honors Fellows only; permission of department required.")["prereq_text"]

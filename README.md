@@ -162,6 +162,8 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Numbered sequences stay in order** — Part II of any sequence (Calculus II, Physics II, Professional Pilot Flight Lab II, Studio II…) is always planned in a later term than Part I, even when the catalog's prerequisite line names a certificate instead of the course ("Private Pilot Certificate"). Found from the catalog's own course titles, so new sequences are picked up automatically; where the catalog says the order doesn't matter ("HIST 1010 is not a prerequisite for HIST 1020") it's left alone.
+- **Plans match the catalog pages** — "Choose … from the following" lists partway down a section no longer swallow the required courses above them (Professional Pilot, Pre-Law, Theatre and ~60 other majors), "A, B, or C" prerequisites are read as one choice, and plans fill 8 real semesters (skipped summers don't count) with gen-ed spread through the plan. A *check prereq* tag shows the catalog's wording when a course needs something outside the plan.
 - **Tested live on Vercel Hobby** — ~70 ms per page or plan, and 150 simultaneous students all served (2–3 s while it scales up). Free Hobby plan for now; [upgrade to Pro](#when-to-upgrade-to-pro) when usage or official adoption calls for it.
 - **Automatic refresh confirmed** — the first scheduled-style run downloaded MTSU's class schedule, passed its checks, and published the new data to both Render and Vercel with no one touching it.
 - **Schedule Planner hand-off** — *Build my schedule* opens MTSU's Schedule Planner with the next term's courses ready to copy, to pick sections by time, days and open seats.
@@ -207,11 +209,12 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 1,533 tests | **1,532 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 1,759 tests | **1,758 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
 | Every major planned over 8 semesters — no course in the same term as, or before, a prerequisite on the plan | All 223 | 223 / 223 |
+| Numbered sequences (Calculus I → II, Flight Lab I → II, Physics I → II…) always in later terms, from scratch and from random progress | All 223 × 3 plans | 223 / 223 (before the fix: out of order in 18 majors) |
 | Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
 | Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
 | Plans from random partial progress keep prerequisite order and never re-plan finished courses | 32 majors × 5 random students | All passed |
@@ -255,7 +258,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>1,533 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>1,759 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]
@@ -493,7 +496,8 @@ Everything needed to run the site is in this repository; nothing depends on a te
 3. **Hosting:** stay on Vercel Hobby (free) for now and upgrade to Pro when a [trigger](#when-to-upgrade-to-pro) is hit — at the latest before a registration period with real student traffic — or move to MTSU's servers with a `gradpath.mtsu.edu` subdomain.
 4. **Retire Supabase** (remove `DATABASE_URL`, then delete the project).
 5. **Spot-check majors** with advisors in each department and report anything that doesn't match the catalog.
-6. **Later features:** saved plans and accounts, older catalog years for students who started earlier, a Degree Works import, and a short user guide.
+6. **Degree Works system test (planned):** before a release, check every major and minor against Degree Works — same required courses, same choices, same hours — so each program is verified by hand-level comparison before it's pushed. Not started yet.
+7. **Later features:** saved plans and accounts, older catalog years for students who started earlier, a Degree Works import, and a short user guide.
 
 ---
 

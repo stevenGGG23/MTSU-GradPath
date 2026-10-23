@@ -268,3 +268,31 @@ def test_courses_counted_in_the_gen_ed_core_do_not_make_a_list_look_like_a_pick_
     b.convert_section(section, "supporting", [])
     assert {"MATH 1910", "EXMP 1000", "EXMP 2000", "MATH 1530"} <= set(b.required)
     assert not b.generic
+
+
+def test_part_two_of_a_numbered_sequence_waits_for_part_one(tmp_path, monkeypatch):
+    # Flight Lab II's catalog line asks for a "Private Pilot Certificate" (earned
+    # in Flight Lab I), not the course -- the titles still say which comes first
+    courses = {
+        "FLY 2201": {"title": "Pilot Flight Lab I", "credits": 2},
+        "FLY 3203": {"title": "Pilot Flight Lab II", "credits": 2, "prereq_text": "Private Pilot Certificate"},
+        "FLY 3204": {"title": "Pilot Flight Lab III", "credits": 2},
+        "HIS 1010": {"title": "Survey I", "credits": 3, "desc": "HIS 1010 is NOT a prerequisite for HIS 1020."},
+        "HIS 1020": {"title": "Survey II", "credits": 3},
+        "OTH 1020": {"title": "Pilot Flight Lab II", "credits": 2},
+    }
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"catalog": {"name": "T"}, "courses": courses, "programs": []}))
+    monkeypatch.setenv("GRADPATH_CATALOG_FILE", str(path))
+    store.reload()
+    try:
+        assert store.resolve_prereqs("FLY 3203") == {"FLY 2201"}
+        assert store.resolve_prereqs("FLY 3204") == {"FLY 3203"}
+        assert store.resolve_prereqs("FLY 2201") == set()
+        # The catalog says the order doesn't matter: no rule
+        assert store.resolve_prereqs("HIS 1020") == set()
+        # Same title in another subject isn't the same sequence
+        assert store.resolve_prereqs("OTH 1020") == set()
+    finally:
+        monkeypatch.delenv("GRADPATH_CATALOG_FILE")
+        store.reload()
