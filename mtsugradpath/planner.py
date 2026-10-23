@@ -136,14 +136,20 @@ def _full_prereqs(code: str, cfg: dict, catalog: dict) -> Set[str]:
     # Catalog-generated configs (and minors/second majors folded into a plan)
     # carry a resolved prerequisite set for the courses they plan
     override = cfg.get("prereq_override_map", {})
-    if code in override and (cfg.get("catalog_driven") or code_prefix != cfg.get("prefix")):
-        return set(override[code]) | set(cfg.get("prereq_map", {}).get(code, set()))
     universe = plan_universe(cfg)
-    if cfg.get("catalog_driven") and code in catalog:
-        # Elective picks on a catalog major: every prerequisite the plan also
-        # schedules, whatever its prefix (MUS 3130 waits for MUTH 2120)
-        return _trim_to_plan(set(catalog[code].get("prereqs", set())) | set(cfg.get("prereq_map", {}).get(code, ())),
-                             code, cfg, universe)
+    if cfg.get("catalog_driven"):
+        # Catalog programs: the program's own resolved prerequisites, plus
+        # every catalog prerequisite that's also on this plan, whatever its
+        # prefix -- with a second major or minor folded in, a prerequisite
+        # the other program brings (MATH 1730 before MATH 1910) counts too.
+        # (The catalog's prerequisite graph has no loops; any it ever has
+        # are dropped in catalog_store.)
+        prereqs = set(override.get(code, ())) | set(cfg.get("prereq_map", {}).get(code, ()))
+        if code in catalog:
+            prereqs |= {p for p in catalog[code].get("prereqs", set()) if p in universe}
+        return prereqs
+    if code in override and code_prefix != cfg.get("prefix"):
+        return set(override[code]) | set(cfg.get("prereq_map", {}).get(code, set()))
     if code_prefix == cfg.get("prefix"):
         return _trim_to_plan(_effective_prereqs(
             code, catalog, cfg.get("prereq_map", {}), cfg.get("prereq_override_map", {}), cfg["prefix"]
@@ -492,6 +498,56 @@ def _remaining_pool(completed: Set[str], catalog: Dict[str, Dict[str, object]], 
     return remaining_required | elective_pool
 
 
+def _consistent_coreqs(universe: Set[str], prereqs_of, catalog: Dict[str, Dict[str, object]]) -> Dict[str, Set[str]]:
+    """{course: corequisites that can go in its term or earlier}, limited to
+    *universe*, with any corequisite that contradicts the prerequisites left out.
+
+    Each link is an ordering rule: a prerequisite must come strictly before,
+    a corequisite no later. A corequisite link "c no later than a" is
+    impossible when a path from *a* back to *c* passes through a strictly-
+    before step (then c would have to come after a)."""
+    strict = {code: {p for p in prereqs_of(code) if p in universe} for code in universe}
+    coreqs = {
+        code: {c for c in ((catalog.get(code) or {}).get("coreqs") or ()) if c in universe and c != code}
+        for code in universe
+    }
+    # Edges x -> y: x comes no later than y (coreq) / strictly before y (prereq)
+    later_than: Dict[str, List] = {}
+    for code in universe:
+        for p in strict[code]:
+            later_than.setdefault(p, []).append((code, True))
+        for c in coreqs[code]:
+            later_than.setdefault(c, []).append((code, False))
+
+    def forces_after(start, target):
+        """Some path start -> ... -> target uses a strictly-before step."""
+        seen = set()
+        stack = [(start, False)]
+        while stack:
+            node, used_strict = stack.pop()
+            if node == target and used_strict:
+                return True
+            if (node, used_strict) in seen:
+                continue
+            seen.add((node, used_strict))
+            for nxt, is_strict in later_than.get(node, ()):
+                stack.append((nxt, used_strict or is_strict))
+        return False
+
+    # One-way links are checked (and dropped) before links two courses list
+    # for each other -- "take together" is the more deliberate statement
+    links = sorted(
+        ((code, c) for code in universe for c in coreqs[code]),
+        key=lambda link: (link[0] in coreqs.get(link[1], ()), link),
+    )
+    for code, c in links:
+        # Link: c no later than code. Impossible if code forces c later.
+        if forces_after(code, c):
+            coreqs[code].discard(c)
+            later_than[c] = [(n, st) for n, st in later_than.get(c, []) if not (n == code and not st)]
+    return {code: cs for code, cs in coreqs.items() if cs}
+
+
 # Function that returns elective courses that remain unfinished (degree-cfg aware)
 def _remaining_pool_cfg(
     completed: Set[str],
@@ -605,7 +661,10 @@ def generate_plan(
     degree_cfg: dict = None,
     catalog: Dict[str, Dict[str, object]] = None,
     course_grades: Dict[str, str] = None,
+    earned_hours: float = None,
 ) -> Dict[str, List[Dict[str, object]]]:
+    """*earned_hours*: credit hours the student has already earned (for class
+    standing). Defaults to the hours of *completed_courses*."""
 
     cfg = degree_cfg or CS_CONFIG
     prefix = cfg["prefix"]
@@ -682,6 +741,10 @@ def generate_plan(
         return True
 
     current_completed = set(completed_courses)
+    # Hours already earned, for class standing (sophomore 30, junior 60,
+    # senior 90 -- MTSU's classification by earned hours)
+    if earned_hours is None:
+        earned_hours = sum(course_hours(c, catalog) or 0 for c in current_completed)
     supporting_remaining = [code for code, _, _ in supporting_courses_list if code not in current_completed]
 
     # Build generic queue for this major
@@ -720,6 +783,18 @@ def generate_plan(
                                                "suggestions": ["Any elective course"]}
     generic_queue = _build_generic_queue(remaining_map)
 
+    # Corequisites the plan can honor. The catalog's corequisite lines are
+    # occasionally contradictory (IDES 3330 lists IDES 4100 as a corequisite,
+    # while IDES 4100 needs IDES 3320, which needs IDES 3330 alongside), so a
+    # corequisite link that would force a course both before and after
+    # another is dropped -- one at a time, in a fixed order, keeping the rest
+    coreqs_of = _consistent_coreqs(
+        set(_remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude))
+        | set(supporting_remaining),
+        lambda code: _full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set()),
+        catalog,
+    )
+
     # How many terms each course's chain of later courses needs: a course
     # that unlocks four more in sequence has to start early, one that
     # unlocks nothing can wait for a term with room
@@ -730,6 +805,11 @@ def generate_plan(
             if pre in chain_codes:
                 dependents.setdefault(pre, set()).add(code)
     chain_len: Dict[str, int] = {}
+    map_year = cfg.get("map_year") or {}
+
+    def _level(code):
+        number = code.split()[-1]
+        return min(max(int(number[0]), 1), 4) if number[:1].isdigit() else 4
 
     def _chain(code, path=()):
         if code in chain_len:
@@ -803,27 +883,52 @@ def generate_plan(
                 supporting_remaining.remove(code)
 
         def _try(code):
-            """Schedule *code* (with its labs) if it fits this term."""
+            """Schedule *code* -- with its labs and every corequisite not yet
+            taken ("X or simultaneous completion of X"), which go in the same
+            term or earlier, never later -- if they can all go in together."""
             if code in newly_completed:
                 return
-            lecture = lecture_of.get(code)
-            if lecture and lecture not in current_completed and lecture not in newly_completed:
-                return  # a lab waits for its lecture
-            labs = _labs_ready(code)
-            # Lecture and lab go together, so both must be ready this term
-            if any(not _full_prereqs(lab, cfg, catalog) <= current_completed
-                   or not _offered(lab, term_season, term_year) for lab in labs):
+            group, stack = [], [code]
+            while stack:
+                member = stack.pop()
+                if member in group:
+                    continue
+                group.append(member)
+                stack += [lab for lab in _labs_ready(member) if lab not in group]
+                stack += [co for co in coreqs_of.get(member, ())
+                          if co in plan_codes and co not in current_completed
+                          and co not in newly_completed and co not in group]
+            for member in group:
+                lecture = lecture_of.get(member)
+                if lecture and lecture not in current_completed and lecture not in newly_completed \
+                        and lecture not in group:
+                    return  # a lab waits for its lecture
+                if member == code:
+                    continue
+                if member in lecture_of:
+                    ok = (_full_prereqs(member, cfg, catalog) <= current_completed
+                          and _offered(member, term_season, term_year))
+                else:
+                    ok = _ready(member)
+                if not ok:
+                    return  # part of the group can't go this term: wait
+            if not _fits(sum(_hrs(member) for member in group)):
                 return
-            if not _fits(_hrs(code) + sum(_hrs(lab) for lab in labs)):
-                return
-            _schedule(code)
-            for lab in labs:
-                _schedule(lab)
+            for member in group:
+                _schedule(member)
 
         cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
         remaining_required_now = {code for code in required_codes if code not in current_completed}
+        plan_codes = set(cs_pool) | set(supporting_remaining)
+        relax_standing = False
+
+        def _standing_ok(code):
+            # "Junior standing" etc. from the catalog's prerequisite line
+            return relax_standing or (catalog.get(code) or {}).get("min_hours", 0) <= earned_hours
 
         def _ready(code):
+            if not _standing_ok(code):
+                return False
             if code in supporting_remaining and code not in cs_pool:
                 # Supporting courses: prereqs from the course's own catalog
                 # entry plus any the config adds (e.g. PHYS 2120 needs
@@ -834,12 +939,24 @@ def generate_plan(
                 ok = _prereqs_satisfied(code, current_completed)
             return ok and _offered(code, term_season, term_year)
 
-        # Courses on a long prerequisite chain first (they set the
-        # graduation date), then the rest by course number
-        candidates = sorted(
-            set(cs_pool) | set(supporting_remaining),
-            key=lambda c: (-_chain(c), c.split()[-1], c),
-        )
+        # Order: a course that has to start now to finish on time (its
+        # prerequisite chain needs every remaining term) goes first; the rest
+        # follow MTSU's four-year map for the major (freshman-year courses
+        # before sophomore-year ...), then course level (1000s before 3000s),
+        # then longer chains -- so "Introduction to Aerospace" isn't pushed
+        # behind a 2000-level course that merely starts a longer chain.
+        # "Has to start now" only applies while finishing in the terms asked
+        # for is still possible; past that, MTSU's order is kept.
+        can_finish = work_left <= terms_left * MAX_HOURS_PER_TERM
+
+        def _critical(code):
+            return can_finish and _chain(code) >= terms_left - 1
+
+        def _priority(c):
+            critical = _critical(c)
+            return (not critical, map_year.get(c) or _level(c), _level(c), -_chain(c), c.split()[-1], c)
+
+        candidates = sorted(set(cs_pool) | set(supporting_remaining), key=_priority)
 
         # Leave room each term for an even share of the gen-ed and other
         # requirement rows, so they don't all pile up at the end. A course
@@ -865,21 +982,51 @@ def generate_plan(
                     leftover.append(chunk)
             generic_queue[:] = leftover
 
-        for code in candidates:
-            if not _ready(code):
-                continue
-            critical = _chain(code) >= terms_left - 1
-            if critical or hours_used + _hrs(code) <= course_room:
-                _try(code)
-        _fill_generic()
-        # Room left over (few requirement rows remain): more courses, then rows
-        for code in candidates:
-            if code not in newly_completed and _ready(code):
-                _try(code)
+        # Class standing from hours earned so far (30 a year). A course waits
+        # until the student is within a year of where the map (or its level)
+        # puts it -- no senior seminar in the first semester just because it
+        # lists no prerequisites -- unless it has to start now
+        standing = 1 + int(earned_hours // 30)
 
-        # Fills remaining space with requirement rows, skipping any piece
-        # that doesn't fit rather than stopping at it
-        _fill_generic()
+        def _in_year(code):
+            return _critical(code) or (map_year.get(code) or _level(code)) <= standing + 1
+
+        def _fill_term():
+            # Courses for the student's current year (or that must start now)
+            # go in before the gen-ed share; next year's courses use what's
+            # left of the course share
+            for code in candidates:
+                if not _ready(code) or not _in_year(code):
+                    continue
+                critical = _critical(code)
+                this_year = (map_year.get(code) or _level(code)) <= standing
+                if critical or this_year or hours_used + _hrs(code) <= course_room:
+                    _try(code)
+            _fill_generic()
+            # Room left over (few requirement rows remain): more courses, then rows
+            for code in candidates:
+                if code not in newly_completed and _ready(code) and _in_year(code):
+                    _try(code)
+
+            # Fills remaining space with requirement rows, skipping any piece
+            # that doesn't fit rather than stopping at it
+            _fill_generic()
+            # A term still light after that: a later-year course rather than
+            # an empty slot (finishing on time matters more than the ideal year)
+            if hours_used <= TARGET_HOURS_PER_TERM - 3:
+                for code in candidates:
+                    if code not in newly_completed and _ready(code):
+                        _try(code)
+
+        _fill_term()
+        if not term_items and not generic_queue and plan_codes and all(
+            (catalog.get(code) or {}).get("min_hours", 0) > earned_hours for code in plan_codes
+        ):
+            # Every course left needs more class standing than the student's
+            # recorded hours, and nothing else can add hours (likely hours
+            # earned elsewhere that weren't entered): plan them rather than stall
+            relax_standing = True
+            _fill_term()
 
         if not term_items:
             # Nothing can be taken this term (e.g. a summer with no offerings,
@@ -901,6 +1048,7 @@ def generate_plan(
 
         # Makes a course available as a prerequisite next semester
         current_completed.update(newly_completed)
+        earned_hours += hours_used
 
     remaining_items = []
 

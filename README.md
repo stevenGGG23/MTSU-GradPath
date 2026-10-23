@@ -162,6 +162,8 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Plans follow MTSU's own order** — courses are scheduled by the major's four-year map in the catalog (freshman-year courses first, then course level), so *Introduction to Aerospace* comes before *Professional Pilot I*. "Junior/senior standing" prerequisites wait for 60/90 earned hours (MTSU's class standing: sophomore 30, junior 60, senior 90), and "or simultaneous completion of X" corequisites are never planned after the course. With a second major or minor, one program's prerequisite that another program brings (MATH 1730 before MATH 1910) is honored too. All of it is read from the catalog, so it follows MTSU's changes.
+- **Full-screen prerequisite map** — the map on the plan page and the Prerequisite Map page have *Full screen*, zoom and *Fit* buttons; drag to move around a large map.
 - **Numbered sequences stay in order** — Part II of any sequence (Calculus II, Physics II, Professional Pilot Flight Lab II, Studio II…) is always planned in a later term than Part I, even when the catalog's prerequisite line names a certificate instead of the course ("Private Pilot Certificate"). Found from the catalog's own course titles, so new sequences are picked up automatically; where the catalog says the order doesn't matter ("HIST 1010 is not a prerequisite for HIST 1020") it's left alone.
 - **Plans match the catalog pages** — "Choose … from the following" lists partway down a section no longer swallow the required courses above them (Professional Pilot, Pre-Law, Theatre and ~60 other majors), "A, B, or C" prerequisites are read as one choice, and plans fill 8 real semesters (skipped summers don't count) with gen-ed spread through the plan. A *check prereq* tag shows the catalog's wording when a course needs something outside the plan.
 - **Tested live on Vercel Hobby** — ~70 ms per page or plan, and 150 simultaneous students all served (2–3 s while it scales up). Free Hobby plan for now; [upgrade to Pro](#when-to-upgrade-to-pro) when usage or official adoption calls for it.
@@ -209,12 +211,16 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 1,759 tests | **1,758 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,289 tests | **2,288 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
 | Every major planned over 8 semesters — no course in the same term as, or before, a prerequisite on the plan | All 223 | 223 / 223 |
 | Numbered sequences (Calculus I → II, Flight Lab I → II, Physics I → II…) always in later terms, from scratch and from random progress | All 223 × 3 plans | 223 / 223 (before the fix: out of order in 18 majors) |
+| "Junior/senior standing" prerequisites met and corequisites never planned after the course | All 223 | 223 / 223 (before the fix: standing missed in 76 majors) |
+| Plans follow the major's four-year map — nothing the map puts 2+ years earlier lands after a later course, no 1000-level course after a 3000/4000-level one in its subject (unless the map or the offering terms say so) | All 223 from scratch + random students | 223 / 223 (before the fix: out of order in 122 majors) |
+| Random students with minors and second majors through the real plan page — prerequisites (including ones another program brings), sequences, class standing, corequisites, map order, nothing twice | 60 in the test suite, plus 7,000+ in stress runs | 0 problems (before the fix: about 1 in 120 combined plans had a prerequisite out of order) |
+| Saved catalog vs the live catalog (fresh download of 7 programs and the flight-lab courses) | Professional Pilot, Pre-Law, Studio Art, Nursing, Theatre, Interior Architecture, Computer Science | Identical |
 | Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
 | Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
 | Plans from random partial progress keep prerequisite order and never re-plan finished courses | 32 majors × 5 random students | All passed |
@@ -258,7 +264,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>1,759 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,289 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]
@@ -487,7 +493,7 @@ Everything needed to run the site is in this repository; nothing depends on a te
 
 ## Status and next steps
 
-**Production-ready today:** every undergraduate major and minor from the official catalog; real offering terms; prerequisite-aware plans; automatic weekly/monthly data refresh with safety checks; hardened against common web attacks; 1,000+ automated tests including every major planned end to end; measured capacity of thousands of simultaneous students on a small server.
+**Production-ready today:** every undergraduate major and minor from the official catalog; real offering terms; prerequisite-aware plans; automatic weekly/monthly data refresh with safety checks; hardened against common web attacks; 2,000+ automated tests including every major planned end to end (prerequisites, class standing, corequisites and MTSU's four-year order) and random major/minor/double-major combinations; measured capacity of thousands of simultaneous students on a small server.
 
 **Next steps:**
 
@@ -506,7 +512,10 @@ Everything needed to run the site is in this repository; nothing depends on a te
 - **Unofficial.** Requirements are read automatically from the catalog. Most programs come out within a few hours of their stated total, but some catalog layouts are ambiguous (e.g. programs whose courses also satisfy gen-ed areas without saying which). Each program links to its catalog page, and the plan page says to confirm there and with an advisor.
 - **Offering terms are inferred from the last three years.** A department can change its rotation; the next posted term is always used exactly, and the weekly refresh picks up changes as schedules are posted.
 - **Programs with alternative "emphases"** (e.g. the Science minor) plan the first emphasis listed.
-- **Course notes the catalog writes in prose** ("no more than one course from the same department", "approval of the advisor") aren't enforced.
+- **Course notes the catalog writes in prose** ("no more than one course from the same department", "approval of the advisor") aren't enforced, and "or permission of instructor" alternatives aren't assumed — plans follow the standard path.
+- **Class standing is estimated from what the student enters** — checked courses plus hours typed in. Hours earned elsewhere that aren't entered make the plan treat the student as earlier in their degree.
+- **A few corequisite lines in the catalog contradict the prerequisites** (e.g. Interior Architecture: IDES 3330 lists IDES 4100 as a corequisite, but IDES 4100 needs IDES 3320, which goes with IDES 3330). The planner drops the one-way link that makes the set impossible and keeps the rest.
+- **Some degrees don't fit 8 semesters at a normal load** (e.g. Aerospace Maintenance Management is 133 hours, and some sequences only run in one season); the plan lists what's left in a *Remaining* box instead of overloading terms.
 - **Rate limiting counts per gunicorn worker** (or per serverless instance on Vercel), not globally — in-memory storage. A stricter global limit would need Redis or the host's firewall rules.
 - **Only the newest catalog year.** A student who started under an older catalog sees the newest requirements.
 - **Planner input only lasts for the browser tab** (`sessionStorage`). Saved plans tied to accounts are a future item.

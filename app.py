@@ -1,5 +1,6 @@
 import gzip
 import json
+import math
 import os
 import re
 import secrets
@@ -815,6 +816,14 @@ def _plan():
         planning_generic_hours.update(second_generic_hours)
 
     generic_hours = read_generic_hours(request.form, planning_cfg)
+    # Hours earned so far, for class standing ("junior standing" = 60):
+    # the checked-off courses plus hours typed in for requirement rows
+    # (checked courses only fill what typed hours leave open, so the two
+    # don't overlap)
+    earned_hours = sum(catalog_store.credits(code, default=3) or 0 for code in validated_completed_courses) + sum(
+        min(max(_as_float(value), 0.0), 200.0) for value in generic_hours.values()
+        if math.isfinite(_as_float(value))
+    )
 
     # Requirements that list specific courses ("Choose one: MATH 1530 or
     # BIA 2610") fill in from the courses the student checked off
@@ -913,6 +922,7 @@ def _plan():
         degree_cfg=planning_cfg,
         catalog=catalog,
         course_grades=course_grades,
+        earned_hours=earned_hours,
     )
 
     audit = build_audit(

@@ -288,6 +288,7 @@ def parse_units(items: list) -> list:
     return units
 
 
+_MAP_YEARS = {"freshman": 1, "sophomore": 2, "junior": 3, "senior": 4}
 _CODE_AT_START = re.compile(r"^\s*([A-Z]{2,4} \d{4}[A-Z]?)\s+[-–]\s+\w")
 _CODE_IN_TEXT = re.compile(r"\b([A-Z]{2,4} \d{4}[A-Z]?)\b")
 _CHOOSE_START = re.compile(r"^\s*(choose|chosen|select|pick|complete one|take one|one of|two of|three of|from the following|at least)\b", re.I)
@@ -702,6 +703,16 @@ class _Builder:
             self.alternatives_note = f"Planned with {alternatives[0]['name']}; other options are in the catalog."
         curriculum = [s for s in sections if re.match(r"curriculum|academic map", s["name"], re.I)]
 
+        # The year MTSU's four-year map puts each course in (Freshman = 1 ...
+        # Senior = 4): the department's own order, used to sequence plans
+        self.map_year = {}
+        for sec, _, _ in _walk(curriculum):
+            year = _MAP_YEARS.get((sec["name"].strip().split() or [""])[0].lower())
+            if year:
+                for u in parse_units(sec.get("items")):
+                    for code in _unit_codes(u):
+                        self.map_year.setdefault(code, year)
+
         # Main prefix: most common among the major's own (non-supporting) courses
         major_codes = Counter()
         all_codes = Counter()
@@ -889,6 +900,7 @@ class _Builder:
             "odd_year_spring_only": set(),
             "coreq_map": self.coreq_map,
             "lab_partners": lab_partners,
+            "map_year": self.map_year,
             "upper_division_prefix": self.prefix,
             "upper_division_min": 3000,
             "minor_bucket_id": self.minor_bucket,

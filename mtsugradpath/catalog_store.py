@@ -29,7 +29,7 @@ RUNTIME_FILE = DATA_DIR / "catalog.json"
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _state: dict = {"path": None, "mtime": None, "data": None, "by_prefix": None, "search": None,
-               "sequence": None, "checked": 0.0}
+               "sequence": None, "loops": None, "checked": 0.0}
 
 
 def _candidate_file() -> Path | None:
@@ -100,7 +100,8 @@ def _load() -> None:
         by_prefix = defaultdict(list)
         for code in data["courses"]:
             by_prefix[code.split()[0]].append(code)
-        _state.update(path=path, mtime=mtime, data=data, by_prefix=dict(by_prefix), search=None, sequence=None)
+        _state.update(path=path, mtime=mtime, data=data, by_prefix=dict(by_prefix), search=None, sequence=None,
+                      loops=None)
         # Converted program configs depend on this data
         from . import catalog_programs
         catalog_programs.reset_cache()
@@ -203,6 +204,60 @@ def previous_part(code: str) -> list:
     return _state["sequence"].get(code, [])
 
 
+def _loop_links() -> set:
+    """(course, prerequisite) links that sit inside a prerequisite loop
+    (A needs B, B needs A -- a catalog error). They're ignored so a plan can
+    never wait forever. The 2026-27 catalog has none."""
+    data()
+    if _state["loops"] is None:
+        graph = {}
+        for code, info in courses().items():
+            links = set(info.get("prereqs", []))
+            for group in info.get("prereq_any", []):
+                links |= set(group)
+            links |= set(previous_part(code))
+            graph[code] = {p for p in links if p in courses() and p != code}
+        # Tarjan's strongly connected components, iteratively
+        index, low, on_stack, stack, loops = {}, {}, set(), [], set()
+        counter = 0
+        for root in graph:
+            if root in index:
+                continue
+            work = [(root, iter(graph[root]))]
+            index[root] = low[root] = counter
+            counter += 1
+            stack.append(root)
+            on_stack.add(root)
+            while work:
+                node, children = work[-1]
+                for child in children:
+                    if child not in index:
+                        index[child] = low[child] = counter
+                        counter += 1
+                        stack.append(child)
+                        on_stack.add(child)
+                        work.append((child, iter(graph[child])))
+                        break
+                    if child in on_stack:
+                        low[node] = min(low[node], index[child])
+                else:
+                    work.pop()
+                    if work:
+                        low[work[-1][0]] = min(low[work[-1][0]], low[node])
+                    if low[node] == index[node]:
+                        component = set()
+                        while True:
+                            member = stack.pop()
+                            on_stack.discard(member)
+                            component.add(member)
+                            if member == node:
+                                break
+                        if len(component) > 1:
+                            loops |= {(c, p) for c in component for p in graph[c] if p in component}
+        _state["loops"] = loops
+    return _state["loops"]
+
+
 def resolve_prereqs(code: str, prefer: set | None = None) -> set:
     """A course's prerequisites as one set: every required code, plus one
     pick from each "A or B" group -- the option in *prefer* if there is one
@@ -221,11 +276,38 @@ def resolve_prereqs(code: str, prefer: set | None = None) -> set:
     earlier = previous_part(code)
     if earlier and not result & set(earlier):
         result.add(next((c for c in earlier if c in prefer), earlier[0]))
-    return result
+    loops = _loop_links()
+    return {p for p in result if (code, p) not in loops} if loops else result
+
+
+# "Junior standing", "junior or senior standing", "junior-level classification
+# or higher", "Senior status", "upper division status": the lowest class named
+_STANDING_PHRASE = re.compile(
+    r"\b(sophomore|junior|senior|upper[- ]division)(?:[- ]level)?"
+    r"(?:\s*(?:/|or|and)\s*(?:junior|senior)(?:[- ]level)?)*"
+    r"\s+(standing|classification|status|class|level)\b(?!\s+courses?)",
+    re.I,
+)
+# MTSU class standing by earned hours: sophomore 30, junior 60, senior 90
+_STANDING_HOURS = {"sophomore": 30, "junior": 60, "upper division": 60, "upper-division": 60, "senior": 90}
+
+
+def standing_hours(code: str) -> int:
+    """Earned hours a course's prerequisite line asks for through class
+    standing ("Junior standing" -> 60), or 0. A standing only "recommended"
+    doesn't count."""
+    text = (course(code) or {}).get("prereq_text") or ""
+    hours = [
+        _STANDING_HOURS[m.group(1).lower()]
+        for m in _STANDING_PHRASE.finditer(text)
+        if not re.match(r"[\s,]*(is\s+)?recommended", text[m.end():], re.I)
+    ]
+    return min(hours) if hours else 0
 
 
 def catalog_entry(code: str, prefer: set | None = None) -> dict:
-    """The planner's per-course dict: title, credits, prereqs, prereq_grades."""
+    """The planner's per-course dict: title, credits, prereqs, prereq_grades,
+    coreqs, and min_hours (class standing the course asks for)."""
     info = course(code) or {}
     return {
         "title": info.get("title", ""),
@@ -233,6 +315,7 @@ def catalog_entry(code: str, prefer: set | None = None) -> dict:
         "prereqs": resolve_prereqs(code, prefer),
         "prereq_grades": dict(info.get("min_grades", {})),
         "coreqs": set(info.get("coreqs", [])),
+        "min_hours": standing_hours(code),
     }
 
 

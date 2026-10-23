@@ -26,9 +26,22 @@
   </div>
 
   {% if node_count %}
-  <div class="prereq-graph-wrap">
-    <pre class="mermaid">{{ mermaid_source }}</pre>
+  <div class="map-viewer">
+    <div class="map-viewer-toolbar" role="toolbar" aria-label="Map controls">
+      <button type="button" class="btn btn-sm btn-primary" data-map-full aria-pressed="false"><i class="bi bi-arrows-fullscreen me-1"></i>Full screen</button>
+      <div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
+        <button type="button" class="btn btn-outline-secondary" data-map-out title="Zoom out" aria-label="Zoom out"><i class="bi bi-zoom-out"></i></button>
+        <span class="btn btn-outline-secondary disabled map-zoom-label" data-map-zoom-label>100%</span>
+        <button type="button" class="btn btn-outline-secondary" data-map-in title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in"></i></button>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-map-fit><i class="bi bi-arrows-angle-contract me-1"></i>Fit</button>
+      <span class="map-viewer-hint">Drag to move around</span>
+    </div>
+    <div class="prereq-graph-wrap">
+      <pre class="mermaid">{{ mermaid_source }}</pre>
+    </div>
   </div>
+  <script src="{{ static_url('map-viewer.js') }}" defer></script>
   {% elif not standalone %}
   <div class="alert alert-info">This program doesn't list specific required courses &mdash; its requirements are chosen from lists. See the catalog for details.</div>
   {% endif %}

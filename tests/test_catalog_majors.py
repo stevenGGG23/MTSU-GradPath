@@ -535,3 +535,195 @@ def test_flight_labs_are_never_in_the_same_term():
         term_of = {i["code"]: t for t, (term, items) in enumerate(plan.items()) for i in items if i.get("kind") == "course"}
         labs = [term_of[c] for c in ("AERO 2201", "AERO 3203", "AERO 3204", "AERO 3261") if c in term_of]
         assert labs == sorted(labs) and len(set(labs)) == len(labs)
+
+
+def _level(code):
+    number = code.split()[-1]
+    return int(number[0]) if number[:1].isdigit() else 0
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_plans_follow_the_four_year_map_from_scratch(key):
+    """Plans keep MTSU's own order: nothing the four-year map puts in an
+    earlier year lands after a course it puts two or more years later, and
+    no 1000-level course follows a 3000/4000-level course in its subject --
+    unless the map orders them that way or the course only runs in some
+    terms (fall only, odd-year springs, ...)."""
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+    term_of = {item["code"]: t for t, (term, items) in enumerate(plan.items()) if not term.startswith("Remaining")
+               for item in items if item.get("kind") == "course"}
+    year = cfg.get("map_year", {})
+    problems = []
+    for a, ta in term_of.items():
+        if catalog_store.offering_summary(a):
+            continue  # runs only in some terms: may have to wait
+        for b, tb in term_of.items():
+            if ta <= tb:
+                continue
+            if year.get(a) and year.get(b) and year[a] + 2 <= year[b]:
+                problems.append(f"{a} (map year {year[a]}) after {b} (map year {year[b]})")
+            elif (a.split()[0] == b.split()[0] and _level(a) == 1 and _level(b) >= 3
+                  and not (year.get(a) and year.get(b) and year[a] >= year[b])):
+                problems.append(f"{a} after {b}")
+    assert not problems, f"{cfg['name']}: {problems[:4]}"
+
+
+def test_introduction_to_aerospace_comes_first():
+    """A student flagged Professional Pilot I planned before Introduction to Aerospace."""
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    plan, _ = _plan_for(cfg, terms=8)
+    first = [i["code"] for i in next(iter(plan.values())) if i.get("kind") == "course"]
+    assert "AERO 1010" in first
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS[::3])
+def test_random_students_keep_the_four_year_map_order(key):
+    """Random students (some courses done, summers on or off, 4-12 terms):
+    a course the map puts 2+ years earlier never follows a later one unless
+    it can't run that term or is waiting on its own prerequisite."""
+    from mtsugradpath.planner import _offered_in_term
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    year = cfg.get("map_year", {})
+    required = sorted({code for k in ("core_courses", "concentration_courses", "supporting_courses") for code, _, _ in cfg[k]})
+    rng = random.Random("order" + key)
+    for _ in range(4):
+        done = set(rng.sample(required, k=rng.randint(0, len(required) // 2))) if required else set()
+        done = {c for c in done if cfg["prereq_override_map"].get(c, set()) <= done}
+        plan = generate_plan(done, {}, rng.choice([4, 8, 12]), rng.random() < 0.5,
+                             start_season=rng.choice(["Fall", "Spring", "Summer"]), start_year=2027,
+                             degree_cfg=cfg, catalog=catalog)
+        terms = list(plan)
+        term_of = {i["code"]: t for t, (name, items) in enumerate(plan.items()) if not name.startswith("Remaining")
+                   for i in items if i.get("kind") == "course"}
+        for a, ta in term_of.items():
+            if catalog_store.offering_summary(a):
+                continue
+            for b, tb in term_of.items():
+                if not (ta > tb and year.get(a) and year.get(b) and year[a] + 2 <= year[b]):
+                    continue
+                season, yr = terms[tb].split()
+                info = catalog_store.course(a) or {}
+                waiting = any(p in term_of and term_of[p] >= tb
+                              for p in set(catalog.get(a, {}).get("prereqs", ())) | set(catalog_store.previous_part(a)))
+                waiting = waiting or any(
+                    [g for g in group if g in term_of] and min(term_of[g] for g in group if g in term_of) >= tb
+                    for group in info.get("prereq_any", []))
+                waiting = waiting or catalog_store.standing_hours(a) > 0
+                assert waiting or not _offered_in_term(a, season, int(yr), cfg), (
+                    f"{cfg['name']} with {sorted(done)}: {a} (year {year[a]}) after {b} (year {year[b]})")
+
+
+
+def _terms_and_hours(plan, completed=(), catalog=None):
+    """{course: term index} and {course: hours earned before its term}."""
+    term_of, before = {}, {}
+    earned = sum(catalog_store.credits(c, default=3) or 0 for c in completed)
+    for t, (term, items) in enumerate(plan.items()):
+        if term.startswith("Remaining"):
+            continue
+        for item in items:
+            if item.get("kind") == "course":
+                term_of[item["code"]] = t
+                before[item["code"]] = earned
+        earned += sum(item.get("hours") or 0 for item in items)
+    return term_of, before
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_every_catalog_major_respects_class_standing_and_corequisites(key):
+    """"Junior standing" courses wait for 60 earned hours (sophomore 30,
+    senior 90), and a corequisite ("X or simultaneous completion of X") is
+    never planned after the course that needs it."""
+    from mtsugradpath.planner import _consistent_coreqs, _full_prereqs
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg, catalog=catalog)
+    term_of, before = _terms_and_hours(plan)
+    early = [(c, catalog_store.standing_hours(c), before[c]) for c in term_of
+             if before[c] < catalog_store.standing_hours(c)]
+    assert not early, f"{cfg['name']}: before the class standing it needs: {early[:4]}"
+    # Judge contradictions over every course the plan holds (the planner's
+    # own view), including any left over after the last term
+    on_plan = {item["code"] for items in plan.values() for item in items if item.get("kind") == "course"}
+    honored = _consistent_coreqs(on_plan, lambda c: _full_prereqs(c, cfg, catalog), catalog)
+    late = [(c, co) for c, cos in honored.items() for co in cos
+            if c in term_of and co in term_of and term_of[co] > term_of[c]]
+    assert not late, f"{cfg['name']}: corequisite planned after the course: {late[:4]}"
+
+
+def _plan_page_terms(html):
+    """[(term, [codes], hours)] from a plan page."""
+    import re as re_
+    cards = re_.findall(r'term-card-title">([^<]+)</span>\s*(?:<span class="badge bg-secondary">([\d.]+) cr hrs</span>)?'
+                        r'(.*?)(?=term-card-title|Your prerequisite path|$)', html, re_.S)
+    return [(name, re_.findall(r'plan-item-code">([^<]+)<', body), float(hours or 0)) for name, hours, body in cards]
+
+
+def test_partial_progress_with_minors_and_second_majors_keeps_prerequisites():
+    """Random students with a minor or two and sometimes a second major,
+    through the real plan page: prerequisites (one program's prerequisite
+    can come from another program), numbered sequences, class standing, no
+    course twice, and no warnings other than the summer-only notice."""
+    from werkzeug.datastructures import MultiDict
+    rng = random.Random(2026)
+    client = app.test_client()
+    majors, minors = sorted(catalog_majors()), [k for k, _ in picker_minors()]
+    for _ in range(60):
+        major = rng.choice(majors)
+        second = rng.choice(majors) if rng.random() < 0.4 else ""
+        picked = rng.sample(minors, k=rng.randint(1, 2))
+        pool = sorted({c for key in [major, second] if key for k in ("core_courses", "concentration_courses", "supporting_courses")
+                       for c, _, _ in catalog_majors()[key][k]})
+        done = rng.sample(pool, k=rng.randint(0, len(pool) // 3)) if pool else []
+        form = MultiDict([("major", major), ("second_major", second), ("target_semesters", str(rng.choice([6, 8, 12]))),
+                          ("start_season", rng.choice(["Fall", "Spring", "Summer"])), ("start_year", "2027"),
+                          ("completed_courses", "\n".join(done))] + [("minor", m) for m in picked]
+                         + ([("include_summer", "on")] if rng.random() < 0.5 else []))
+        html = client.post("/", data=form).get_data(as_text=True)
+        label = f"{major} + {second or '-'} + {picked} with {sorted(done)}"
+        if "Plan warning" in html:
+            warnings = html.split("Plan warning")[1].split("</ul>")[0]
+            assert warnings.count("<li") == warnings.count("only offered in summer terms"), label
+        terms = _plan_page_terms(html)
+        codes = [c for _, cs, _ in terms for c in cs]
+        assert len(codes) == len(set(codes)) and not set(codes) & set(done), label
+        term_of, before, earned = {}, {}, sum(catalog_store.credits(c, default=3) or 0 for c in done)
+        for t, (name, cs, hours) in enumerate(terms):
+            if name.startswith("Remaining"):
+                continue
+            for c in cs:
+                term_of[c], before[c] = t, earned
+            earned += hours
+        for c, t in term_of.items():
+            info = catalog_store.course(c) or {}
+            assert not [p for p in info.get("prereqs", []) if p in term_of and term_of[p] >= t], f"{label}: {c}"
+            assert not [p for p in catalog_store.previous_part(c) if p in term_of and term_of[p] >= t], f"{label}: {c}"
+            assert before[c] >= catalog_store.standing_hours(c), f"{label}: {c} needs class standing"
+
+
+@pytest.mark.parametrize("major,second", [
+    ("concrete-industry-management-concrete-contracting-concentration-bs", "computer-science-artificial-intelligence-concentration-bs"),
+    ("recording-industry-commercial-songwriting-concentration-bs", "construction-management-commercial-construction-management-concentration-bs"),
+    ("nursing-bsn", "biochemistry-bs"),
+    ("geosciences-geospatial-science-concentration-bs", "economics-bba"),
+])
+def test_double_majors_honor_each_others_prerequisites(major, second):
+    """One major's course can need a course only the other major lists
+    (MATH 1910 needs MATH 1730): the combined plan keeps that order."""
+    from werkzeug.datastructures import MultiDict
+    if major not in catalog_majors() or second not in catalog_majors():
+        pytest.skip("program not in this catalog")
+    html = app.test_client().post("/", data=MultiDict([
+        ("major", major), ("second_major", second), ("target_semesters", "8"),
+        ("start_season", "Fall"), ("start_year", "2026"),
+    ])).get_data(as_text=True)
+    term_of = {c: t for t, (name, codes, _) in enumerate(_plan_page_terms(html)) if not name.startswith("Remaining")
+               for c in codes}
+    late = [(c, p) for c in term_of for p in (catalog_store.course(c) or {}).get("prereqs", [])
+            if p in term_of and term_of[p] >= term_of[c]]
+    assert not late, late

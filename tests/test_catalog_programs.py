@@ -296,3 +296,56 @@ def test_part_two_of_a_numbered_sequence_waits_for_part_one(tmp_path, monkeypatc
     finally:
         monkeypatch.delenv("GRADPATH_CATALOG_FILE")
         store.reload()
+
+
+
+def test_class_standing_is_read_from_the_prerequisite_line(tmp_path, monkeypatch):
+    courses = {
+        "ACT 3020": {"title": "A", "prereq_text": "ACT 2120 ; junior standing; admission into the College"},
+        "ACT 4980": {"title": "B", "prereq_text": "Senior standing; 3.00 overall GPA"},
+        "VET 4800": {"title": "C", "prereq_text": "ANSC 3000 and junior/senior standing"},
+        "ANS 4410": {"title": "D", "prereq_text": "ANS 1401 ; junior-level classification or higher"},
+        "ACT 2110": {"title": "E", "prereq_text": "A college-level math course; ENGL 1010 ; sophomore standing"},
+        "MOD 3610": {"title": "F", "prereq_text": "Upper-division status recommended but not required"},
+        "CHM 4600": {"title": "G", "prereq_text": "8 hours of BIOL beyond the freshman level; junior or senior standing"},
+    }
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"catalog": {"name": "T"}, "courses": courses, "programs": []}))
+    monkeypatch.setenv("GRADPATH_CATALOG_FILE", str(path))
+    store.reload()
+    try:
+        assert {c: store.standing_hours(c) for c in courses} == {
+            "ACT 3020": 60, "ACT 4980": 90, "VET 4800": 60, "ANS 4410": 60,
+            "ACT 2110": 30, "MOD 3610": 0, "CHM 4600": 60,
+        }
+    finally:
+        monkeypatch.delenv("GRADPATH_CATALOG_FILE")
+        store.reload()
+
+
+def test_contradictory_corequisites_are_dropped_not_deadlocked():
+    # IDES 3320 and 3330 list each other; 3330 also lists 4100, which needs
+    # 3320 first -- impossible together. The one-way link is the one dropped.
+    from mtsugradpath.planner import _consistent_coreqs
+    prereqs = {"S4100": {"S3320"}}
+    catalog = {"S3320": {"coreqs": {"S3330"}}, "S3330": {"coreqs": {"S3320", "S4100"}}, "S4100": {"coreqs": set()}}
+    honored = _consistent_coreqs(set(catalog), lambda c: prereqs.get(c, set()), catalog)
+    assert honored == {"S3320": {"S3330"}, "S3330": {"S3320"}}
+
+
+def test_a_prerequisite_loop_in_the_catalog_is_ignored(tmp_path, monkeypatch):
+    courses = {
+        "LOP 1000": {"title": "One", "prereqs": ["LOP 2000"]},
+        "LOP 2000": {"title": "Two", "prereqs": ["LOP 1000"]},
+        "LOP 3000": {"title": "Three", "prereqs": ["LOP 2000"]},
+    }
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"catalog": {"name": "T"}, "courses": courses, "programs": []}))
+    monkeypatch.setenv("GRADPATH_CATALOG_FILE", str(path))
+    store.reload()
+    try:
+        assert store.resolve_prereqs("LOP 1000") == set() and store.resolve_prereqs("LOP 2000") == set()
+        assert store.resolve_prereqs("LOP 3000") == {"LOP 2000"}  # outside the loop: kept
+    finally:
+        monkeypatch.delenv("GRADPATH_CATALOG_FILE")
+        store.reload()

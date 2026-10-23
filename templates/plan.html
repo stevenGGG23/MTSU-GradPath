@@ -271,10 +271,23 @@
       <span class="legend-item"><span class="legend-swatch" style="background:#bfdbfe;border:1px solid #3b82f6;"></span>Planned</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#f1f5f9;border:1px dashed #cbd5e1;"></span>External prerequisite</span>
     </div>
-    <div class="prereq-graph-wrap">
-      <pre class="mermaid personal-mermaid">{{ personal_mermaid }}</pre>
+    <div class="map-viewer">
+      <div class="map-viewer-toolbar" role="toolbar" aria-label="Map controls">
+        <button type="button" class="btn btn-sm btn-primary" data-map-full aria-pressed="false"><i class="bi bi-arrows-fullscreen me-1"></i>Full screen</button>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
+          <button type="button" class="btn btn-outline-secondary" data-map-out title="Zoom out" aria-label="Zoom out"><i class="bi bi-zoom-out"></i></button>
+          <span class="btn btn-outline-secondary disabled map-zoom-label" data-map-zoom-label>100%</span>
+          <button type="button" class="btn btn-outline-secondary" data-map-in title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in"></i></button>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-map-fit><i class="bi bi-arrows-angle-contract me-1"></i>Fit</button>
+        <span class="map-viewer-hint">Drag to move around</span>
+      </div>
+      <div class="prereq-graph-wrap">
+        <pre class="mermaid personal-mermaid">{{ personal_mermaid }}</pre>
+      </div>
     </div>
   </div>
+  <script src="{{ static_url('map-viewer.js') }}" defer></script>
 
   <script type="module" nonce="{{ csp_nonce }}">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.4/dist/mermaid.esm.min.mjs";
