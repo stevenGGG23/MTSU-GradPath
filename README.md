@@ -219,7 +219,7 @@ Everything below passed on the current version (October 2026). The automated sui
 | Numbered sequences (Calculus I → II, Flight Lab I → II, Physics I → II…) always in later terms, from scratch and from random progress | All 223 × 3 plans | 223 / 223 (before the fix: out of order in 18 majors) |
 | "Junior/senior standing" prerequisites met and corequisites never planned after the course | All 223 | 223 / 223 (before the fix: standing missed in 76 majors) |
 | Plans follow the major's four-year map — nothing the map puts 2+ years earlier lands after a later course, no 1000-level course after a 3000/4000-level one in its subject (unless the map or the offering terms say so) | All 223 from scratch + random students | 223 / 223 (before the fix: out of order in 122 majors) |
-| Random students with minors and second majors through the real plan page — prerequisites (including ones another program brings), sequences, class standing, corequisites, map order, nothing twice | 60 in the test suite, plus 7,000+ in stress runs | 0 problems (before the fix: about 1 in 120 combined plans had a prerequisite out of order) |
+| Random students with minors and second majors through the real plan page — prerequisites (including ones another program brings), sequences, class standing, corequisites, map order, nothing twice | 60 in the test suite, plus 9,200 in stress runs | 0 problems (before the fix: about 1 in 120 combined plans had a prerequisite out of order) |
 | Saved catalog vs the live catalog (fresh download of 7 programs and the flight-lab courses) | Professional Pilot, Pre-Law, Studio Art, Nursing, Theatre, Interior Architecture, Computer Science | Identical |
 | Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
 | Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
@@ -233,6 +233,22 @@ Everything below passed on the current version (October 2026). The automated sui
 | Independent code reviews | Correctness review and security/production review | All confirmed findings fixed and covered by tests |
 
 Problems found during this testing (for example, 0-credit labs counted as 3 credits, plans stopping at the first empty term, a course past a full requirement disappearing) were fixed, and each now has a test so it can't come back.
+
+#### What the October 2026 plan-order testing found and fixed
+
+Students flagged Professional Pilot plans with Flight Lab I and II too close together and *Professional Pilot I* before *Introduction to Aerospace*. Testing every major, minor and combination turned up:
+
+| Found | How widespread | Fix |
+|---|---|---|
+| Plans out of MTSU's order (e.g. a senior seminar in the first semester, an intro course after a 3000-level one) | 122 of 223 majors | Courses follow each major's four-year map in the catalog, then course level |
+| "Junior/senior/sophomore standing" prerequisites ignored | 365 courses; 76 majors affected | Waits for 30 / 60 / 90 earned hours (MTSU's class standing) |
+| A corequisite ("or simultaneous completion of X") planned after the course | 19 majors | Same term or earlier; the one contradictory catalog link (Interior Architecture) is dropped |
+| Part II of a sequence in the same term as Part I (Physics I/II, Studio I/II, Music History I/II) | 18 majors | Part II always a later term, read from course titles |
+| With a minor or second major, a prerequisite the other program brings ignored (MATH 1910 before MATH 1730) | About 1 in 120 combined plans | Prerequisites checked against the whole combined plan |
+
+After the fixes: 0 problems in 2,676 random single-major plans and 9,200 random major/minor/double-major plans through the real site, and 0 page errors in browser trials. The heaviest setups (double major + four minors, 16 terms) take a median of 14 ms, at most 86 ms.
+
+**Degree Works:** it needs a student's PipelineMT login, so it couldn't be checked directly. Plans were compared against the live catalog instead (the source Degree Works audits against): 7 programs downloaded fresh matched the saved data exactly. A program-by-program Degree Works comparison is planned (see [next steps](#status-and-next-steps)).
 
 ### What the test files cover
 
