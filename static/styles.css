@@ -1916,3 +1916,24 @@ body.map-viewer-open {
         display: none;
     }
 }
+
+/* ── Prerequisites checked automatically ─────────────────────────────────── */
+
+.auto-prereq-list {
+    padding-left: 1.1rem;
+    margin-bottom: 0.75rem;
+}
+
+.auto-prereq-list li {
+    margin-bottom: 0.25rem;
+}
+
+/* "Go back and edit": briefly highlight the courses that were added */
+.cs-course-check.auto-flash {
+    animation: auto-flash 2.4s ease-out;
+}
+
+@keyframes auto-flash {
+    0%, 35% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55); background-color: #eff6ff; }
+    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}

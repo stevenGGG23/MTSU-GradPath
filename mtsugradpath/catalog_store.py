@@ -280,6 +280,17 @@ def resolve_prereqs(code: str, prefer: set | None = None) -> set:
     return {p for p in result if (code, p) not in loops} if loops else result
 
 
+def prerequisite_options(code: str) -> tuple[set, list]:
+    """(courses all required, ["A or B" groups]) a course lists as
+    prerequisites -- with part I of a numbered sequence counted as required,
+    and links inside a catalog prerequisite loop left out."""
+    info = course(code) or {}
+    loops = _loop_links()
+    required = {p for p in [*info.get("prereqs", []), *previous_part(code)] if (code, p) not in loops and p != code}
+    groups = [[p for p in group if (code, p) not in loops and p != code] for group in info.get("prereq_any", [])]
+    return required, [g for g in groups if g]
+
+
 # "Junior standing", "junior or senior standing", "junior-level classification
 # or higher", "Senior status", "upper division status": the lowest class named
 _STANDING_PHRASE = re.compile(

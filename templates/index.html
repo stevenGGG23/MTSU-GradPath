@@ -120,7 +120,7 @@
                 <div class="cs-course-grid">
                   {% for course in section.courses %}
                   <div class="form-check cs-course-check{% if course.required %} is-required{% endif %}" title="{{ course.note }}" data-seasons="{{ course.seasons }}" data-required="{{ 1 if course.required else 0 }}" data-search="{{ (course.code ~ ' ' ~ course.title) | lower }}">
-                    <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" id="cs_{{ course.code | replace(' ', '_') }}">
+                    <input class="form-check-input cs-course-checkbox" type="checkbox" data-code="{{ course.code }}" data-label="{{ course.label }}" data-prereqs="{{ course.prereqs | join('|') }}" id="cs_{{ course.code | replace(' ', '_') }}">
                     <label class="form-check-label" for="cs_{{ course.code | replace(' ', '_') }}">
                       <span class="cs-course-code">{{ course.code }}</span>
                       <span class="cs-course-title">{{ course.title }}</span>
@@ -250,6 +250,26 @@
 </div>
 </form>
 
+<div class="modal fade" id="autoPrereqModal" tabindex="-1" aria-labelledby="autoPrereqTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="autoPrereqTitle"><i class="bi bi-diagram-2 text-primary me-2"></i>Prerequisites added for you</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">Some courses you checked need an earlier course first, so these were also marked as completed:</p>
+        <ul class="auto-prereq-list" id="autoPrereqList"></ul>
+        <p class="small text-muted mb-0">If you haven't taken one of these (for example, you got credit another way), go back and uncheck it.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="autoPrereqEdit">Go back and edit</button>
+        <button type="button" class="btn btn-primary" id="autoPrereqProceed">Proceed</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script nonce="{{ csp_nonce }}">
 const addCourseButton = document.getElementById('add-course');
 const courseInput = document.getElementById('course_input');
@@ -279,6 +299,76 @@ const courseOptionsReady = fetch('/courses.json?v=' + encodeURIComponent({{ cour
   .catch(() => {});
 const csCourseCheckboxes = document.querySelectorAll('.cs-course-checkbox');
 const csSelectedCount = document.getElementById('cs-selected-count');
+
+const COURSE_CODE_RE = /^[A-Z]{2,5} \d{4}[A-Z]?$/;
+
+// ── Prerequisites checked along with a course ──
+// Checking a course (e.g. CSCI 2170) also checks its prerequisites that are
+// on this checklist (CSCI 1170), and theirs in turn. autoAdded remembers which
+// courses were checked that way and for which courses, so unchecking the
+// later course unchecks them again, and Generate Plan can say what was added.
+const prereqMap = new Map();
+csCourseCheckboxes.forEach(box => {
+  const list = (box.dataset.prereqs || '').split('|').filter(code => COURSE_CODE_RE.test(code));
+  if (list.length) prereqMap.set(box.dataset.code, list);
+});
+let autoAdded = {};
+let autoConfirmed = false;
+
+function checkboxFor(code) {
+  return document.querySelector(`.cs-course-checkbox[data-code="${CSS.escape(code)}"]`);
+}
+
+function isSelectedCourse(code) {
+  return !!selectedCourses.querySelector(`.badge[data-course="${CSS.escape(code)}"]`);
+}
+
+function markAuto(code) {
+  const box = checkboxFor(code);
+  if (!box) return;
+  const card = box.closest('.cs-course-check');
+  if (card.dataset.note === undefined) card.dataset.note = card.title;
+  const reasons = autoAdded[code];
+  card.classList.toggle('is-auto', !!reasons);
+  card.title = reasons
+    ? `Checked automatically \u2014 prerequisite of ${reasons.join(', ')}\n${card.dataset.note}`
+    : card.dataset.note;
+}
+
+function autoSelectPrereqs(code) {
+  (prereqMap.get(code) || []).forEach(pre => {
+    if (autoAdded[pre]) {
+      if (!autoAdded[pre].includes(code)) autoAdded[pre].push(code);
+      markAuto(pre);
+      return;
+    }
+    if (isSelectedCourse(pre)) return;  // the student checked it already
+    autoAdded[pre] = [code];
+    autoConfirmed = false;
+    const box = checkboxFor(pre);
+    addCourse(pre, box ? box.dataset.label : null);  // checks its own prerequisites too
+    markAuto(pre);
+  });
+}
+
+// *code* was unchecked: courses checked only because of it go too
+function forgetAuto(code) {
+  if (autoAdded[code]) {
+    delete autoAdded[code];
+    markAuto(code);
+  }
+  Object.keys(autoAdded).forEach(pre => {
+    if (!autoAdded[pre] || !autoAdded[pre].includes(code)) return;
+    autoAdded[pre] = autoAdded[pre].filter(c => c !== code);
+    if (autoAdded[pre].length) {
+      markAuto(pre);
+      return;
+    }
+    delete autoAdded[pre];
+    markAuto(pre);
+    removeCourse(pre);
+  });
+}
 const majorOptions = {{ majors | tojson | safe }};
 const minorOptions = {{ minors | tojson | safe }};
 let selectedMinors = [];
@@ -316,6 +406,7 @@ function saveState() {
     target_semesters: document.getElementById('target_semesters').value,
     include_summer: document.getElementById('include_summer').checked,
     minors: selectedMinors.slice(),
+    auto: autoAdded,
   };
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -467,12 +558,14 @@ function addCourse(code, label = null) {
     syncCheckboxForCode(normalized, false);
     updateCourseGrades();
     updateCsSelectedCount();
+    forgetAuto(normalized);
   });
 
   badge.appendChild(remove);
   selectedCourses.appendChild(badge);
   updateHiddenField();
   syncCheckboxForCode(normalized, true);
+  if (!restoring) autoSelectPrereqs(normalized);
 }
 
 function removeCourse(code) {
@@ -487,6 +580,7 @@ function removeCourse(code) {
     syncCheckboxForCode(normalized, false);
     updateCourseGrades();
     updateHiddenField();
+    forgetAuto(normalized);
   }
 }
 
@@ -529,6 +623,9 @@ courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
 clearCoursesButton.addEventListener('click', () => {
   selectedCourses.innerHTML = '';
+  const wasAuto = Object.keys(autoAdded);
+  autoAdded = {};
+  wasAuto.forEach(markAuto);
 
   csCourseCheckboxes.forEach(box => {
     box.checked = false;
@@ -897,6 +994,13 @@ function restoreState() {
     const match = courseOptions.find(c => c.code === code);
     addCourse(code, match ? match.label : null);
   });
+  // Which of those were checked automatically, and for what
+  Object.entries(saved.auto || {}).forEach(([code, reasons]) => {
+    if (COURSE_CODE_RE.test(code) && Array.isArray(reasons) && isSelectedCourse(code)) {
+      autoAdded[code] = reasons.filter(r => typeof r === 'string' && COURSE_CODE_RE.test(r));
+      markAuto(code);
+    }
+  });
 
   document.querySelectorAll('.course-grade-select').forEach(select => {
   const savedGrade = (saved.grades || {})[select.dataset.code];
@@ -984,7 +1088,66 @@ updateCsSelectedCount();
 plannerForm.addEventListener('input', saveState);
 plannerForm.addEventListener('change', saveState);
 
-plannerForm.addEventListener('submit', () => {
+// ── Generate Plan: confirm prerequisites that were checked automatically ──
+const autoModalEl = document.getElementById('autoPrereqModal');
+// The page card creates its own stacking layer; at the top level the popup
+// sits above Bootstrap's backdrop instead of under it
+document.body.appendChild(autoModalEl);
+
+function showAutoPrereqModal(codes) {
+  const list = document.getElementById('autoPrereqList');
+  list.innerHTML = '';
+  codes.forEach(code => {
+    const box = checkboxFor(code);
+    const item = document.createElement('li');
+    const name = document.createElement('strong');
+    name.textContent = box ? box.dataset.label : code;
+    const why = document.createElement('span');
+    why.className = 'text-muted';
+    why.textContent = ` \u2014 prerequisite of ${autoAdded[code].join(', ')}`;
+    item.append(name, why);
+    list.appendChild(item);
+  });
+  bootstrap.Modal.getOrCreateInstance(autoModalEl).show();
+}
+
+document.getElementById('autoPrereqProceed').addEventListener('click', () => {
+  autoConfirmed = true;
+  bootstrap.Modal.getOrCreateInstance(autoModalEl).hide();
+  plannerForm.requestSubmit(document.getElementById('generate-btn'));
+});
+
+document.getElementById('autoPrereqEdit').addEventListener('click', () => {
+  const codes = Object.keys(autoAdded).filter(isSelectedCourse);
+  bootstrap.Modal.getOrCreateInstance(autoModalEl).hide();
+  // Show every course (a filter could be hiding them) and open step 1
+  const all = document.querySelector('.checklist-filters [data-filter="all"]');
+  if (all) all.click();
+  const search = document.getElementById('checklist-search');
+  if (search && search.value) {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+  }
+  const step = document.getElementById('stepCs');
+  if (step) bootstrap.Collapse.getOrCreateInstance(step, { toggle: false }).show();
+  const cards = codes.map(code => checkboxFor(code)).filter(Boolean).map(box => box.closest('.cs-course-check'));
+  cards.forEach(card => {
+    const details = card.closest('details');
+    if (details) details.open = true;
+    card.classList.remove('auto-flash');
+    void card.offsetWidth;  // restart the highlight
+    card.classList.add('auto-flash');
+  });
+  if (cards.length) setTimeout(() => cards[0].scrollIntoView({ behavior: 'smooth', block: 'center' }), 350);
+});
+
+plannerForm.addEventListener('submit', event => {
+  const pending = Object.keys(autoAdded).filter(isSelectedCourse);
+  if (pending.length && !autoConfirmed) {
+    event.preventDefault();
+    showAutoPrereqModal(pending);
+    return;
+  }
   updateHiddenField();
   const btn = document.getElementById('generate-btn');
   const btnText = document.getElementById('generate-btn-text');

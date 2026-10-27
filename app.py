@@ -482,7 +482,22 @@ def _checklist_sections(cfg, exclude=()):
     return sections
 
 
-def _course_card(code, required, min_grades):
+def _checklist_prereqs(code, on_page):
+    """Prerequisites of *code* that are also on this checklist -- the ones
+    checking *code* also checks. An "A or B" prerequisite counts only when
+    exactly one option is on the checklist (otherwise there's no telling
+    which one the student took); prerequisites from outside the program
+    (often skippable by placement score) are never assumed."""
+    required, groups = catalog_store.prerequisite_options(code)
+    picks = {p for p in required if p in on_page}
+    for group in groups:
+        listed = [p for p in group if p in on_page]
+        if len(listed) == 1:
+            picks.add(listed[0])
+    return sorted(picks - {code})
+
+
+def _course_card(code, required, min_grades, on_page=()):
     info = catalog_store.course(code) or {}
     title = info.get("title", "")
     offered = catalog_store.offering_summary(code)
@@ -508,6 +523,7 @@ def _course_card(code, required, min_grades):
         "offered": offered,
         "seasons": " ".join(s.lower() for s in seasons),
         "note": "\n".join(note),
+        "prereqs": _checklist_prereqs(code, on_page),
     }
 
 
@@ -594,7 +610,7 @@ def index():
         checklist.append({
             "name": cfg["name"],
             "sections": [
-                {**sec, "courses": [_course_card(c, required, min_grades) for c in sec["codes"]]}
+                {**sec, "courses": [_course_card(c, required, min_grades, all_codes) for c in sec["codes"]]}
                 for sec in sections
             ],
         })

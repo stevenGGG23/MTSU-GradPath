@@ -727,3 +727,42 @@ def test_double_majors_honor_each_others_prerequisites(major, second):
     late = [(c, p) for c in term_of for p in (catalog_store.course(c) or {}).get("prereqs", [])
             if p in term_of and term_of[p] >= term_of[c]]
     assert not late, late
+
+
+def _checkbox_prereqs(html):
+    import re as re_
+    return {code: [p for p in pre.split("|") if p] for code, pre in
+            re_.findall(r'data-code="([^"]+)"[^>]*data-prereqs="([^"]*)"', html)}
+
+
+def test_checklist_courses_carry_the_prerequisites_to_check_with_them():
+    """Checking CSCI 2170 also checks CSCI 1170 (the page's script uses these
+    lists); only prerequisites on the same checklist are listed."""
+    html = app.test_client().get("/?major=cs").get_data(as_text=True)
+    prereqs = _checkbox_prereqs(html)
+    assert prereqs["CSCI 2170"] == ["CSCI 1170"]
+    assert set(prereqs["CSCI 3110"]) == {"CSCI 2170", "CSCI 3080"}
+    assert prereqs["CSCI 1170"] == []
+    on_page = set(prereqs)
+    assert all(set(p) <= on_page for p in prereqs.values())
+    # The confirmation popup is on the page
+    assert 'id="autoPrereqModal"' in html and 'id="autoPrereqProceed"' in html and 'id="autoPrereqEdit"' in html
+
+
+def test_flight_lab_two_checks_flight_lab_one():
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    prereqs = _checkbox_prereqs(app.test_client().get(f"/?major={cfg['key']}").get_data(as_text=True))
+    assert prereqs["AERO 3203"] == ["AERO 2201"]  # "Private Pilot Certificate", earned in Flight Lab I
+    assert prereqs["AERO 3204"] == ["AERO 3203"]
+
+
+def test_an_either_or_prerequisite_is_not_guessed():
+    """AERO 3020 needs one of MATH 1530/1710/1810/1910 and one science course:
+    with several options on the checklist, none is checked for the student."""
+    cfg = catalog_majors().get("aerospace-professional-pilot-concentration-bs")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    prereqs = _checkbox_prereqs(app.test_client().get(f"/?major={cfg['key']}").get_data(as_text=True))
+    assert set(prereqs["AERO 3020"]) == {"AERO 1010", "AERO 1020"}
