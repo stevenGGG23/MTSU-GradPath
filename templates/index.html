@@ -147,9 +147,9 @@
               <div class="accordion-body">
                 <p class="form-text mt-0 mb-2">Anything not in the checklist &mdash; every course in the {{ catalog_meta.name or 'catalog' }} is searchable.</p>
                 <div class="input-group position-relative">
-                  <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off">
+                  <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="course_suggestions" aria-label="Search for a completed course">
                   <button type="button" class="btn btn-primary" id="add-course">Add</button>
-                  <div id="course_suggestions" class="autocomplete-list shadow-sm"></div>
+                  <div id="course_suggestions" class="autocomplete-list shadow-sm" role="listbox" aria-label="Matching courses"></div>
                 </div>
               </div>
             </div>
@@ -488,24 +488,60 @@ function syncCheckboxForCode(code, checked) {
 
 updateCourseGrades();
 
+// Course search suggestions: Up/Down move the highlight, Enter adds the
+// highlighted course (or the typed code when nothing is highlighted),
+// Escape closes the list
+let courseSuggestions = [];
+let courseActive = -1;
+
+function pickCourseSuggestion(index) {
+  const match = courseSuggestions[index];
+  if (!match) return;
+  addCourse(match.code, match.label);
+  courseInput.value = '';
+  clearSuggestions();
+  courseInput.focus();
+}
+
+function markCourseActive() {
+  suggestionsBox.querySelectorAll('.autocomplete-item').forEach((item, index) => {
+    const on = index === courseActive;
+    item.classList.toggle('is-active', on);
+    item.setAttribute('aria-selected', on ? 'true' : 'false');
+    if (on) item.scrollIntoView({ block: 'nearest' });
+  });
+  if (courseActive >= 0) {
+    courseInput.setAttribute('aria-activedescendant', `course-option-${courseActive}`);
+  } else {
+    courseInput.removeAttribute('aria-activedescendant');
+  }
+}
+
 function setSuggestions(matches) {
   suggestionsBox.innerHTML = '';
+  courseSuggestions = matches;
+  courseActive = -1;
+  courseInput.removeAttribute('aria-activedescendant');
   if (!matches.length) {
     suggestionsBox.style.display = 'none';
+    courseInput.setAttribute('aria-expanded', 'false');
     return;
   }
 
   suggestionsBox.style.display = 'block';
-  matches.forEach(match => {
-    const item = document.createElement('button');
-    item.type = 'button';
+  courseInput.setAttribute('aria-expanded', 'true');
+  matches.forEach((match, index) => {
+    const item = document.createElement('div');
+    item.id = `course-option-${index}`;
     item.className = 'autocomplete-item btn btn-sm btn-light text-start w-100';
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', 'false');
     item.textContent = match.label;
-    item.addEventListener('click', () => {
-      addCourse(match.code, match.label);
-      courseInput.value = '';
-      setSuggestions([]);
-      courseInput.focus();
+    // mousedown keeps focus in the search box, so its blur doesn't close the list first
+    item.addEventListener('mousedown', event => event.preventDefault());
+    item.addEventListener('click', () => pickCourseSuggestion(index));
+    item.addEventListener('mousemove', () => {
+      if (courseActive !== index) { courseActive = index; markCourseActive(); }
     });
     suggestionsBox.appendChild(item);
   });
@@ -514,6 +550,10 @@ function setSuggestions(matches) {
 function clearSuggestions() {
   suggestionsBox.innerHTML = '';
   suggestionsBox.style.display = 'none';
+  courseSuggestions = [];
+  courseActive = -1;
+  courseInput.setAttribute('aria-expanded', 'false');
+  courseInput.removeAttribute('aria-activedescendant');
 }
 
 function addCourse(code, label = null) {
@@ -611,11 +651,32 @@ addCourseButton.addEventListener('click', () => {
 courseInput.addEventListener('input', updateCourseSearch);
 
 courseInput.addEventListener('keydown', event => {
-  if (event.key === 'Enter') {
+  if (event.key === 'ArrowDown') {
     event.preventDefault();
+    if (!courseSuggestions.length) updateCourseSearch();
+    if (!courseSuggestions.length) return;
+    courseActive = Math.min(courseActive + 1, courseSuggestions.length - 1);
+    markCourseActive();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (!courseSuggestions.length) return;
+    // Up from the first suggestion goes back to the typed text
+    courseActive = Math.max(courseActive - 1, -1);
+    markCourseActive();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (courseActive >= 0) {
+      pickCourseSuggestion(courseActive);
+      return;
+    }
     addCourse(courseInput.value);
     courseInput.value = '';
     clearSuggestions();
+  } else if (event.key === 'Escape') {
+    if (courseSuggestions.length) {
+      event.preventDefault();
+      clearSuggestions();
+    }
   }
 });
 
@@ -742,10 +803,16 @@ function searchOptions(options, query) {
   return { words, results: scored.map(item => item.option) };
 }
 
+let comboCount = 0;
+
 function createCombo(wrap, { options, selected = '', exclude = () => [], onPick, onClear, emptyText }) {
   const input = wrap.querySelector('.combo-input');
   const menu = wrap.querySelector('.program-menu');
   const clearButton = wrap.querySelector('.combo-clear');
+  // Link the box to its list so screen readers announce the highlighted option
+  comboCount += 1;
+  if (!menu.id) menu.id = `program-menu-${comboCount}`;
+  input.setAttribute('aria-controls', menu.id);
   let current = selected;
   let typing = false;
   let results = [];
@@ -781,6 +848,7 @@ function createCombo(wrap, { options, selected = '', exclude = () => [], onPick,
         + (option.key === current ? ' is-selected' : '')
         + (disabled ? ' is-disabled' : '');
       item.setAttribute('role', 'option');
+      item.id = `${menu.id}-option-${index}`;
       item.setAttribute('aria-selected', option.key === current ? 'true' : 'false');
       const sub = option.concentration || option.description;
       const meta = disabled ? 'Coming soon' : (option.hours ? `${option.hours} cr hrs` : option.prefix);
@@ -809,10 +877,19 @@ function createCombo(wrap, { options, selected = '', exclude = () => [], onPick,
   }
 
   function markActive() {
+    let activeId = '';
     menu.querySelectorAll('.program-option').forEach((item, index) => {
       item.classList.toggle('is-active', index === active);
-      if (index === active) item.scrollIntoView({ block: 'nearest' });
+      if (index === active) {
+        item.scrollIntoView({ block: 'nearest' });
+        activeId = item.id;
+      }
     });
+    if (activeId && !menu.classList.contains('d-none')) {
+      input.setAttribute('aria-activedescendant', activeId);
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
   }
 
   function openMenu() {
@@ -825,6 +902,7 @@ function createCombo(wrap, { options, selected = '', exclude = () => [], onPick,
   function closeMenu() {
     menu.classList.add('d-none');
     input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
   }
 
   function pick(index) {

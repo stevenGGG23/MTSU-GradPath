@@ -192,3 +192,15 @@ def test_render_counts_each_visitor_separately(monkeypatch):
     with app_module.app.test_request_context("/", headers={"CF-Connecting-IP": "203.0.113.50"},
                                              environ_base={"REMOTE_ADDR": "172.68.0.1"}):
         assert app_module._client_ip() == "172.68.0.1"  # header ignored off Render
+
+
+def test_search_boxes_are_keyboard_and_screen_reader_friendly():
+    """The course search and program pickers are ARIA comboboxes: Up/Down move
+    the highlight, Enter picks it (the script in index.html), and screen
+    readers are told which option is highlighted."""
+    html = client().get("/").get_data(as_text=True)
+    assert re.search(r'id="course_input"[^>]*role="combobox"[^>]*aria-controls="course_suggestions"', html)
+    assert re.search(r'id="course_suggestions"[^>]*role="listbox"', html)
+    for key in ("ArrowDown", "ArrowUp", "Enter", "Escape", "aria-activedescendant"):
+        assert key in html
+    assert 'id="major_input"' in html and 'role="combobox"' in html

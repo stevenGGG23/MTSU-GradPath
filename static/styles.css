@@ -102,7 +102,8 @@ main,
 }
 
 .autocomplete-item:hover,
-.autocomplete-item:focus {
+.autocomplete-item:focus,
+.autocomplete-item.is-active {
     background: rgba(2, 132, 255, 0.08);
     color: #0b1733;
 }
