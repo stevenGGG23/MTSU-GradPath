@@ -261,7 +261,7 @@
 
   </script>
 
-  {% if personal_mermaid %}
+  {% if personal_mermaid or personal_standalone %}
   <div class="mb-2">
     <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-diagram-2 text-primary"></i>Your prerequisite path</h4>
     <p class="text-muted mb-3">Courses are shown based on your selections. Green = completed, blue = next up (first two terms), light blue = later in your plan, gray = supporting prerequisites.</p>
@@ -271,6 +271,7 @@
       <span class="legend-item"><span class="legend-swatch" style="background:#bfdbfe;border:1px solid #3b82f6;"></span>Planned</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#f1f5f9;border:1px dashed #cbd5e1;"></span>External prerequisite</span>
     </div>
+    {% if personal_mermaid %}
     <div class="map-viewer">
       <div class="map-viewer-toolbar" role="toolbar" aria-label="Map controls">
         <button type="button" class="btn btn-sm btn-primary" data-map-full aria-pressed="false"><i class="bi bi-arrows-fullscreen me-1"></i>Full screen</button>
@@ -286,13 +287,22 @@
         <pre class="mermaid personal-mermaid">{{ personal_mermaid }}</pre>
       </div>
     </div>
+    {% endif %}
+    {% if personal_standalone %}
+    <h6 class="mt-4 mb-2">No prerequisite links on your plan</h6>
+    <div class="d-flex flex-wrap gap-2">
+      {% for c in personal_standalone %}<span class="badge prereq-chip prereq-chip-{{ c.status }}" title="{{ c.title }}">{{ c.code }}{% if c.title %} &middot; {{ c.title }}{% endif %}</span>{% endfor %}
+    </div>
+    {% endif %}
   </div>
+  {% if personal_mermaid %}
   <script src="{{ static_url('map-viewer.js') }}" defer></script>
 
   <script type="module" nonce="{{ csp_nonce }}">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.4/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
   </script>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

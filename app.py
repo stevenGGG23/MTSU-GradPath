@@ -1017,7 +1017,16 @@ def _plan():
     personal_nodes, personal_edges = build_personal_prereq_graph(
         catalog, validated_completed_courses, plan, degree_cfg=planning_cfg
     )
-    personal_mermaid = render_personal_prereq_mermaid(personal_nodes, personal_edges)
+    # Courses with no prerequisite links on the plan would just stack down the
+    # side of the graph -- list them separately (as the Prerequisite Map does)
+    personal_linked = {code for edge in personal_edges for code in edge}
+    personal_standalone = [
+        {"code": code, "title": info.get("title", ""), "status": info.get("status", "planned")}
+        for code, info in personal_nodes.items() if code not in personal_linked
+    ]
+    personal_mermaid = render_personal_prereq_mermaid(
+        {code: info for code, info in personal_nodes.items() if code in personal_linked}, personal_edges
+    ) if personal_linked else ""
 
     config_hours = {}
     for key in ("core_courses", "concentration_courses", "supporting_courses"):
@@ -1143,6 +1152,7 @@ def _plan():
         max_term_hours=max_term_hours,
         warnings=warnings_display,
         personal_mermaid=personal_mermaid,
+        personal_standalone=personal_standalone,
         degree_name=degree_cfg["name"],
         catalog_url=degree_cfg.get("catalog_url"),
         second_audit=second_audit,

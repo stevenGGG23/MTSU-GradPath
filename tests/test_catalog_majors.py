@@ -766,3 +766,18 @@ def test_an_either_or_prerequisite_is_not_guessed():
         pytest.skip("program not in this catalog")
     prereqs = _checkbox_prereqs(app.test_client().get(f"/?major={cfg['key']}").get_data(as_text=True))
     assert set(prereqs["AERO 3020"]) == {"AERO 1010", "AERO 1020"}
+
+
+def test_plan_page_prerequisite_path_reads_left_to_right():
+    """Like the Prerequisite Map page: a left-to-right graph of the linked
+    courses, and courses with no links on the plan listed below it."""
+    import re as re_
+    html = app.test_client().post("/", data={
+        "major": "cs", "completed_courses": "CSCI 1170", "target_semesters": "8",
+        "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    graph = re_.search(r'<pre class="mermaid personal-mermaid">(.*?)</pre>', html, re_.S).group(1)
+    assert graph.strip().startswith("graph LR")
+    chips = re_.findall(r'class="badge prereq-chip prereq-chip-\w+"[^>]*>([A-Z]{2,4} \d{4})', html)
+    assert chips and all(code.replace(" ", "_") not in graph for code in chips)
+    assert "No prerequisite links on your plan" in html

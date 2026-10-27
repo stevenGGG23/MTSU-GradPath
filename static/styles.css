@@ -1875,9 +1875,10 @@ footer a {
     font-size: 0.8rem;
 }
 
+/* Left-to-right maps are fitted to the box's width and shown at full
+   height (the page scrolls), so nothing is cut off inside a scroll box */
 .map-viewer .prereq-graph-wrap {
     overflow: auto;
-    max-height: 70vh;
     cursor: grab;
 }
 
@@ -1938,3 +1939,17 @@ body.map-viewer-open {
     0%, 35% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55); background-color: #eff6ff; }
     100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
+
+/* ── Plan page: courses with no prerequisite links, colored like the map ── */
+
+.prereq-chip {
+    font-weight: 500;
+    white-space: normal;
+    text-align: left;
+    border: 1px solid transparent;
+}
+
+.prereq-chip-completed { background: #16a34a; color: #ffffff; }
+.prereq-chip-next { background: #2563eb; color: #ffffff; }
+.prereq-chip-planned { background: #bfdbfe; color: #1e3a5f; border-color: #3b82f6; }
+.prereq-chip-external { background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1; }

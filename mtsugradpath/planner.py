@@ -1323,7 +1323,8 @@ def render_personal_prereq_mermaid(
         title = _mermaid_text(info.get("title", ""))
         return f"{check}{code}<br/>{title}" if title else f"{check}{code}"
 
-    lines = ["graph TD"]
+    # Left to right, like the Prerequisite Map page: each chain reads as a row
+    lines = ["graph LR"]
 
     for code, info in nodes.items():
         lines.append(f'  {node_id(code)}["{node_label(code, info)}"]')
