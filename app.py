@@ -946,6 +946,13 @@ def _plan():
         earned_hours=earned_hours,
         max_courses_per_term=HEALTHY_MIX_COURSES if healthy_mix else None,
     )
+    if not include_summer:
+        # "No summers": skipped summers are left out of the plan entirely
+        # (no empty cards, no 0-hour bars) rather than shown as empty terms
+        plan = {
+            term: items for term, items in plan.items()
+            if not (term.startswith("Summer") and all(item.get("kind") == "note" for item in items))
+        }
 
     audit = build_audit(
         validated_completed_courses,
@@ -1132,6 +1139,11 @@ def _plan():
         if codes and not term.startswith("Remaining"):
             next_term, next_courses = term, codes
             break
+    # The GPA calculator starts from the upcoming semester's courses
+    gpa_next = {"term": next_term, "courses": [
+        {"code": item["code"], "hours": item.get("hours") or 0}
+        for item in plan.get(next_term, []) if item.get("kind") == "course" and (item.get("hours") or 0) > 0
+    ]} if next_term else None
 
     # Calculates the total number of planned hours for each semester
     term_hours_display = {
@@ -1159,6 +1171,7 @@ def _plan():
         warnings=warnings_display,
         personal_mermaid=personal_mermaid,
         personal_standalone=personal_standalone,
+        gpa_next=gpa_next,
         degree_name=degree_cfg["name"],
         catalog_url=degree_cfg.get("catalog_url"),
         second_audit=second_audit,

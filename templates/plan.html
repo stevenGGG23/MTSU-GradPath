@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% if gpa_next %}<script type="application/json" id="gpa-next-term">{{ gpa_next | tojson }}</script>{% endif %}
 <div class="card plan-card">
   <!-- Only shown in the PDF / printout -->
   <div class="print-only print-header">
@@ -121,7 +122,7 @@
     </div>
   </div>
   {% endif %}
-  <div class="mb-4">
+  <div class="mb-4 plan-section plan-requirements">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-clipboard-check text-primary"></i>Requirement details</h4>
     <div class="accordion" id="auditAccordion">
       {% for group in audit.groups + (second_audit.groups if second_audit else []) + minor_audits %}
@@ -160,7 +161,7 @@
   {% endif %}
 
   {% if term_hours %}
-  <div class="mb-4">
+  <div class="mb-4 plan-section plan-chart">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-bar-chart-line text-primary"></i>Credit hours per term</h4>
     <div class="term-chart">
       {% for term, hours in term_hours.items() %}
@@ -180,7 +181,7 @@
   </div>
   {% endif %}
 
-  <div class="mb-4">
+  <div class="mb-4 plan-section plan-completed">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-check2-all text-primary"></i>Completed courses</h4>
     {% if completed %}
     <div class="d-flex flex-wrap gap-2 completed-badges">
@@ -209,9 +210,9 @@
   </div>
   {% endif %}
 
-  <div class="mb-4">
+  <div class="mb-4 plan-section plan-overview">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-calendar3-range text-primary"></i>Plan overview</h4>
-    <div class="term-grid">
+    <div class="term-grid{{ ' term-grid-years' if not include_summer }}">
       {% for term, items in plan.items() %}
       <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
         <div class="term-card-header">
@@ -262,7 +263,7 @@
   </script>
 
   {% if personal_mermaid or personal_standalone %}
-  <div class="mb-2">
+  <div class="mb-2 plan-section plan-prereq-path">
     <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-diagram-2 text-primary"></i>Your prerequisite path</h4>
     <p class="text-muted mb-3">Courses are shown based on your selections. Green = completed, blue = next up (first two terms), light blue = later in your plan, gray = supporting prerequisites.</p>
     <div class="personal-prereq-legend mb-3">

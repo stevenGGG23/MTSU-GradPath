@@ -204,3 +204,15 @@ def test_search_boxes_are_keyboard_and_screen_reader_friendly():
     for key in ("ArrowDown", "ArrowUp", "Enter", "Escape", "aria-activedescendant"):
         assert key in html
     assert 'id="major_input"' in html and 'role="combobox"' in html
+
+
+def test_data_refresh_runs_at_three_am_central():
+    """Scheduled at 08:00 and 09:00 UTC; the timing job lets through only the
+    one that is 3:00 AM in Central time (daylight / standard)."""
+    import yaml
+    from pathlib import Path
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/refresh-data.yml").read_text())
+    crons = sorted(item["cron"] for item in workflow[True]["schedule"])
+    assert crons == ["0 8 * * 1", "0 8 1 * *", "0 9 * * 1", "0 9 1 * *"]
+    assert workflow["jobs"]["refresh"]["needs"] == "timing"
+    assert "America/Chicago" in workflow["jobs"]["timing"]["steps"][0]["run"]

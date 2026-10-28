@@ -569,6 +569,13 @@ footer a {
     align-items: start;
 }
 
+/* Without summers: one school year (Fall | Spring) per row */
+@media (min-width: 768px) {
+    .term-grid-years {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .term-card {
     background: #ffffff;
     border: 1px solid #e2e8f0;
@@ -1607,16 +1614,89 @@ footer a {
         box-shadow: none;
     }
 
-    .progress-summary,
-    .extra-progress-card,
-    .term-card,
-    .accordion-item,
-    .prereq-graph-wrap {
-        break-inside: avoid;
+    /* Compact type so the plan fits in a few pages */
+    html {
+        font-size: 13px;
     }
 
-    .term-grid {
+    h4 {
+        font-size: 1.2rem;
+        break-after: avoid;
+        page-break-after: avoid;
+    }
+
+    /* Small blocks stay whole; long sections flow across pages, with no
+       requirement row or term card split in half */
+    .progress-summary,
+    .extra-progress-card,
+    .plan-chart,
+    .plan-completed,
+    .term-card,
+    .audit-item {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .accordion-item {
+        border: 1px solid #e2e8f0 !important;
+        margin-bottom: 0.4rem;
+    }
+
+    .accordion-header {
+        break-after: avoid;
+        page-break-after: avoid;
+    }
+
+    .accordion-button {
+        padding: 0.45rem 0.75rem;
+        font-size: 0.95rem;
+    }
+
+    .accordion-body {
+        padding: 0.35rem 0.75rem 0.5rem;
+    }
+
+    .audit-item {
+        padding-top: 0.2rem;
+        padding-bottom: 0.2rem;
+    }
+
+    .term-grid,
+    .term-grid-years {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+    }
+
+    .term-card-header {
+        padding: 0.4rem 0.7rem;
+    }
+
+    .plan-item-row {
+        padding: 0.3rem 0.7rem;
+    }
+
+    .plan-item-suggestion {
+        font-size: 0.72rem;
+    }
+
+    /* The prerequisite map gets its own page, scaled to the page width */
+    .plan-prereq-path {
+        break-before: page;
+        page-break-before: always;
+    }
+
+    .map-viewer .prereq-graph-wrap,
+    .prereq-graph-wrap {
+        overflow: visible;
+        max-height: none;
+        padding: 0.25rem;
+        border: none;
+    }
+
+    .prereq-graph-wrap svg {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
     }
 }
 

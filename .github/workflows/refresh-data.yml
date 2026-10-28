@@ -1,4 +1,5 @@
-# Keeps GradPath's data current with no one maintaining it:
+# Keeps GradPath's data current with no one maintaining it, at 3:00 AM
+# Central time (MTSU's time zone):
 #   - every Monday: MTSU's class schedule (which terms each course runs)
 #   - the 1st of each month: the full catalog too (courses, majors, minors)
 # Before publishing, the new data must pass the checks that mean the site
@@ -17,9 +18,14 @@ on:
         description: "Also re-download the full catalog (~40 min)"
         type: boolean
         default: false
+  # GitHub's schedules are in UTC, and 3:00 AM Central is 08:00 UTC during
+  # daylight time but 09:00 UTC during standard time -- so each is scheduled
+  # at both, and the "timing" job below lets only the 3:00 AM one run.
   schedule:
-    - cron: "0 8 * * 1"  # Mondays 08:00 UTC: class schedule
-    - cron: "0 9 1 * *"  # 1st of the month 09:00 UTC: catalog + schedule
+    - cron: "0 8 * * 1"  # Mondays: class schedule (3 AM CDT)
+    - cron: "0 9 * * 1"  # Mondays: class schedule (3 AM CST)
+    - cron: "0 8 1 * *"  # 1st of the month: catalog + schedule (3 AM CDT)
+    - cron: "0 9 1 * *"  # 1st of the month: catalog + schedule (3 AM CST)
 
 permissions:
   contents: write
@@ -30,7 +36,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  timing:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          # A manual run always goes ahead. A scheduled run goes ahead only if
+          # its UTC hour is 3:00 AM in Central time right now (a run that
+          # starts late still counts: the check is on the schedule, not the clock)
+          if [ -z "$SCHEDULE" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          offset=$(TZ=America/Chicago date +%z)
+          hour=$(echo "$SCHEDULE" | awk '{print $2}')
+          if { [ "$hour" = "8" ] && [ "$offset" = "-0500" ]; } || { [ "$hour" = "9" ] && [ "$offset" = "-0600" ]; }; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not 3:00 AM Central for this schedule ($SCHEDULE, offset $offset); the other one runs."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
   refresh:
+    needs: timing
+    if: needs.timing.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -44,7 +74,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
 
       - name: Refresh the full catalog
-        if: github.event.schedule == '0 9 1 * *' || inputs.catalog
+        if: endsWith(github.event.schedule, ' 1 * *') || inputs.catalog
         env:
           SECRET_KEY: ci-only
         run: python scrape_courses.py --refresh

@@ -9,7 +9,7 @@ A degree-progress and term-planning tool for MTSU undergraduates. Pick a major (
 | What | Pulled from | Refreshed automatically |
 |---|---|---|
 | Courses, majors, minors, concentrations and their requirements | MTSU Undergraduate Catalog — **https://catalog.mtsu.edu** (via its public Acalog widget API, `https://catalog.mtsu.edu/widget-api/`) | Monthly (1st of the month) |
-| Which terms each course is offered (fall / spring / summer, alternate years, posted future terms) | MTSU class schedule — **https://ssb.mtsu.edu/pls/PROD/bwckschd.p_disp_dyn_sched** (public, no login; same data as RaiderNet's class lookup) | Weekly (Mondays) |
+| Which terms each course is offered (fall / spring / summer, alternate years, posted future terms) | MTSU class schedule — **https://ssb.mtsu.edu/pls/PROD/bwckschd.p_disp_dyn_sched** (public, no login; same data as RaiderNet's class lookup) | Weekly (Mondays, 3:00 AM Central) |
 
 Picking actual sections (days, times, open seats) is handed off to MTSU's own Schedule Planner at **https://sched.mtsu.edu/#/form** via the *Build my schedule* button.
 
@@ -124,8 +124,8 @@ The **Refresh catalog and schedule** GitHub Action (`.github/workflows/refresh-d
 
 | When | What |
 |---|---|
-| Every Monday | Re-download the class schedule |
-| 1st of each month | Re-download the full catalog too (new courses, changed majors, a new catalog year) |
+| Every Monday, 3:00 AM Central | Re-download the class schedule |
+| 1st of each month, 3:00 AM Central | Re-download the full catalog too (new courses, changed majors, a new catalog year) |
 
 Every run first checks that the site works with the new data — every major and minor must still plan without warnings, every major must reach 100% when complete, every page must render — and only then commits it to `main`, which redeploys the site. Tests that pin specific facts ("Accounting requires ACTG 3110") run afterwards: if MTSU changed one of those, the data is still published and an issue asks for the test to be updated, so a real catalog change never blocks the refresh. So if MTSU drops Calculus I from Computer Science, the site stops requiring it within a month, with no code change. If anything fails (MTSU's site is down, or its format changed), **nothing is published**, the site keeps serving its last good data, and the workflow opens a GitHub issue. Refreshes also refuse to publish data that shrank by more than 20% (a sign of a broken download, not a real catalog change).
 
@@ -162,6 +162,8 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Cleaner plan page and PDF** — with *Include summer* off, summers are left out of the plan completely (no empty summer cards or 0-hour bars) and the schedule shows one school year (Fall | Spring) per row. The GPA calculator on the plan page starts with your next semester's courses and credit hours (grades and your current GPA left for you to fill in), shows what all A's / B's / C's would do, and *Reach a target* uses that semester's hours. **Download PDF** now prints in about 5 pages instead of 8: compact type, requirement groups that flow instead of leaving half-empty pages, no split chart or term card, and the prerequisite map on its own page scaled to fit.
+- **Data refresh at 3:00 AM Central** — the weekly schedule refresh (Mondays) and monthly catalog refresh (the 1st) run at 3:00 AM Central all year: both 08:00 and 09:00 UTC are scheduled, and a timing check lets only the one that's 3:00 AM in Chicago (daylight or standard time) go ahead.
 - **Healthy course mix (on by default)** — a switch in step 4 keeps semesters balanced: at most 3 full major courses per term (labs don't count) with gen-eds mixed in, instead of one semester of all major courses and another of all gen-eds. Turning it off packs courses as tightly as prerequisites allow. The limit only gives way when it must — a course whose prerequisite chain needs every remaining term or that won't be offered again in time, or a degree with more courses left than fit at 3 a term (then they're spread evenly). Across all majors, terms over 3 major courses dropped from 106 majors to 27, with one more major needing a 9th semester. The planner also now gives named courses an even share of each semester before gen-ed fills the rest. The step-4 term count now defaults to **8** (a four-year plan).
 - **Prerequisite path reads left to right** — the map on the plan page now flows left to right like the Prerequisite Map page, so a sequence reads as one row (Professional Pilot I → II → III → IV → V). Courses with no prerequisite links on the plan are listed under the map as colored chips instead of crowding it, and the whole map shows at once (no cut-off scroll box).
 - **Keyboard navigation** — every search box (course search in step 2, major, second major, minors) works without a mouse: **Up/Down** move through the results, **Enter** picks the highlighted one (in course search, Enter with nothing highlighted adds the typed code), **Escape** closes the list. Screen readers are told which result is highlighted (ARIA combobox). The prerequisite popup takes focus when it opens, and Escape closes it.
@@ -215,7 +217,7 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,519 tests | **2,518 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,523 tests | **2,522 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -284,7 +286,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>2,519 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,523 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]

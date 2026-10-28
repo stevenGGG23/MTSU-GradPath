@@ -829,3 +829,34 @@ def test_planner_defaults_to_eight_terms_and_a_healthy_mix():
     busiest = lambda html: max(len(re.findall(r'plan-item-tag">MAJ', body)) for body in
                                re.findall(r'term-card-title">(?!Remaining)[^<]+<(.*?)(?=term-card-title|Your prerequisite path)', html, re.S))
     assert busiest(on) <= 3 < busiest(off)
+
+
+def _cs_plan_page(**extra):
+    return app.test_client().post("/", data={
+        "major": "cs", "target_semesters": "8", "start_season": "Fall", "start_year": "2026", **extra,
+    }).get_data(as_text=True)
+
+
+def test_no_summer_plans_leave_summers_out_entirely():
+    html = _cs_plan_page()
+    terms = _re.findall(r'term-card-title">([^<]+)<', html)
+    assert len(terms) == 8 and not [t for t in terms if t.startswith("Summer")]
+    assert "summer skipped" not in html and "term-grid-years" in html
+    with_summer = _re.findall(r'term-card-title">([^<]+)<', _cs_plan_page(include_summer="on"))
+    assert any(t.startswith("Summer") for t in with_summer)
+
+
+def test_gpa_calculator_gets_the_upcoming_semester():
+    import json as json_
+    html = _cs_plan_page(completed_courses="CSCI 1170")
+    data = json_.loads(_re.search(r'<script type="application/json" id="gpa-next-term">(.*?)</script>', html, _re.S).group(1))
+    first_term = _re.search(r'term-card-title">([^<]+)<', html).group(1)
+    assert data["term"] == first_term
+    assert data["courses"] and all(c["hours"] > 0 for c in data["courses"])
+    assert "CSCI 1170" not in [c["code"] for c in data["courses"]]
+
+
+def test_pdf_layout_hooks_are_on_the_plan_page():
+    html = _cs_plan_page()
+    for section in ("plan-requirements", "plan-chart", "plan-completed", "plan-overview", "plan-prereq-path"):
+        assert f"plan-section {section}" in html
