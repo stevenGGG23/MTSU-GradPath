@@ -826,8 +826,11 @@ def test_planner_defaults_to_eight_terms_and_a_healthy_mix():
     base = {"major": "cs", "start_season": "Fall", "start_year": "2026", "healthy_mix_shown": "1"}
     on = client.post("/", data={**base, "healthy_mix": "on", "target_semesters": "8"}).get_data(as_text=True)
     off = client.post("/", data={**base, "target_semesters": "8"}).get_data(as_text=True)
-    busiest = lambda html: max(len(re.findall(r'plan-item-tag">MAJ', body)) for body in
-                               re.findall(r'term-card-title">(?!Remaining)[^<]+<(.*?)(?=term-card-title|Your prerequisite path)', html, re.S))
+    # Full (3+ credit) major courses per term -- what the limit counts
+    def busiest(html):
+        terms = re.findall(r'term-card-title">(?!Remaining)[^<]+<(.*?)(?=term-card-title|Your prerequisite path)', html, re.S)
+        return max(len([h for h in re.findall(r'plan-item-tag">MAJ</span>.*?plan-item-hours">([\d.]+)', body, re.S)
+                        if float(h) >= 3]) for body in terms)
     assert busiest(on) <= 3 < busiest(off)
 
 
@@ -864,3 +867,49 @@ def test_pdf_layout_hooks_are_on_the_plan_page():
     html = _cs_plan_page()
     for section in ("plan-requirements", "plan-chart", "plan-completed", "plan-overview", "plan-prereq-path"):
         assert f"plan-section {section}" in html
+
+
+def _terms(plan):
+    return [(t, items) for t, items in plan.items() if not t.startswith(("Summer", "Remaining"))]
+
+
+def test_pick_lists_are_major_courses_spread_through_the_plan():
+    """A major's own pick-lists ("Supporting Courses: choose 9 hours") are
+    planned like its courses: tagged MAJ, counted in the course mix, and not
+    piled into the last year (Professional Pilot used to end with 4 of them)."""
+    for key in ("aerospace-professional-pilot-concentration-bs", "animal-science-pre-veterinary-medicine-concentration-bs"):
+        cfg = catalog_majors().get(key)
+        if cfg is None:
+            continue
+        plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg,
+                             catalog=load_catalog_for(cfg), max_courses_per_term=3)
+        per_term = [sum(1 for i in items if i.get("program")) for _, items in _terms(plan)]
+        assert sum(per_term) and per_term[-1] + per_term[-2] < 0.6 * sum(per_term), (key, per_term)
+    html = app.test_client().post("/", data={
+        "major": "aerospace-professional-pilot-concentration-bs", "target_semesters": "8",
+        "start_season": "Fall", "start_year": "2026",
+    }).get_data(as_text=True)
+    assert _re.search(r'plan-item-tag">MAJ</span>\s*<div class="plan-item-main">\s*<span class="plan-item-title">Supporting Courses', html)
+
+
+def test_business_majors_reach_junior_standing_on_time():
+    """Most upper-division business courses need junior standing (60 hours).
+    A plan that ended year two at 59 hours spent a whole term on gen-eds while
+    they waited; now that term is topped up and every term has major courses."""
+    cfg = catalog_majors().get("business-administration-bba")
+    if cfg is None:
+        pytest.skip("program not in this catalog")
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg,
+                         catalog=load_catalog_for(cfg), max_courses_per_term=3)
+    terms = _terms(plan)
+    assert sum(sum(i.get("hours") or 0 for i in items) for _, items in terms[:4]) >= 60
+    full = [sum(1 for i in items if (i.get("kind") == "course" or i.get("program")) and (i.get("hours") or 0) >= 3)
+            for _, items in terms]
+    assert min(full[1:]) >= 1, full
+
+
+def test_no_extra_load_when_there_are_spare_terms():
+    """The top-up toward a standing threshold only happens when a plan is
+    tight: a 120-hour degree over 12 terms stays at 15 hours or fewer."""
+    plan, _ = _plan_for(catalog_majors()["business-administration-bba"], terms=12)
+    assert max(sum(i.get("hours") or 0 for i in items) for _, items in _terms(plan)) <= 15

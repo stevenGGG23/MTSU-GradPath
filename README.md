@@ -162,6 +162,8 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Pick-lists planned as major courses** — a major's own pick-lists ("Supporting Courses: choose 9 hours", "Choose one: BCED 3510 or ENGL 3620", a minor's electives) are now tagged **MAJ**, count toward the healthy course mix, and are spread from the year their options belong to, instead of being treated like gen-ed and piling into the last semester (Professional Pilot's final term used to be four of them). Majors with most pick-lists in the last year: 22 → 0.
+- **On pace for junior/senior standing** — when courses are waiting for a class-standing threshold (e.g. junior standing, 60 hours, for most upper-division business courses), a term that would fall just short is topped up (up to 17 hours) so the next term isn't spent on gen-eds while they wait. Only when the plan is tight — with spare terms nothing changes. Majors with an all-gen-ed term right before heavy ones: 19 → 5 (the rest have nothing else available yet).
 - **Cleaner plan page and PDF** — with *Include summer* off, summers are left out of the plan completely (no empty summer cards or 0-hour bars) and the schedule shows one school year (Fall | Spring) per row. The GPA calculator on the plan page starts with your next semester's courses and credit hours (grades and your current GPA left for you to fill in), shows what all A's / B's / C's would do, and *Reach a target* uses that semester's hours. **Download PDF** now prints in about 5 pages instead of 8: compact type, requirement groups that flow instead of leaving half-empty pages, no split chart or term card, and the prerequisite map on its own page scaled to fit.
 - **Data refresh at 3:00 AM Central** — the weekly schedule refresh (Mondays) and monthly catalog refresh (the 1st) run at 3:00 AM Central all year: both 08:00 and 09:00 UTC are scheduled, and a timing check lets only the one that's 3:00 AM in Chicago (daylight or standard time) go ahead.
 - **Healthy course mix (on by default)** — a switch in step 4 keeps semesters balanced: at most 3 full major courses per term (labs don't count) with gen-eds mixed in, instead of one semester of all major courses and another of all gen-eds. Turning it off packs courses as tightly as prerequisites allow. The limit only gives way when it must — a course whose prerequisite chain needs every remaining term or that won't be offered again in time, or a degree with more courses left than fit at 3 a term (then they're spread evenly). Across all majors, terms over 3 major courses dropped from 106 majors to 27, with one more major needing a 9th semester. The planner also now gives named courses an even share of each semester before gen-ed fills the rest. The step-4 term count now defaults to **8** (a four-year plan).
@@ -217,7 +219,7 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,523 tests | **2,522 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,526 tests | **2,525 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -226,6 +228,7 @@ Everything below passed on the current version (October 2026). The automated sui
 | "Junior/senior standing" prerequisites met and corequisites never planned after the course | All 223 | 223 / 223 (before the fix: standing missed in 76 majors) |
 | Plans follow the major's four-year map — nothing the map puts 2+ years earlier lands after a later course, no 1000-level course after a 3000/4000-level one in its subject (unless the map or the offering terms say so) | All 223 from scratch + random students | 223 / 223 (before the fix: out of order in 122 majors) |
 | Random students with minors and second majors through the real plan page — prerequisites (including ones another program brings), sequences, class standing, corequisites, map order, nothing twice | 60 in the test suite, plus 9,200 in stress runs | 0 problems (before the fix: about 1 in 120 combined plans had a prerequisite out of order) |
+| **Final safety sweep** (before hand-off) — every major × 4 settings, 3,000 random major/minor/double-major setups through the real plan page, 679 extreme inputs (everything completed, 1 or 16 terms, junk values), and a browser pass at desktop and phone width | 892 + 3,000 + 679 plans, 10 browser sessions | 0 crashes, 0 prerequisite / sequence / standing / corequisite / duplicate problems, no term over 17 hours, 0 page errors |
 | Saved catalog vs the live catalog (fresh download of 7 programs and the flight-lab courses) | Professional Pilot, Pre-Law, Studio Art, Nursing, Theatre, Interior Architecture, Computer Science | Identical |
 | Completing everything reads 100% with nothing left to plan | All 223 | 223 / 223 |
 | Every minor planned alongside a major without warnings | All minors (155 incl. cross-listed) | 155 / 155 |
@@ -286,7 +289,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>2,523 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,526 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]

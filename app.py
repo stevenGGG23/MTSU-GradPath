@@ -1100,6 +1100,8 @@ def _plan():
                 "title": item["label"],
                 "hours": credit_short(item["hours"]),
                 "suggestion": item.get("suggestion"),
+                # The program's own pick-lists are major courses, not gen-ed
+                "program": bool(item.get("program")),
                 "minor": item.get("id", "").startswith(MINOR_ELECTIVE_ID_PREFIX),
                 "second": item.get("id", "").startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX),
             }

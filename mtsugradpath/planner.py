@@ -819,6 +819,19 @@ def generate_plan(
         number = code.split()[-1]
         return min(max(int(number[0]), 1), 4) if number[:1].isdigit() else 4
 
+    # The program's own pick-lists ("Choose one: BCED 3510 or ENGL 3620",
+    # "Supporting Courses: choose 9 hours", a minor's electives) are major
+    # courses the student chooses, not gen-ed: they're spread with the
+    # program's courses -- by the year their options belong to -- and count
+    # toward the course-mix limit, instead of waiting until gen-ed is done
+    program_ids = {gid for gid, _, _, _ in cfg["supporting_generic"]} | {"ud_elective_shortfall"}
+    for chunk in generic_queue:
+        if chunk["id"] in program_ids:
+            options = (cfg.get("generic_options") or {}).get(chunk["id"]) or []
+            years = sorted(map_year.get(c) or _level(c) for c in options)
+            chunk["program"] = True
+            chunk["year"] = years[len(years) // 2] if years else (3 if chunk["id"] == "ud_elective_shortfall" else 2)
+
     def _chain(code, path=()):
         if code in chain_len:
             return chain_len[code]
@@ -943,8 +956,7 @@ def generate_plan(
             if (max_courses_per_term and not cap_relaxed
                     and not (can_finish and _wait_terms(code) + _chain(code) > terms_left)):
                 # Healthy course mix: no more than the limit of full courses this term
-                full_now = sum(1 for item in term_items
-                               if item.get("kind") == "course" and (item.get("hours") or 0) >= 3)
+                full_now = _full_count()
                 full_new = sum(1 for member in group if _hrs(member) >= 3)
                 if full_new and full_now + full_new > course_limit:
                     return
@@ -954,6 +966,10 @@ def generate_plan(
         cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
         remaining_required_now = {code for code in required_codes if code not in current_completed}
         plan_codes = set(cs_pool) | set(supporting_remaining)
+        # The next class-standing threshold (junior: 60 hours) that courses
+        # on the plan are waiting for -- see the top-up after the term fills
+        next_gate = min((g for g in ((catalog.get(c) or {}).get("min_hours", 0) for c in plan_codes)
+                         if g > earned_hours), default=None)
         relax_standing = False
         cap_relaxed = False
 
@@ -998,16 +1014,61 @@ def generate_plan(
         # so much that the named courses can't keep their own even share
         # (otherwise they pile up at the end instead). A course whose chain
         # needs every remaining term goes in regardless.
-        generic_left = sum(chunk["hours"] for chunk in generic_queue)
-        courses_left = sum(_hrs(c) for c in set(cs_pool) | set(supporting_remaining))
+        # Class standing from hours earned so far (30 a year)
+        standing = 1 + int(earned_hours // 30)
+        generic_left = sum(chunk["hours"] for chunk in generic_queue if not chunk.get("program"))
+        # (pick-lists count once the student is within a year of them --
+        # upper-division ones don't shrink gen-ed's room in year one)
+        courses_left = sum(_hrs(c) for c in set(cs_pool) | set(supporting_remaining)) + sum(
+            chunk["hours"] for chunk in generic_queue
+            if chunk.get("program") and chunk["year"] <= standing + 1)
         course_share = -(-courses_left // terms_left) if terms_left else 0
         reserve = min(generic_left, -(-generic_left // terms_left)) if terms_left else 0
         reserve = max(0, min(reserve, TARGET_HOURS_PER_TERM - course_share))
         course_room = TARGET_HOURS_PER_TERM - reserve
         # Healthy course mix: the limit per term, raised only as far as needed
         # when a degree has more full courses left than fit at the limit
-        full_left = sum(1 for c in set(cs_pool) | set(supporting_remaining) if _hrs(c) >= 3)
+        full_left = sum(1 for c in set(cs_pool) | set(supporting_remaining) if _hrs(c) >= 3) + sum(
+            1 for chunk in generic_queue if chunk.get("program") and chunk["hours"] >= 3)
         course_limit = max(max_courses_per_term or 0, -(-full_left // terms_left) if terms_left else 0)
+
+        def _full_count():
+            """Full (3+ credit) courses this term, pick-list rows included."""
+            return sum(1 for item in term_items
+                       if (item.get("kind") == "course" or item.get("program")) and (item.get("hours") or 0) >= 3)
+
+        def _fill_program(relaxed=False, share_only=False):
+            """The program's pick-list rows, like its courses: earliest year
+            first, within the course-mix limit and the courses' share of the
+            term. *share_only*: just their even share of the terms left (so
+            they don't pile up at the end), ahead of other courses.
+            *relaxed* (a term left light): year and share give way."""
+            nonlocal hours_used
+            placed = []
+            eligible = [c for c in generic_queue if c.get("program") and (c["year"] <= standing + 1 or terms_left <= 2)]
+            share = -(-sum(c["hours"] for c in eligible) // terms_left) if terms_left else 0
+            share_used = 0
+            for chunk in sorted((c for c in generic_queue if c.get("program")), key=lambda c: c["year"]):
+                if share_only and share_used >= share:
+                    break
+                if not relaxed and chunk["year"] > standing + 1 and terms_left > 2:
+                    continue
+                if (max_courses_per_term and not cap_relaxed and chunk["hours"] >= 3
+                        and _full_count() >= course_limit):
+                    continue
+                # Like a course: one for the student's current year claims its
+                # spot before gen-ed; one for next year uses the course share
+                this_year = chunk["year"] <= standing
+                if (not relaxed and not share_only and not this_year and hours_used
+                        and hours_used + chunk["hours"] > course_room):
+                    continue
+                if not _fits(chunk["hours"]):
+                    continue
+                term_items.append(chunk)
+                hours_used += chunk["hours"]
+                share_used += chunk["hours"]
+                placed.append(id(chunk))
+            generic_queue[:] = [c for c in generic_queue if id(c) not in placed]
 
         def _fill_generic():
             """Requirement rows in queue order, skipping any that don't fit.
@@ -1015,8 +1076,11 @@ def generate_plan(
             nonlocal hours_used
             leftover = []
             for chunk in generic_queue:
-                if chunk["id"] == ELECTIVES_GENERIC_ID and any(
-                    c["id"] != ELECTIVES_GENERIC_ID and c not in term_items for c in generic_queue
+                if chunk.get("program"):
+                    leftover.append(chunk)  # placed with the program's courses (_fill_program)
+                elif chunk["id"] == ELECTIVES_GENERIC_ID and any(
+                    c["id"] != ELECTIVES_GENERIC_ID and not c.get("program") and c not in term_items
+                    for c in generic_queue
                 ) and hours_used >= TARGET_HOURS_PER_TERM - 3:
                     leftover.append(chunk)
                 elif _fits(chunk["hours"]):
@@ -1026,11 +1090,9 @@ def generate_plan(
                     leftover.append(chunk)
             generic_queue[:] = leftover
 
-        # Class standing from hours earned so far (30 a year). A course waits
-        # until the student is within a year of where the map (or its level)
-        # puts it -- no senior seminar in the first semester just because it
-        # lists no prerequisites -- unless it has to start now
-        standing = 1 + int(earned_hours // 30)
+        # A course waits until the student is within a year of where the map
+        # (or its level) puts it -- no senior seminar in the first semester
+        # just because it lists no prerequisites -- unless it has to start now
 
         def _in_year(code):
             return _critical(code) or (map_year.get(code) or _level(code)) <= standing + 1
@@ -1040,6 +1102,12 @@ def generate_plan(
             # Courses for the student's current year (or that must start now)
             # go in before the gen-ed share; next year's courses use what's
             # left of the course share
+            # Courses that can't wait, then the pick-lists' even share, then
+            # the rest of the courses
+            for code in candidates:
+                if _critical(code) and _ready(code):
+                    _try(code)
+            _fill_program(share_only=True)
             for code in candidates:
                 if not _ready(code) or not _in_year(code):
                     continue
@@ -1047,11 +1115,13 @@ def generate_plan(
                 this_year = (map_year.get(code) or _level(code)) <= standing
                 if critical or this_year or hours_used + _hrs(code) <= course_room:
                     _try(code)
+            _fill_program()
             _fill_generic()
             # Room left over (few requirement rows remain): more courses, then rows
             for code in candidates:
                 if code not in newly_completed and _ready(code) and _in_year(code):
                     _try(code)
+            _fill_program()
 
             # Fills remaining space with requirement rows, skipping any piece
             # that doesn't fit rather than stopping at it
@@ -1061,13 +1131,31 @@ def generate_plan(
             # The course-mix limit gives way only when no gen-ed or other
             # requirement row is left to mix in.
             if hours_used <= TARGET_HOURS_PER_TERM - 3:
-                cap_relaxed = not generic_queue
+                cap_relaxed = not any(not c.get("program") for c in generic_queue)
                 for code in candidates:
                     if code not in newly_completed and _ready(code):
                         _try(code)
+                _fill_program(relaxed=True)
+                _fill_generic()
                 cap_relaxed = False
 
         _fill_term()
+        # Stay on pace for the next class-standing threshold courses are
+        # waiting for (junior: 60 hours): after this term the student should
+        # be within full terms of it. A term that falls short (13 hours here,
+        # 14 there -- ending at 59) is topped up (up to MAX_HOURS_PER_TERM),
+        # instead of a later term being gen-eds only while those courses wait
+        # (Only when the plan is tight -- with spare terms there's no hurry)
+        if next_gate and work_left >= terms_left * (TARGET_HOURS_PER_TERM - 1):
+            terms_to_gate = -(-(next_gate - earned_hours) // TARGET_HOURS_PER_TERM)
+            on_pace = next_gate - TARGET_HOURS_PER_TERM * (terms_to_gate - 1)
+            if earned_hours + hours_used < on_pace <= earned_hours + MAX_HOURS_PER_TERM:
+                term_cap = MAX_HOURS_PER_TERM
+                _fill_generic()
+                if earned_hours + hours_used < on_pace:
+                    for code in candidates:
+                        if code not in newly_completed and _ready(code):
+                            _try(code)
         if not term_items and not generic_queue and plan_codes and all(
             (catalog.get(code) or {}).get("min_hours", 0) > earned_hours for code in plan_codes
         ):
