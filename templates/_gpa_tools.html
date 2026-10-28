@@ -86,20 +86,25 @@
   })();
   let prefillKey = '';
 
+  // The plan page's rows (its next semester) and rows typed on other pages
+  // are kept apart, so neither overwrites the other
   function save() {
+    const previous = load();
+    const rows = [...rowsBox.children].map(row => ({
+      name: row.querySelector('.gpa-name').value,
+      hours: row.querySelector('.gpa-hrs').value,
+      grade: row.querySelector('.gpa-grade').value,
+      old: row.querySelector('.gpa-old').value,
+    }));
     const state = {
-      // (pages without a plan keep the last plan's marker)
-      prefill: prefillKey || load().prefill || '',
+      // (pages without a plan keep the last plan's marker and rows)
+      prefill: prefillKey || previous.prefill || '',
       current: $('gpa_current').value,
       hours: $('gpa_hours').value,
       goal: $('gpa_goal').value,
       more: $('gpa_more').value,
-      rows: [...rowsBox.children].map(row => ({
-        name: row.querySelector('.gpa-name').value,
-        hours: row.querySelector('.gpa-hrs').value,
-        grade: row.querySelector('.gpa-grade').value,
-        old: row.querySelector('.gpa-old').value,
-      })),
+      planRows: prefillKey ? rows : (previous.planRows || []),
+      rows: prefillKey ? (previous.rows || []) : rows,
     };
     try { sessionStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
   }
@@ -110,13 +115,12 @@
   }
 
   function addRow(data = {}) {
-    const ungraded = data.grade === '';
     const row = document.createElement('div');
     row.className = 'gpa-row';
     row.innerHTML = `
       <input type="text" class="form-control form-control-sm gpa-name" placeholder="CSCI 3110" aria-label="Course">
       <input type="number" class="form-control form-control-sm gpa-hrs" min="0" max="12" step="1" aria-label="Credit hours">
-      <select class="form-select form-select-sm gpa-grade" aria-label="Expected grade">${ungraded ? gradeOptions('', '&mdash;') : gradeOptions(data.grade || 'A')}</select>
+      <select class="form-select form-select-sm gpa-grade" aria-label="Expected grade">${gradeOptions(data.grade || '', '&mdash;')}</select>
       <select class="form-select form-select-sm gpa-old" aria-label="Grade it replaces">${gradeOptions(data.old || '', 'New')}</select>
       <button type="button" class="btn-close gpa-remove" aria-label="Remove course"></button>`;
     const nameInput = row.querySelector('.gpa-name');
@@ -124,7 +128,7 @@
     // Long names (gen-ed areas) don't fit the box: hovering shows all of it
     nameInput.title = nameInput.value;
     nameInput.addEventListener('input', () => { nameInput.title = nameInput.value; });
-    row.querySelector('.gpa-hrs').value = data.hours ?? 3;
+    row.querySelector('.gpa-hrs').value = data.hours ?? '';
     row.querySelector('.gpa-remove').addEventListener('click', () => { row.remove(); update(); });
     rowsBox.appendChild(row);
   }
@@ -260,13 +264,21 @@
   ['current', 'hours', 'goal', 'more'].forEach(key => {
     if (saved[key]) $(`gpa_${key}`).value = saved[key];
   });
+  // Earlier versions kept a plan's rows in "rows"
+  if (saved.prefill && !saved.planRows) {
+    saved.planRows = saved.rows || [];
+    saved.rows = [];
+  }
+  // Until a plan is generated the rows start blank
   let rows = saved.rows && saved.rows.length ? saved.rows : [{}];
   if (nextTerm && nextTerm.courses && nextTerm.courses.length) {
     // Start from the upcoming semester's courses (grades left for the
     // student); edits made for this same semester are kept
     const courses = nextTerm.courses.filter(c => c && typeof c.code === 'string');
     prefillKey = `${nextTerm.term}:${courses.map(c => c.code).join(',')}`;
-    if (saved.prefill !== prefillKey) {
+    if (saved.prefill === prefillKey && saved.planRows && saved.planRows.length) {
+      rows = saved.planRows;
+    } else {
       rows = courses.map(c => ({ name: c.code, hours: Number(c.hours) || 0, grade: '' }));
       const total = courses.reduce((sum, c) => sum + (Number(c.hours) || 0), 0);
       if (total) $('gpa_more').value = total;
