@@ -116,10 +116,14 @@
     row.innerHTML = `
       <input type="text" class="form-control form-control-sm gpa-name" placeholder="CSCI 3110" aria-label="Course">
       <input type="number" class="form-control form-control-sm gpa-hrs" min="0" max="12" step="1" aria-label="Credit hours">
-      <select class="form-select form-select-sm gpa-grade" aria-label="Expected grade">${ungraded ? gradeOptions('', 'Grade') : gradeOptions(data.grade || 'A')}</select>
+      <select class="form-select form-select-sm gpa-grade" aria-label="Expected grade">${ungraded ? gradeOptions('', '&mdash;') : gradeOptions(data.grade || 'A')}</select>
       <select class="form-select form-select-sm gpa-old" aria-label="Grade it replaces">${gradeOptions(data.old || '', 'New')}</select>
       <button type="button" class="btn-close gpa-remove" aria-label="Remove course"></button>`;
-    row.querySelector('.gpa-name').value = data.name || '';
+    const nameInput = row.querySelector('.gpa-name');
+    nameInput.value = data.name || '';
+    // Long names (gen-ed areas) don't fit the box: hovering shows all of it
+    nameInput.title = nameInput.value;
+    nameInput.addEventListener('input', () => { nameInput.title = nameInput.value; });
     row.querySelector('.gpa-hrs').value = data.hours ?? 3;
     row.querySelector('.gpa-remove').addEventListener('click', () => { row.remove(); update(); });
     rowsBox.appendChild(row);

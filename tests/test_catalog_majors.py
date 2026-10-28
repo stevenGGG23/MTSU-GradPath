@@ -854,6 +854,10 @@ def test_gpa_calculator_gets_the_upcoming_semester():
     assert data["term"] == first_term
     assert data["courses"] and all(c["hours"] > 0 for c in data["courses"])
     assert "CSCI 1170" not in [c["code"] for c in data["courses"]]
+    # The whole semester: gen-ed / elective rows too, so the hours match the term card
+    term_hours = float(_re.search(r'term-card-title">[^<]+</span>\s*<span class="badge bg-secondary">([\d.]+) cr hrs', html).group(1))
+    assert sum(c["hours"] for c in data["courses"]) == term_hours
+    assert any(not _re.fullmatch(r"[A-Z]{2,4} \d{4}", c["code"]) for c in data["courses"])
 
 
 def test_pdf_layout_hooks_are_on_the_plan_page():

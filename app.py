@@ -1139,11 +1139,31 @@ def _plan():
         if codes and not term.startswith("Remaining"):
             next_term, next_courses = term, codes
             break
-    # The GPA calculator starts from the upcoming semester's courses
-    gpa_next = {"term": next_term, "courses": [
-        {"code": item["code"], "hours": item.get("hours") or 0}
-        for item in plan.get(next_term, []) if item.get("kind") == "course" and (item.get("hours") or 0) > 0
-    ]} if next_term else None
+    # The GPA calculator starts from the upcoming semester: its named courses
+    # and its gen-ed / elective rows (named after the requirement, numbered
+    # when one repeats; "Gen ed 1, 2, ..." when a row has no name)
+    gpa_next = None
+    if next_term:
+        rows, seen, unnamed = [], {}, 0
+        for item in plan.get(next_term, []):
+            hours = item.get("hours") or 0
+            if hours <= 0 or item.get("kind") not in ("course", "requirement"):
+                continue
+            if item["kind"] == "course":
+                name = item["code"]
+            else:
+                name = " ".join(str(item.get("label") or "").split())
+                if not name:
+                    unnamed += 1
+                    name = f"Gen ed {unnamed}"
+                name = name.replace(" and ", " & ")
+                if len(name) > 34:
+                    name = name[:33].rstrip() + "…"
+                seen[name] = seen.get(name, 0) + 1
+                if seen[name] > 1:
+                    name = f"{name} {seen[name]}"
+            rows.append({"code": name, "hours": hours})
+        gpa_next = {"term": next_term, "courses": rows}
 
     # Calculates the total number of planned hours for each semester
     term_hours_display = {
