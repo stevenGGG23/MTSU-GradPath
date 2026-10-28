@@ -662,9 +662,17 @@ def generate_plan(
     catalog: Dict[str, Dict[str, object]] = None,
     course_grades: Dict[str, str] = None,
     earned_hours: float = None,
+    max_courses_per_term: int = None,
 ) -> Dict[str, List[Dict[str, object]]]:
     """*earned_hours*: credit hours the student has already earned (for class
-    standing). Defaults to the hours of *completed_courses*."""
+    standing). Defaults to the hours of *completed_courses*.
+
+    *max_courses_per_term*: "healthy course mix" -- at most this many named
+    courses of 3+ credits (labs don't count) per term, with gen-ed and other
+    requirement rows filling the rest. When a degree has more courses left
+    than fit at that pace, the limit rises just enough to finish (spread
+    evenly), and a course whose chain needs every remaining term may go
+    over. None: no limit."""
 
     cfg = degree_cfg or CS_CONFIG
     prefix = cfg["prefix"]
@@ -843,6 +851,14 @@ def generate_plan(
             continue
         terms_done += 1
         terms_left = target_terms - terms_done + 1  # including this one
+        # The plan's remaining terms after this one (summers skipped when off)
+        upcoming, next_index = [], term_index
+        while len(upcoming) < terms_left - 1:
+            next_index += 1
+            label = term_label(next_index, start_season, start_year)
+            if include_summer or not label.startswith("Summer"):
+                season, year = label.split()
+                upcoming.append((season, int(year)))
 
         term_items = []
         hours_used = 0
@@ -882,6 +898,14 @@ def generate_plan(
             if code in supporting_remaining:
                 supporting_remaining.remove(code)
 
+        def _wait_terms(code):
+            """Terms until *code* is offered again after this one (a big
+            number when it isn't, within the plan)."""
+            for wait, (season, year) in enumerate(upcoming, start=1):
+                if _offered(code, season, year):
+                    return wait
+            return terms_left + 1
+
         def _try(code):
             """Schedule *code* -- with its labs and every corequisite not yet
             taken ("X or simultaneous completion of X"), which go in the same
@@ -914,6 +938,16 @@ def generate_plan(
                     return  # part of the group can't go this term: wait
             if not _fits(sum(_hrs(member) for member in group)):
                 return
+            # A course can wait only if, starting at its next offering, it and
+            # the courses after it still fit before the plan ends
+            if (max_courses_per_term and not cap_relaxed
+                    and not (can_finish and _wait_terms(code) + _chain(code) > terms_left)):
+                # Healthy course mix: no more than the limit of full courses this term
+                full_now = sum(1 for item in term_items
+                               if item.get("kind") == "course" and (item.get("hours") or 0) >= 3)
+                full_new = sum(1 for member in group if _hrs(member) >= 3)
+                if full_new and full_now + full_new > course_limit:
+                    return
             for member in group:
                 _schedule(member)
 
@@ -921,6 +955,7 @@ def generate_plan(
         remaining_required_now = {code for code in required_codes if code not in current_completed}
         plan_codes = set(cs_pool) | set(supporting_remaining)
         relax_standing = False
+        cap_relaxed = False
 
         def _standing_ok(code):
             # "Junior standing" etc. from the catalog's prerequisite line
@@ -959,11 +994,20 @@ def generate_plan(
         candidates = sorted(set(cs_pool) | set(supporting_remaining), key=_priority)
 
         # Leave room each term for an even share of the gen-ed and other
-        # requirement rows, so they don't all pile up at the end. A course
-        # whose chain needs every remaining term goes in regardless.
+        # requirement rows, so they don't all pile up at the end -- but never
+        # so much that the named courses can't keep their own even share
+        # (otherwise they pile up at the end instead). A course whose chain
+        # needs every remaining term goes in regardless.
         generic_left = sum(chunk["hours"] for chunk in generic_queue)
+        courses_left = sum(_hrs(c) for c in set(cs_pool) | set(supporting_remaining))
+        course_share = -(-courses_left // terms_left) if terms_left else 0
         reserve = min(generic_left, -(-generic_left // terms_left)) if terms_left else 0
+        reserve = max(0, min(reserve, TARGET_HOURS_PER_TERM - course_share))
         course_room = TARGET_HOURS_PER_TERM - reserve
+        # Healthy course mix: the limit per term, raised only as far as needed
+        # when a degree has more full courses left than fit at the limit
+        full_left = sum(1 for c in set(cs_pool) | set(supporting_remaining) if _hrs(c) >= 3)
+        course_limit = max(max_courses_per_term or 0, -(-full_left // terms_left) if terms_left else 0)
 
         def _fill_generic():
             """Requirement rows in queue order, skipping any that don't fit.
@@ -992,6 +1036,7 @@ def generate_plan(
             return _critical(code) or (map_year.get(code) or _level(code)) <= standing + 1
 
         def _fill_term():
+            nonlocal cap_relaxed
             # Courses for the student's current year (or that must start now)
             # go in before the gen-ed share; next year's courses use what's
             # left of the course share
@@ -1012,11 +1057,15 @@ def generate_plan(
             # that doesn't fit rather than stopping at it
             _fill_generic()
             # A term still light after that: a later-year course rather than
-            # an empty slot (finishing on time matters more than the ideal year)
+            # an empty slot (finishing on time matters more than the ideal year).
+            # The course-mix limit gives way only when no gen-ed or other
+            # requirement row is left to mix in.
             if hours_used <= TARGET_HOURS_PER_TERM - 3:
+                cap_relaxed = not generic_queue
                 for code in candidates:
                     if code not in newly_completed and _ready(code):
                         _try(code)
+                cap_relaxed = False
 
         _fill_term()
         if not term_items and not generic_queue and plan_codes and all(

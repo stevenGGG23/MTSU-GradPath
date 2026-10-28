@@ -6,7 +6,7 @@
 {% set saved_hours = saved_state.get('generic_hours', {}) %}
 {% set saved_season = saved_state.get('start_season', default_season) %}
 {% set saved_year = saved_state.get('start_year', default_year) %}
-{% set saved_semesters = saved_state.get('target_semesters', 4) %}
+{% set saved_semesters = saved_state.get('target_semesters', 8) %}
 {% set saved_summer = saved_state.get('include_summer', false) %}
 
 <form method="post" id="planner-form">
@@ -222,6 +222,16 @@
                       <label class="form-check-label" for="include_summer">Include summer term planning</label>
                     </div>
                   </div>
+                  <div class="col-12">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" role="switch" id="healthy_mix" name="healthy_mix" checked>
+                      <label class="form-check-label" for="healthy_mix">Healthy course mix</label>
+                      <i class="bi bi-question-circle text-muted ms-1 healthy-mix-help" tabindex="0" role="img"
+                         aria-label="About healthy course mix" data-bs-toggle="tooltip" data-bs-placement="top"
+                         title="At most 3 major courses per semester, with gen-eds mixed in, so no semester is overloaded (2–3 is common workload advice). A course you need that term to graduate on time can still go over. Turn off to pack courses as tightly as prerequisites allow."></i>
+                    </div>
+                    <input type="hidden" name="healthy_mix_shown" value="1">
+                  </div>
                 </div>
               </div>
             </div>
@@ -405,6 +415,7 @@ function saveState() {
     start_year: document.getElementById('start_year').value,
     target_semesters: document.getElementById('target_semesters').value,
     include_summer: document.getElementById('include_summer').checked,
+    healthy_mix: document.getElementById('healthy_mix').checked,
     minors: selectedMinors.slice(),
     auto: autoAdded,
   };
@@ -1102,6 +1113,7 @@ updateCourseGrades();
   if (saved.start_year) document.getElementById('start_year').value = saved.start_year;
   if (saved.target_semesters) document.getElementById('target_semesters').value = saved.target_semesters;
   if (saved.include_summer !== undefined) document.getElementById('include_summer').checked = saved.include_summer;
+  if (saved.healthy_mix !== undefined) document.getElementById('healthy_mix').checked = saved.healthy_mix;
   // Older saved state held a single "minor" string
   setMinors(saved.minors || (saved.minor ? [saved.minor] : []));
 

@@ -682,6 +682,8 @@ def index():
 
 # MTSU's own Schedule Planner: pick sections by time, days and open seats
 SCHEDULE_PLANNER_URL = "https://sched.mtsu.edu/#/form"
+# "Healthy course mix": most full (3+ credit) courses planned in one term
+HEALTHY_MIX_COURSES = 3
 
 # Course equivalencies (old code -> current code) rarely change; read them at
 # most every few minutes. A failure is remembered too, so a database that's
@@ -774,11 +776,14 @@ def _plan():
             minor_cfgs.append(minor_cfg)
 
     try:
-        target_semesters = min(max(int(request.form.get("target_semesters", 4)), 1), 16)
+        target_semesters = min(max(int(request.form.get("target_semesters", 8)), 1), 16)
     except ValueError:
-        target_semesters = 4
+        target_semesters = 8
 
     include_summer = bool(request.form.get("include_summer"))
+    # Healthy course mix (on unless the student switched it off): at most
+    # HEALTHY_MIX_COURSES full courses per term, gen-eds mixed in
+    healthy_mix = bool(request.form.get("healthy_mix")) or not request.form.get("healthy_mix_shown")
 
     start_season = request.form.get("start_season") or default_start_season()
 
@@ -939,6 +944,7 @@ def _plan():
         catalog=catalog,
         course_grades=course_grades,
         earned_hours=earned_hours,
+        max_courses_per_term=HEALTHY_MIX_COURSES if healthy_mix else None,
     )
 
     audit = build_audit(

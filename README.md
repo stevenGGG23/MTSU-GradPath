@@ -162,6 +162,7 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Healthy course mix (on by default)** — a switch in step 4 keeps semesters balanced: at most 3 full major courses per term (labs don't count) with gen-eds mixed in, instead of one semester of all major courses and another of all gen-eds. Turning it off packs courses as tightly as prerequisites allow. The limit only gives way when it must — a course whose prerequisite chain needs every remaining term or that won't be offered again in time, or a degree with more courses left than fit at 3 a term (then they're spread evenly). Across all majors, terms over 3 major courses dropped from 106 majors to 27, with one more major needing a 9th semester. The planner also now gives named courses an even share of each semester before gen-ed fills the rest. The step-4 term count now defaults to **8** (a four-year plan).
 - **Prerequisite path reads left to right** — the map on the plan page now flows left to right like the Prerequisite Map page, so a sequence reads as one row (Professional Pilot I → II → III → IV → V). Courses with no prerequisite links on the plan are listed under the map as colored chips instead of crowding it, and the whole map shows at once (no cut-off scroll box).
 - **Keyboard navigation** — every search box (course search in step 2, major, second major, minors) works without a mouse: **Up/Down** move through the results, **Enter** picks the highlighted one (in course search, Enter with nothing highlighted adds the typed code), **Escape** closes the list. Screen readers are told which result is highlighted (ARIA combobox). The prerequisite popup takes focus when it opens, and Escape closes it.
 - **Prerequisites check themselves** — checking a course also checks its prerequisites on the same checklist (Computer Science II → Computer Science I; Flight Lab II → Flight Lab I), and theirs in turn. Unchecking the course unchecks them again; unchecking one of them is respected. On **Generate Plan**, a popup lists what was added and why, with **Proceed** or **Go back and edit** (which opens step 1 and highlights those courses). Only prerequisites in the student's own program are assumed — never ones from outside it (often skippable by placement score) or an "A or B" choice with more than one option listed.
@@ -193,7 +194,7 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 1. Search for a major in the **Major** box (e.g. "nursing", "accounting", "CSCI"). Optionally add a second major and up to four minors.
 2. Check off completed courses, grouped by the catalog's own sections. Checking a course also checks its prerequisites on the list (you'll be asked to confirm them when you generate the plan). Hover a course for its credits, when it's offered, whether it's required, and any minimum grade. Filter the list with **All / Required / Fall / Spring / Summer** or by typing a code or title. Use search (step 2) to add anything else in the catalog — type, then **Up/Down** and **Enter** to pick a result.
 3. Review **Other degree requirements**: rows marked *auto* fill in from checked-off courses; enter hours for anything else.
-4. Pick a starting term/year, number of terms, and whether to include summers, then **Generate Plan**.
+4. Pick a starting term/year, number of terms (8 by default), whether to include summers, and whether to keep a **healthy course mix** (on by default), then **Generate Plan**.
 5. Review completion progress, the per-section breakdown, the term-by-term schedule, and any prerequisite warnings. **View in catalog** links to the official program page.
 6. **Build my schedule** (or *Build Schedule* in the nav) opens MTSU's Schedule Planner (`sched.mtsu.edu`) to pick sections by days, times and open seats; the plan page lists the next term's courses with a button to copy them.
 7. **Prerequisite Map** in the nav bar shows the course dependency graph for any major (with full screen and zoom).
@@ -214,7 +215,7 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,294 tests | **2,293 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,519 tests | **2,518 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -283,7 +284,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>2,294 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,519 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]

@@ -781,3 +781,51 @@ def test_plan_page_prerequisite_path_reads_left_to_right():
     chips = re_.findall(r'class="badge prereq-chip prereq-chip-\w+"[^>]*>([A-Z]{2,4} \d{4})', html)
     assert chips and all(code.replace(" ", "_") not in graph for code in chips)
     assert "No prerequisite links on your plan" in html
+
+
+def _full_courses_per_term(plan):
+    return [sum(1 for i in items if i.get("kind") == "course" and (i.get("hours") or 0) >= 3)
+            for term, items in plan.items() if not term.startswith(("Remaining", "Summer"))]
+
+
+def test_healthy_course_mix_spreads_major_courses():
+    """Computer Science over 8 semesters: no more than 3 full major courses in
+    any semester, and gen-ed in every semester but none piled at the end."""
+    from mtsugradpath.degree_configs import get_full_degree_config
+    cfg = get_full_degree_config("cs")
+    catalog = load_catalog_for(cfg)
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg,
+                         catalog=catalog, max_courses_per_term=3)
+    counts = _full_courses_per_term(plan)
+    assert max(counts) <= 3 and min(counts) >= 1, counts
+    assert not any(t.startswith("Remaining") for t in plan)
+    assert validate_plan(plan, set(), catalog, degree_cfg=cfg) == []
+
+
+@pytest.mark.parametrize("key", MAJOR_KEYS)
+def test_every_catalog_major_plans_cleanly_with_a_healthy_course_mix(key):
+    """The course-mix limit never breaks prerequisites, standing or the plan."""
+    cfg = catalog_majors()[key]
+    catalog = load_catalog_for(cfg)
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg,
+                         catalog=catalog, max_courses_per_term=3)
+    assert validate_plan(plan, set(), catalog, degree_cfg=cfg) == []
+    term_of, before = _terms_and_hours(plan)
+    for code, t in term_of.items():
+        info = catalog_store.course(code) or {}
+        assert not [p for p in info.get("prereqs", []) if p in term_of and term_of[p] >= t], code
+        assert before[code] >= catalog_store.standing_hours(code), code
+
+
+def test_planner_defaults_to_eight_terms_and_a_healthy_mix():
+    re = _re
+    page = app.test_client().get("/?major=cs").get_data(as_text=True)
+    assert re.search(r'id="target_semesters"[^>]*value="8"', page)
+    assert re.search(r'id="healthy_mix"[^>]*checked', page)
+    client = app.test_client()
+    base = {"major": "cs", "start_season": "Fall", "start_year": "2026", "healthy_mix_shown": "1"}
+    on = client.post("/", data={**base, "healthy_mix": "on", "target_semesters": "8"}).get_data(as_text=True)
+    off = client.post("/", data={**base, "target_semesters": "8"}).get_data(as_text=True)
+    busiest = lambda html: max(len(re.findall(r'plan-item-tag">MAJ', body)) for body in
+                               re.findall(r'term-card-title">(?!Remaining)[^<]+<(.*?)(?=term-card-title|Your prerequisite path)', html, re.S))
+    assert busiest(on) <= 3 < busiest(off)
