@@ -150,4 +150,29 @@ def fetch_raw(raw_dir: Path, catalog_id: int | None = None, log=print) -> dict:
     failures += _fetch_details(catalog_id, "courses", course_briefs, raw_dir / "courses", log)
     if failures:
         raise RuntimeError(f"{failures} catalog items failed to download; re-run to retry")
+    fetch_degree_requirements_page(catalog_id, raw_dir, log)
     return meta
+
+
+def fetch_degree_requirements_page(catalog_id: int, raw_dir: Path, log=print) -> None:
+    """Save the catalog's "Undergraduate Degree Requirements" page (the
+    university-wide bachelor's rules: 36 upper-division hours, 30 hours
+    through MTSU, ...). Best effort: without it the site uses the last
+    values it had."""
+    try:
+        pages, page = [], 1
+        while True:
+            data = get_json(f"{API_ROOT}/catalog/{catalog_id}/pages/?page-size={PAGE_SIZE}&page={page}")
+            batch = data.get("page-list") or []
+            pages += batch
+            if not batch or len(pages) >= data.get("count", 0):
+                break
+            page += 1
+        match = next((p for p in pages if "undergraduate degree requirements" in (p.get("name") or "").lower()), None)
+        if not match:
+            log("Degree requirements page not found; keeping the previous rules")
+            return
+        detail = get_json(f"{API_ROOT}/catalog/{catalog_id}/page/{match['id']}/")
+        (raw_dir / "degree_requirements.json").write_text(json.dumps(detail))
+    except Exception as exc:  # never fails the export
+        log(f"Couldn't fetch the degree requirements page ({exc}); keeping the previous rules")

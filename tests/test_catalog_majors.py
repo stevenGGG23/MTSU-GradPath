@@ -913,3 +913,39 @@ def test_no_extra_load_when_there_are_spare_terms():
     tight: a 120-hour degree over 12 terms stays at 15 hours or fewer."""
     plan, _ = _plan_for(catalog_majors()["business-administration-bba"], terms=12)
     assert max(sum(i.get("hours") or 0 for i in items) for _, items in _terms(plan)) <= 15
+
+
+def test_elective_labels_say_exactly_what_counts():
+    from mtsugradpath.degree_checks import clarify_label
+    assert clarify_label("ACTG UD electives") == "ACTG upper-division electives (3000–4000-level ACTG courses)"
+    assert clarify_label("Upper-division electives") == "Upper-division electives (3000–4000 level)"
+    assert clarify_label("Free electives") == "Free electives (any course)"
+    assert clarify_label("HIST upper-division (3000-4000 level) elective") == "HIST upper-division (3000-4000 level) elective"
+
+
+def test_plan_page_has_the_bachelors_degree_block_and_gateways():
+    """Lisa Eddy (advising): MATH 1730 is the gatekeeper to the CSCI courses, and
+    the Degree Works "Bachelor's Degree" block (36 upper-division hours, 30
+    through MTSU, ...) blocks graduation even with every course done."""
+    html = _cs_plan_page()
+    rules = catalog_store.degree_rules()
+    assert "Bachelor's degree requirements" in html
+    assert f"{rules['upper_division_hours']} upper-division hours" in html
+    assert f"{rules['residence_hours']} hours earned through MTSU" in html
+    assert "Gateway course: MATH 1730" in html and "gateNode" in html
+    assert "Gateway course: ENGL 1010" not in html  # the Written Communication row covers it
+    # Both map layouts are offered; top-down is the default
+    assert 'data-map-dir="TD" aria-pressed="true"' in html and 'data-map-dir="LR"' in html
+
+
+def test_short_plans_turn_late_free_electives_into_upper_division_ones():
+    from mtsugradpath.degree_checks import UPPER_DIVISION_ELECTIVE_LABEL, bachelors_checks, upper_division_hours
+    cfg = catalog_majors()["history-ba"]
+    plan = generate_plan(set(), {}, 8, False, start_season="Fall", start_year=2026, degree_cfg=cfg,
+                         catalog=load_catalog_for(cfg), max_courses_per_term=3)
+    before = upper_division_hours(plan, set(), cfg)
+    rows = bachelors_checks(plan, set(), cfg, [(cfg["name"], cfg, 12)])
+    relabeled = [i for items in plan.values() for i in items if i.get("label") == UPPER_DIVISION_ELECTIVE_LABEL]
+    if before < catalog_store.degree_rules()["upper_division_hours"]:
+        assert relabeled and upper_division_hours(plan, set(), cfg) > before
+    assert rows[0]["status"] in ("ok", "info")

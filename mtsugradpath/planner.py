@@ -1474,6 +1474,7 @@ def render_personal_prereq_mermaid(
         "next": "nextNode",
         "planned": "plannedNode",
         "external": "extNode",
+        "gateway": "gateNode",
     }
     for code, info in nodes.items():
         cls = status_class_map.get(info.get("status"), "plannedNode")
@@ -1484,6 +1485,7 @@ def render_personal_prereq_mermaid(
         "  classDef nextNode fill:#2563eb,color:#ffffff,stroke:#1e40af,stroke-width:3px",
         "  classDef plannedNode fill:#bfdbfe,color:#1e3a5f,stroke:#3b82f6,stroke-width:1px",
         "  classDef extNode fill:#f1f5f9,color:#475569,stroke:#cbd5e1,stroke-dasharray: 4 2",
+        "  classDef gateNode fill:#fef3c7,color:#78350f,stroke:#d97706,stroke-width:2px,stroke-dasharray: 5 3",
     ])
 
     return "\n".join(lines)

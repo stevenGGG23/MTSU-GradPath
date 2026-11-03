@@ -24,6 +24,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mtsugradpath import catalog_store
 from mtsugradpath.catalog_programs import auto_generic_hours, tbc_area_options
+from mtsugradpath.degree_checks import bachelors_checks, clarify_label, gateway_courses
 from mtsugradpath.config import SYNC_ADMIN_PASSWORD, SYNC_ADMIN_USER
 from mtsugradpath.db import SessionLocal, init_db
 from mtsugradpath.degree import (
@@ -954,6 +955,25 @@ def _plan():
             if not (term.startswith("Summer") and all(item.get("kind") == "note" for item in items))
         }
 
+    # Degree Works' "Bachelor's Degree" block: university-wide rules from the
+    # catalog (36 upper-division hours, 30 through MTSU, ...). Late free
+    # electives become upper-division ones if the plan would fall short.
+    rules = catalog_store.degree_rules()
+    degree_programs = [(degree_cfg["name"], degree_cfg, rules["major_upper_division_at_mtsu"])]
+    if second_cfg:
+        degree_programs.append((second_cfg["name"], second_cfg, rules["major_upper_division_at_mtsu"]))
+    degree_programs += [(m["name"], m, rules["minor_upper_division_at_mtsu"]) for m in minor_cfgs]
+    bachelors = bachelors_checks(plan, validated_completed_courses, planning_cfg, degree_programs)
+    # Courses the plan depends on but doesn't schedule (MATH 1730 before
+    # CSCI 1170 and MATH 1910 -- often skippable with a placement score)
+    program_labs = {lab for c in (degree_cfg, second_cfg, *minor_cfgs) if c
+                    for labs in (c.get("coreq_map") or {}).values() for lab in labs}
+    gen_ed_options = tbc_area_options()
+    plan_row_ids = {item.get("id") for items in plan.values() for item in items if item.get("kind") == "requirement"}
+    covered_by_rows = {code for gid in plan_row_ids
+                       for code in ((planning_cfg.get("generic_options") or {}).get(gid) or gen_ed_options.get(gid) or [])}
+    gateways = gateway_courses(plan, validated_completed_courses, ignore=program_labs, covered=covered_by_rows)
+
     audit = build_audit(
         validated_completed_courses,
         audit_generic_hours,
@@ -1026,10 +1046,22 @@ def _plan():
         if code not in all_applied_codes and code not in all_known_codes
     )
 
+    # Elective rows say exactly what counts ("CSCI upper-division electives
+    # (3000–4000-level CSCI courses)" vs "Upper-division elective (any subject...)")
+    for group in audit["groups"] + (second_audit["groups"] if second_audit else []) + minor_audits:
+        for entry in group.get("entries", []):
+            entry["label"] = clarify_label(entry.get("label"))
+
     # Build the student-specific prerequisite tree
     personal_nodes, personal_edges = build_personal_prereq_graph(
         catalog, validated_completed_courses, plan, degree_cfg=planning_cfg
     )
+    for gateway in gateways:
+        personal_nodes.setdefault(gateway["code"], {"title": gateway["title"], "status": "gateway"})
+        personal_nodes[gateway["code"]]["status"] = "gateway"
+        for code in gateway["direct"]:
+            if code in personal_nodes and (gateway["code"], code) not in personal_edges:
+                personal_edges.append((gateway["code"], code))
     # Courses with no prerequisite links on the plan would just stack down the
     # side of the graph -- list them separately (as the Prerequisite Map does)
     personal_linked = {code for edge in personal_edges for code in edge}
@@ -1097,7 +1129,7 @@ def _plan():
             return {
                 "kind": kind,
                 "code": None,
-                "title": item["label"],
+                "title": clarify_label(item["label"]),
                 "hours": credit_short(item["hours"]),
                 "suggestion": item.get("suggestion"),
                 # The program's own pick-lists are major courses, not gen-ed
@@ -1194,6 +1226,9 @@ def _plan():
         personal_mermaid=personal_mermaid,
         personal_standalone=personal_standalone,
         gpa_next=gpa_next,
+        bachelors=bachelors,
+        degree_rules=rules,
+        gateways=gateways,
         degree_name=degree_cfg["name"],
         catalog_url=degree_cfg.get("catalog_url"),
         second_audit=second_audit,

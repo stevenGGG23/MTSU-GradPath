@@ -4,6 +4,24 @@
   "use strict";
 
   const ZOOM_STEP = 1.25;
+  // Top-down by default (advisors find it easier to follow); remembered per browser
+  const DIRECTION_KEY = 'gradpath-map-direction';
+
+  function savedDirection() {
+    try { return localStorage.getItem(DIRECTION_KEY) === 'LR' ? 'LR' : 'TD'; } catch (e) { return 'TD'; }
+  }
+
+  function withDirection(source, direction) {
+    return source.replace(/^(\s*)(graph|flowchart)\s+(TD|TB|LR|RL|BT)\b/, `$1$2 ${direction}`);
+  }
+
+  function markDirection(viewer, direction) {
+    viewer.querySelectorAll('[data-map-dir]').forEach(button => {
+      const on = button.dataset.mapDir === direction;
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
   const MIN_ZOOM = 0.25;
   const MAX_ZOOM = 4;
 
@@ -99,6 +117,28 @@
     const wrap = viewer.querySelector(".prereq-graph-wrap");
     if (!wrap) return;
     enablePan(wrap);
+
+    // Layout: set before Mermaid draws (this script runs first), redraw on a switch
+    const pre = wrap.querySelector("pre.mermaid");
+    const source = pre ? pre.textContent : "";
+    let direction = savedDirection();
+    if (pre) pre.textContent = withDirection(source, direction);
+    markDirection(viewer, direction);
+    viewer.querySelectorAll("[data-map-dir]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const next = button.dataset.mapDir;
+        if (next === direction || !window.gradpathMermaid) return;
+        direction = next;
+        try { localStorage.setItem(DIRECTION_KEY, direction); } catch (e) { /* per-tab only */ }
+        markDirection(viewer, direction);
+        const fresh = document.createElement("pre");
+        fresh.className = (pre && pre.className.replace("is-rendered", "")) || "mermaid";
+        fresh.removeAttribute("data-processed");
+        fresh.textContent = withDirection(source, direction);
+        wrap.replaceChildren(fresh);
+        window.gradpathMermaid.run({ nodes: [fresh] });
+      });
+    });
 
     viewer.querySelector("[data-map-full]").addEventListener("click", function () {
       if (isFull(viewer)) exitFull(viewer); else enterFull(viewer);

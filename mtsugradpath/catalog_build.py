@@ -18,6 +18,7 @@ catalog_programs.py, so conversion rules can improve without a re-export.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from html import unescape
@@ -365,6 +366,45 @@ def build_program(detail: dict, course_code_by_id: dict, gateway: str, legacy_ca
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
+_WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "nine": 9, "twelve": 12}
+
+
+def parse_degree_rules(page_html: str) -> dict:
+    """University-wide bachelor's degree rules from the catalog's
+    "Undergraduate Degree Requirements" page -- the numbers behind Degree
+    Works' "Bachelor's Degree" block. Only rules found in the text are
+    returned."""
+    text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", page_html or "")))
+    patterns = {
+        "min_hours": r"complete a minimum of (\d+) semester hours with a 2\.00",
+        "residence_percent": r"minimum of (\d+) percent of credit for each degree awarded by MTSU",
+        "residence_hours": r"minimum of (\d+) hours earned through MTSU",
+        "upper_division_hours": r"[Aa]t least (\d+) semester hours of junior and senior",
+        "major_upper_division_at_mtsu": r"at least (\w+) semester hours at the upper-division level through MTSU in each major",
+        "minor_upper_division_at_mtsu": r"at least (\w+) semester hours at the upper-division level through MTSU in each minor",
+        "senior_college_hours": r"minimum of (\d+) semester hours of senior college credit",
+        "last_hours_elsewhere": r"complete (\d+) of the last \d+ hours at another",
+        "last_hours": r"complete \d+ of the last (\d+) hours at another",
+    }
+    rules = {}
+    for key, pattern in patterns.items():
+        m = re.search(pattern, text)
+        if m:
+            value = m.group(1).lower()
+            number = _WORD_NUMBERS.get(value) or (int(value) if value.isdigit() else None)
+            if number:
+                rules[key] = number
+    return rules
+
+
+def _degree_rules_from(raw_dir: Path) -> dict:
+    path = Path(raw_dir) / "degree_requirements.json"
+    if not path.exists():
+        return {}
+    detail = json.loads(path.read_text())
+    return parse_degree_rules(str(detail.get("content") or detail.get("body") or ""))
+
+
 def build_catalog(raw_dir: Path, gateway: str = "https://catalog.mtsu.edu") -> dict:
     raw_dir = Path(raw_dir)
     meta = json.loads((raw_dir / "meta.json").read_text())
@@ -396,6 +436,7 @@ def build_catalog(raw_dir: Path, gateway: str = "https://catalog.mtsu.edu") -> d
             "catoid": catalog_meta.get("legacy-id"),
             "fetched_at": meta.get("fetched_at"),
             "source": f"{gateway}/widget-api/catalog/{catalog_meta.get('id')}/",
+            **({"degree_rules": rules} if (rules := _degree_rules_from(raw_dir)) else {}),
         },
         "courses": dict(sorted(courses.items())),
         "programs": programs,

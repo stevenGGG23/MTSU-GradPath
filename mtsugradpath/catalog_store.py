@@ -122,6 +122,21 @@ def meta() -> dict:
     return data().get("catalog", {})
 
 
+# Fallback when an export has no "Undergraduate Degree Requirements" page:
+# the 2026-27 catalog's figures (the refresh reads the live page)
+_DEFAULT_DEGREE_RULES = {
+    "min_hours": 120, "residence_percent": 25, "residence_hours": 30, "upper_division_hours": 36,
+    "major_upper_division_at_mtsu": 12, "minor_upper_division_at_mtsu": 3, "senior_college_hours": 50,
+    "last_hours_elsewhere": 12, "last_hours": 30,
+}
+
+
+def degree_rules() -> dict:
+    """University-wide bachelor's degree rules (Degree Works' "Bachelor's
+    Degree" block), read from the catalog's degree requirements page."""
+    return {**_DEFAULT_DEGREE_RULES, **(meta().get("degree_rules") or {})}
+
+
 def courses() -> dict:
     return data()["courses"]
 

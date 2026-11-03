@@ -166,3 +166,21 @@ def test_a_sentence_mentioning_prerequisite_for_is_not_a_prerequisite_line():
     # "HIST 1010 is NOT a prerequisite for HIST 1020" -- the surveys go in either order
     assert parse_requisites("A survey to 1715. HIST 1010 is NOT a prerequisite for HIST 1020 . TBC: CCE")["prereqs"] == []
     assert parse_requisites("Prerequisite: For Honors Fellows only; permission of department required.")["prereq_text"]
+
+
+def test_bachelors_rules_are_read_from_the_degree_requirements_page():
+    from mtsugradpath.catalog_build import parse_degree_rules
+    page = ("<p>Students must complete a minimum of 120 semester hours with a 2.00 grade point average. "
+            "A minimum of 25 percent of credit for each degree awarded by MTSU must be earned through offerings "
+            "by the University. Typically, a minimum of 30 hours earned through MTSU is required; At least 36 "
+            "semester hours of junior and senior (3000-4000 level) courses must be completed. a candidate may "
+            "complete 12 of the last 30 hours at another college or university or by CLEP. Students must complete "
+            "at least 12 semester hours at the upper-division level through MTSU in each major and at least three "
+            "semester hours at the upper-division level through MTSU in each minor. A minimum of 50 semester hours "
+            "of senior college credit will be required</p>")
+    assert parse_degree_rules(page) == {
+        "min_hours": 120, "residence_percent": 25, "residence_hours": 30, "upper_division_hours": 36,
+        "major_upper_division_at_mtsu": 12, "minor_upper_division_at_mtsu": 3, "senior_college_hours": 50,
+        "last_hours_elsewhere": 12, "last_hours": 30,
+    }
+    assert parse_degree_rules("<p>nothing here</p>") == {}

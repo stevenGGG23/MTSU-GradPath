@@ -35,6 +35,10 @@
         <button type="button" class="btn btn-outline-secondary" data-map-in title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in"></i></button>
       </div>
       <button type="button" class="btn btn-sm btn-outline-secondary" data-map-fit><i class="bi bi-arrows-angle-contract me-1"></i>Fit</button>
+      <div class="btn-group btn-group-sm" role="group" aria-label="Map layout">
+        <button type="button" class="btn btn-outline-secondary" data-map-dir="TD" aria-pressed="true"><i class="bi bi-arrow-down me-1"></i>Top-down</button>
+        <button type="button" class="btn btn-outline-secondary" data-map-dir="LR" aria-pressed="false"><i class="bi bi-arrow-right me-1"></i>Left to right</button>
+      </div>
       <span class="map-viewer-hint">Drag to move around</span>
     </div>
     <div class="prereq-graph-wrap">
@@ -61,6 +65,9 @@
   document.getElementById("prereq-major").addEventListener("change", event => {
     window.location.href = "/prerequisites?major=" + encodeURIComponent(event.target.value);
   });
-  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
+  mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
+  // map-viewer.js (loaded first) has set the layout; it re-renders through this on a switch
+  window.gradpathMermaid = mermaid;
+  mermaid.run();
 </script>
 {% endblock %}

@@ -162,6 +162,11 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Advisor feedback (Lisa Eddy)** —
+  - **Bachelor's degree requirements** on every plan: MTSU's university-wide rules (Degree Works' "Bachelor's Degree" block) — 36 upper-division hours, 30 hours through MTSU (25%), 12 upper-division hours at MTSU in each major and 3 in each minor, the last 30 hours, and 50 senior-college hours for community-college transfers. The numbers are read from the catalog's *Undergraduate Degree Requirements* page by the monthly refresh. A plan short of 36 upper-division hours turns its late free electives into "Upper-division elective (any subject, 3000–4000 level)".
+  - **Gateway courses**: a prerequisite the plan depends on but doesn't schedule — e.g. MATH 1730 Pre-Calculus before MATH 1910 and CSCI 1170, and through them most of a CS degree — is called out on the plan (with the catalog's placement wording) and shown on the map in orange. Found from the catalog's prerequisites for any major.
+  - **Exact elective wording**: "ACTG UD electives" → "ACTG upper-division electives (3000–4000-level ACTG courses)"; a subject-free one says "(3000–4000 level)"; free electives say "(any course)".
+  - **Top-down maps**: both prerequisite maps now draw top-down by default, with a *Top-down / Left to right* switch (remembered per browser).
 - **Pick-lists planned as major courses** — a major's own pick-lists ("Supporting Courses: choose 9 hours", "Choose one: BCED 3510 or ENGL 3620", a minor's electives) are now tagged **MAJ**, count toward the healthy course mix, and are spread from the year their options belong to, instead of being treated like gen-ed and piling into the last semester (Professional Pilot's final term used to be four of them). Majors with most pick-lists in the last year: 22 → 0.
 - **On pace for junior/senior standing** — when courses are waiting for a class-standing threshold (e.g. junior standing, 60 hours, for most upper-division business courses), a term that would fall just short is topped up (up to 17 hours) so the next term isn't spent on gen-eds while they wait. Only when the plan is tight — with spare terms nothing changes. Majors with an all-gen-ed term right before heavy ones: 19 → 5 (the rest have nothing else available yet).
 - **Cleaner plan page and PDF** — with *Include summer* off, summers are left out of the plan completely (no empty summer cards or 0-hour bars) and the schedule shows one school year (Fall | Spring) per row. The GPA calculator on the plan page starts with your next semester's courses and credit hours (grades and your current GPA left for you to fill in), shows what all A's / B's / C's would do, and *Reach a target* uses that semester's hours. **Download PDF** now prints in about 5 pages instead of 8: compact type, requirement groups that flow instead of leaving half-empty pages, no split chart or term card, and the prerequisite map on its own page scaled to fit.
@@ -219,7 +224,7 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,526 tests | **2,525 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,530 tests | **2,529 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -289,7 +294,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>2,526 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,530 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]
@@ -538,6 +543,7 @@ Everything needed to run the site is in this repository; nothing depends on a te
 - **Offering terms are inferred from the last three years.** A department can change its rotation; the next posted term is always used exactly, and the weekly refresh picks up changes as schedules are posted.
 - **Programs with alternative "emphases"** (e.g. the Science minor) plan the first emphasis listed.
 - **Course notes the catalog writes in prose** ("no more than one course from the same department", "approval of the advisor") aren't enforced, and "or permission of instructor" alternatives aren't assumed — plans follow the standard path.
+- **The bachelor's-degree checks can't see where earlier credit was earned** (MTSU, transfer, CLEP), so residence and senior-college hours are reminders, and upper-division hours count only what the plan knows is 3000–4000 level — the plan page says to confirm in Degree Works.
 - **Class standing is estimated from what the student enters** — checked courses plus hours typed in. Hours earned elsewhere that aren't entered make the plan treat the student as earlier in their degree.
 - **A few corequisite lines in the catalog contradict the prerequisites** (e.g. Interior Architecture: IDES 3330 lists IDES 4100 as a corequisite, but IDES 4100 needs IDES 3320, which goes with IDES 3330). The planner drops the one-way link that makes the set impossible and keeps the rest.
 - **Some degrees don't fit 8 semesters at a normal load** (e.g. Aerospace Maintenance Management is 133 hours, and some sequences only run in one season); the plan lists what's left in a *Remaining* box instead of overloading terms.

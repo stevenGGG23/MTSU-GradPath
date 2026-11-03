@@ -22,6 +22,20 @@
     </div>
   </div>
 
+  {% for g in gateways %}
+  <div class="alert gateway-alert mb-3">
+    <div class="d-flex gap-2">
+      <i class="bi bi-signpost-split-fill gateway-icon"></i>
+      <div>
+        <strong>Gateway course: {{ g.code }}{% if g.title %} &middot; {{ g.title }}{% endif %}.</strong>
+        It comes before {{ g.direct[:3] | join(', ') }}{% if g.direct | length > 3 %} and {{ g.direct | length - 3 }} more{% endif %} &mdash;
+        and through them {{ g.count }} of the courses in this plan. It isn't on your plan: take it first unless your placement lets you skip it.
+        {% if g.note %}<div class="small text-muted mt-1">Catalog prerequisite for {{ g.direct[0] }}: &ldquo;{{ g.note }}&rdquo;</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
   {% if warnings %}
   <div class="alert alert-danger prereq-warning mb-4">
     <strong>⚠ Plan warning{{ 's' if warnings|length != 1 }}:</strong> {{ warnings|length }} issue{{ 's' if warnings|length != 1 }} found — review before registering.
@@ -116,6 +130,23 @@
           <div class="extra-progress-name">{{ prog.label }}</div>
           <div class="extra-progress-hours">{{ prog.completed_hours }} / {{ prog.required_hours }} cr hrs</div>
           {% if prog.description %}<div class="extra-progress-desc">{{ prog.description }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if bachelors %}
+  <div class="mb-4 plan-section plan-bachelors">
+    <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-mortarboard text-primary"></i>Bachelor's degree requirements</h4>
+    <p class="text-muted small mb-2">MTSU's rules for every bachelor's degree &mdash; the &ldquo;Bachelor's Degree&rdquo; block in Degree Works. Even with every course done, you don't graduate without these. GradPath can't see where earlier credit was earned, so confirm the rest in Degree Works.</p>
+    <div class="bachelors-list">
+      {% for row in bachelors %}
+      <div class="bachelors-row bachelors-{{ row.status }}">
+        <span class="bachelors-icon" aria-hidden="true">{% if row.status == 'ok' %}<i class="bi bi-check-circle-fill"></i>{% elif row.status == 'warn' %}<i class="bi bi-exclamation-triangle-fill"></i>{% else %}<i class="bi bi-info-circle"></i>{% endif %}</span>
+        <div>
+          <div class="bachelors-title">{{ row.title }}<span class="visually-hidden"> &mdash; {{ {'ok': 'met in this plan', 'warn': 'not met yet', 'info': 'check in Degree Works'}[row.status] }}</span></div>
+          <div class="bachelors-detail">{{ row.detail }}</div>
         </div>
       </div>
       {% endfor %}
@@ -271,6 +302,7 @@
       <span class="legend-item"><span class="legend-swatch" style="background:#2563eb;"></span>Next up</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#bfdbfe;border:1px solid #3b82f6;"></span>Planned</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#f1f5f9;border:1px dashed #cbd5e1;"></span>External prerequisite</span>
+      {% if gateways %}<span class="legend-item"><span class="legend-swatch" style="background:#fef3c7;border:2px dashed #d97706;"></span>Gateway course (not on your plan)</span>{% endif %}
     </div>
     {% if personal_mermaid %}
     <div class="map-viewer">
@@ -282,6 +314,10 @@
           <button type="button" class="btn btn-outline-secondary" data-map-in title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in"></i></button>
         </div>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-map-fit><i class="bi bi-arrows-angle-contract me-1"></i>Fit</button>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Map layout">
+          <button type="button" class="btn btn-outline-secondary" data-map-dir="TD" aria-pressed="true"><i class="bi bi-arrow-down me-1"></i>Top-down</button>
+          <button type="button" class="btn btn-outline-secondary" data-map-dir="LR" aria-pressed="false"><i class="bi bi-arrow-right me-1"></i>Left to right</button>
+        </div>
         <span class="map-viewer-hint">Drag to move around</span>
       </div>
       <div class="prereq-graph-wrap">
@@ -301,7 +337,10 @@
 
   <script type="module" nonce="{{ csp_nonce }}">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.4/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
+    mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict", maxTextSize: 200000 });
+  // map-viewer.js (loaded first) has set the layout; it re-renders through this on a switch
+  window.gradpathMermaid = mermaid;
+  mermaid.run();
   </script>
   {% endif %}
   {% endif %}
