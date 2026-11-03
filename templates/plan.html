@@ -230,6 +230,7 @@
 
   <div class="mb-4 plan-section plan-overview">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-calendar3-range text-primary"></i>Plan overview</h4>
+    {% if faster_without_mix %}<p class="small text-muted mb-2 no-print"><i class="bi bi-lightning-charge me-1"></i>With <strong>Healthy course mix</strong> off, this plan finishes by <strong>{{ faster_without_mix }}</strong>, with more major courses in some terms. <a href="/">Change it on the first page</a>.</p>{% endif %}
     <div class="term-grid{{ ' term-grid-years' if not include_summer }}">
       {% for term, items in plan.items() %}
       <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">

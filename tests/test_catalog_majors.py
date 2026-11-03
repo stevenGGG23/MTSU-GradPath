@@ -987,3 +987,24 @@ def test_plans_dont_end_on_a_lone_elective_and_mix_each_term():
     for body in bodies:
         tags = _re.findall(r'plan-item-tag">([^<]+)<', body)
         assert "MAJ" in tags and "GEN" in tags, tags
+
+
+def test_a_light_last_term_is_brought_to_full_time_and_the_faster_plan_is_offered():
+    """A student's plan ended on a 6-hour term (CSCI 4160 + 4700) that can't
+    fold in without two terms of 4 major courses: the last term is brought to
+    full time with gen-eds instead, and the page says the plan finishes a
+    term sooner with the healthy mix off. Typed-in elective hours might be
+    upper-division, so the 36-hour row is a note, not a warning."""
+    data = {"major": "cs", "target_semesters": "8", "start_season": "Fall", "start_year": "2026", "healthy_mix": "on",
+            "completed_courses": "CSCI 1010\nCSCI 1150\nCSCI 1170\nCSCI 2170\nCSCI 3080\nCSCI 3110\nMATH 1910\nCOMM 2200\nMATH 1810",
+            "hours_tbc_written_comm": "3", "hours_p3306_1": "3", "hours_p3306_2": "3", "hours_p3306_3": "8",
+            "hours_p3306_4": "4", "hours_general_electives": "9", "hours_tbc_cce": "4", "hours_tbc_sci_lit": "8",
+            "hours_tbc_history_civic": "6"}
+    client = app.test_client()
+    html = client.post("/", data=data).get_data(as_text=True)
+    terms = _plan_page_terms(html)
+    assert "Plan warning" not in html and all(hours >= 12 for _, _, hours in terms)
+    assert "this plan finishes by <strong>" in html
+    assert "bachelors-row bachelors-warn" not in html and "can&#39;t see the level" in html
+    packed = _plan_page_terms(client.post("/", data={**{k: v for k, v in data.items() if k != "healthy_mix"}, "healthy_mix_shown": "1"}).get_data(as_text=True))
+    assert len(packed) < len(terms)

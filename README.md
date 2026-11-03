@@ -164,10 +164,14 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 - **Balanced terms** — a final pass over every plan (any major):
   - courses that didn't fit go into terms that still have room, up to MTSU's 18-hour load;
-  - a near-empty last term (one or two classes) is folded into earlier terms, so a plan doesn't end on a lone elective;
-  - with the healthy course mix on, terms of only major courses or only gen-eds trade one for one, so each term mixes the two.
+  - a near-empty last term (one or two classes) is folded into earlier terms, so a plan doesn't end on a lone elective (one term may go one course over the course-mix limit to save the semester); one that can't fold in is brought up to full time (12 hours) with gen-eds from busier terms;
+  - with the healthy course mix on, terms of only major courses or only gen-eds trade one for one, so each term mixes the two;
+  - gen-ed rows even out the hours between the busiest and lightest terms;
+  - when the healthy mix costs a term, the plan page says so ("With Healthy course mix off, this plan finishes by Fall 2027") so the student can choose.
 
-  Nothing moves unless every rule still holds: prerequisites, numbered sequences, offerings, class standing, reported grades, MTSU's four-year map order, and the course-mix limit. Labs and corequisites stay together. Across 1,200 random plans: plans ending on a lone class 252 → 72, all-gen-ed terms 747 → 155, plans running past their terms 349 → 322, with 0 prerequisite warnings. The two halves of a year-long science sequence also no longer land in the same term.
+  The "36 upper-division hours" row is a note rather than a warning when hours the student typed in for gen-eds or electives could cover the gap (GradPath can't see those courses' levels).
+
+  Nothing moves unless every rule still holds: prerequisites, numbered sequences, offerings, class standing, reported grades, MTSU's four-year map order, and the course-mix limit. Labs and corequisites stay together. Across 1,200 random plans (mix on): plans ending on one or two classes 252 → 1, last terms under full time 164 → 9 (against the previous push), all-gen-ed terms 747 → 160, plans running past their terms 349 → 322, with 0 prerequisite warnings. The two halves of a year-long science sequence also no longer land in the same term.
 - **Advisor feedback (Lisa Eddy)** —
   - **Bachelor's degree requirements** on every plan: MTSU's university-wide rules (Degree Works' "Bachelor's Degree" block) — 36 upper-division hours, 30 hours through MTSU (25%), 12 upper-division hours at MTSU in each major and 3 in each minor, the last 30 hours, and 50 senior-college hours for community-college transfers. The numbers are read from the catalog's *Undergraduate Degree Requirements* page by the monthly refresh. A plan short of 36 upper-division hours turns its late free electives into "Upper-division elective (any subject, 3000–4000 level)".
   - **Gateway courses** (MATH 1730 Pre-Calculus before MATH 1910 and CSCI 1170) stay off the plan, since many students place out of them. Courses that need one carry a small "check prereq" tag: "Needs MATH 1730 (or test out of it) first", followed by the catalog's wording (Math ACT 26, placement score). A completed course covers its own prerequisites, so with Calculus I done, nothing asks about Pre-Calc.
@@ -232,7 +236,7 @@ Everything below passed on the current version (October 2026). The automated sui
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,534 tests | **2,533 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,535 tests | **2,534 passed, 0 failed** (1 skipped by design) |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -302,7 +306,7 @@ flowchart TB
         GATE{"Checks pass?<br/>every major plans,<br/>reaches 100%, pages render"}
         REPO[("main branch<br/>code + catalog_data/catalog.json<br/>+ catalog_data/schedule.json")]
         ISSUE["GitHub issue + email<br/>site keeps last good data"]
-        TESTS["GitHub Actions: Tests<br/>2,534 tests on every push"]
+        TESTS["GitHub Actions: Tests<br/>2,535 tests on every push"]
     end
 
     subgraph HOST["Hosting (auto-deploy)"]

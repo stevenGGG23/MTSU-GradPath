@@ -843,6 +843,9 @@ def _plan():
         planning_generic_hours.update(second_generic_hours)
 
     generic_hours = read_generic_hours(request.form, planning_cfg)
+    # Hours the student typed in for requirement rows (their courses' levels
+    # are unknown -- some may be upper-division)
+    typed_row_hours = sum(max(_as_float(v), 0.0) for v in generic_hours.values() if math.isfinite(_as_float(v)))
     # Hours earned so far, for class standing ("junior standing" = 60):
     # the checked-off courses plus hours typed in for requirement rows
     # (checked courses only fill what typed hours leave open, so the two
@@ -939,7 +942,8 @@ def _plan():
     minor_only_codes = set().union(*(m["course_codes"] for m in minor_audits)) - major_codes - second_only_codes
 
     # Generates the plan, audits, and prerequisite warnings
-    def make_plan(cfg, row_hours):
+    def make_plan(cfg, row_hours, mix=None):
+        mix = healthy_mix if mix is None else mix
         made = generate_plan(
             completed_courses,
             row_hours,
@@ -951,7 +955,7 @@ def _plan():
             catalog=catalog,
             course_grades=course_grades,
             earned_hours=earned_hours,
-            max_courses_per_term=HEALTHY_MIX_COURSES if healthy_mix else None,
+            max_courses_per_term=HEALTHY_MIX_COURSES if mix else None,
         )
         if not include_summer:
             # "No summers": skipped summers are left out of the plan entirely
@@ -964,6 +968,21 @@ def _plan():
 
     plan = make_plan(planning_cfg, planning_generic_hours)
 
+    # The healthy mix can cost a term (at most 3 major courses a term): say
+    # so, so the student can choose the faster plan
+    def last_real_term(made):
+        terms = [t for t, items in made.items() if not t.startswith("Remaining")
+                 and any(i.get("kind") in ("course", "requirement") for i in items)]
+        overflow = any(t.startswith("Remaining") for t in made)
+        return terms[-1] if terms else None, len(terms), overflow
+
+    faster_without_mix = None
+    if healthy_mix:
+        packed_last, packed_count, packed_overflow = last_real_term(make_plan(planning_cfg, planning_generic_hours, mix=False))
+        _, mixed_count, mixed_overflow = last_real_term(plan)
+        if packed_last and not packed_overflow and (mixed_overflow or packed_count < mixed_count):
+            faster_without_mix = packed_last
+
     # Degree Works' "Bachelor's Degree" block: university-wide rules from the
     # catalog (36 upper-division hours, 30 through MTSU, ...). Late free
     # electives become upper-division ones if the plan would fall short.
@@ -972,7 +991,8 @@ def _plan():
     if second_cfg:
         degree_programs.append((second_cfg["name"], second_cfg, rules["major_upper_division_at_mtsu"]))
     degree_programs += [(m["name"], m, rules["minor_upper_division_at_mtsu"]) for m in minor_cfgs]
-    bachelors = bachelors_checks(plan, validated_completed_courses, planning_cfg, degree_programs)
+    bachelors = bachelors_checks(plan, validated_completed_courses, planning_cfg, degree_programs,
+                                 typed_hours=min(typed_row_hours, 200.0))
 
     audit = build_audit(
         validated_completed_courses,
@@ -1231,6 +1251,7 @@ def _plan():
         plan=plan_display,
         semesters=target_semesters,
         include_summer=include_summer,
+        faster_without_mix=faster_without_mix,
         audit=audit,
         term_hours=term_hours_display,
         max_term_hours=max_term_hours,

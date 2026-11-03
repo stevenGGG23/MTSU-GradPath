@@ -195,6 +195,7 @@ MAX_HOURS_PER_TERM = 17  # only when a plan would otherwise run past its last te
 TERM_HOUR_LIMIT = 18
 # A last term this light (one or two classes) is folded into earlier terms when it fits
 STRAGGLER_HOURS = 7
+FULL_TIME_HOURS = 12  # full-time enrollment
 
 # When supporting course prerequisites are outside the CSCI catalog information
 SUPPORTING_PREREQUISITE_MAP = {
@@ -672,10 +673,14 @@ def _balance_terms(plan, leftover, prereqs_of, offered, min_hours, year_of, fixe
     1. Courses and rows that didn't fit go into terms that still have room
        (up to MTSU's 18-hour load).
     2. A near-empty last term (one or two classes) is folded into earlier
-       terms with room, so a plan doesn't end on a lone elective.
+       terms with room, so a plan doesn't end on a lone elective -- one term
+       may go one course over the course-mix limit to save the semester.
+       One that can't fold in is brought up to full time (12 hours) with
+       gen-eds from busier terms.
     3. With the healthy course mix on: terms that are all major courses or
        all gen-eds trade one for one, so each term mixes the two where the
        plan allows. (Off means "pack as tightly as prerequisites allow".)
+    4. Gen-ed rows even out the hours between the busiest and lightest terms.
 
     Nothing moves unless every rule still holds: prerequisites (and numbered
     sequences) strictly before, offered that term, class standing, reported
@@ -780,20 +785,65 @@ def _balance_terms(plan, leftover, prereqs_of, offered, min_hours, year_of, fixe
         if place(item, terms, original_ok):
             leftover.remove(item)
 
-    # 2. A lone elective (or two) at the end
-    last = terms[-1]
-    if len(terms) > 1 and not leftover and hours(last) <= STRAGGLER_HOURS:
+    # 2. A lone elective (or two) at the end: folded into earlier terms with
+    # room. Saving a whole semester is worth one term going one course over
+    # the course-mix limit (as a course needed to finish on time can).
+    def fold_last(extra):
+        nonlocal cap
+        last = terms[-1]
         items = [i for i in plan[last] if i.get("kind") in ("course", "requirement")]
         saved = {t: list(plan[t]) for t in terms}
+        base_cap = cap
         plan[last] = [i for i in plan[last] if i not in items]
         original_ok = standing_ok_now()
-        if all(place(item, terms[:-1], original_ok) for item in items):
+        over_before = {t for t in terms[:-1] if majors(t) > base_cap}
+        cap = base_cap + extra
+        placed = all(place(item, terms[:-1], original_ok) for item in items)
+        over_after = {t for t in terms[:-1] if majors(t) > base_cap} - over_before
+        cap = base_cap
+        if placed and len(over_after) <= 1:
             if not plan[last]:
                 del plan[last]
             terms.pop()
-        else:
-            for t, kept in saved.items():
-                plan[t] = kept
+            return True
+        for t, kept in saved.items():
+            plan[t] = kept
+        return False
+
+    if len(terms) > 1 and not leftover and hours(terms[-1]) <= STRAGGLER_HOURS:
+        fold_last(0) or fold_last(1)
+
+    # 2b. A last term still light (it couldn't fold in): gen-eds from busier
+    # terms move into it, up to a full-time 12 hours, without leaving those
+    # terms under 12
+    def move_gen(gen, src, dst, original_ok):
+        """Move a gen-ed row unless it costs a course its class standing."""
+        plan[src].remove(gen)
+        plan[dst].append(gen)
+        if still_valid([], original_ok):
+            return True
+        plan[dst].remove(gen)
+        plan[src].append(gen)
+        return False
+
+    if len(terms) > 1:
+        last = terms[-1]
+        original_ok = standing_ok_now()
+        for _ in range(10):
+            if hours(last) >= FULL_TIME_HOURS:
+                break
+            donors = sorted((t for t in terms[1:-1] if any(_is_gen_item(i) for i in plan[t])), key=lambda t: -hours(t))
+            moved = False
+            for t in donors:
+                for gen in [i for i in plan[t] if _is_gen_item(i)]:
+                    if (hours(t) - (gen.get("hours") or 0) >= FULL_TIME_HOURS and room(last, gen)
+                            and move_gen(gen, t, last, original_ok)):
+                        moved = True
+                        break
+                if moved:
+                    break
+            if not moved:
+                break
 
     # 3. Even out major courses vs gen-eds, one swap at a time
     for _ in range(40 if course_cap else 0):
@@ -828,6 +878,20 @@ def _balance_terms(plan, leftover, prereqs_of, offered, min_hours, year_of, fixe
             if swapped:
                 break
         if not swapped:
+            break
+
+    # 4. Even out the hours with gen-ed rows (they have no prerequisites):
+    # from the busiest term to the lightest while that narrows the gap
+    original_ok = standing_ok_now()
+    for _ in range(20):
+        heavy, light = max(terms, key=hours), min(terms, key=hours)
+        moved = False
+        for gen in sorted((i for i in plan[heavy] if _is_gen_item(i)), key=lambda g: g.get("hours") or 0):
+            h = gen.get("hours") or 0
+            if hours(light) + h < hours(heavy) and room(light, gen) and move_gen(gen, heavy, light, original_ok):
+                moved = True
+                break
+        if not moved:
             break
 
     # Courses first in each term, then requirement rows, as the planner lists them

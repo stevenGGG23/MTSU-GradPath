@@ -68,7 +68,7 @@ def upper_division_hours(plan: dict, completed: set, cfg: dict) -> float:
     return hours
 
 
-def bachelors_checks(plan: dict, completed: set, cfg: dict, programs=()) -> list:
+def bachelors_checks(plan: dict, completed: set, cfg: dict, programs=(), typed_hours: float = 0) -> list:
     """Rows for the plan page's "Bachelor's degree requirements" card.
 
     Mutates *plan*: when the plan falls short of the upper-division minimum,
@@ -77,6 +77,10 @@ def bachelors_checks(plan: dict, completed: set, cfg: dict, programs=()) -> list
 
     *programs*: (label, cfg, minimum upper-division hours at MTSU) for the
     major, any second major, and each minor.
+
+    *typed_hours*: hours the student typed in for requirement rows (gen-eds,
+    electives) -- GradPath can't tell their level, so a gap they could cover
+    is a note to check, not a warning.
     """
     rules = catalog_store.degree_rules()
     rows = []
@@ -106,6 +110,10 @@ def bachelors_checks(plan: dict, completed: set, cfg: dict, programs=()) -> list
     elif have + open_hours >= needed:
         status, extra = "info", (f" Pick upper-division (3000–4000) courses for at least {_nice(needed - have)} of the "
                                  "hours where the plan lets you choose (minor, pick-lists).")
+    elif have + open_hours + typed_hours >= needed:
+        status, extra = "info", (f" {_nice(needed - have)} more may already be done: GradPath can't see the level of the "
+                                 f"{_nice(typed_hours)} hours you entered for gen-eds and electives. Any of them at the "
+                                 "3000–4000 level count — check Degree Works.")
     else:
         status, extra = "warn", (f" {_nice(needed - have)} more needed — choose 3000- or 4000-level courses wherever "
                                  "the plan lets you pick.")
