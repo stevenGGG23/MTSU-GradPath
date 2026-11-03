@@ -22,20 +22,6 @@
     </div>
   </div>
 
-  {% for g in gateways %}
-  <div class="alert gateway-alert mb-3">
-    <div class="d-flex gap-2">
-      <i class="bi bi-signpost-split-fill gateway-icon"></i>
-      <div>
-        <strong>Gateway course: {{ g.code }}{% if g.title %} &middot; {{ g.title }}{% endif %}.</strong>
-        It comes before {{ g.direct[:3] | join(', ') }}{% if g.direct | length > 3 %} and {{ g.direct | length - 3 }} more{% endif %} &mdash;
-        and through them {{ g.count }} of the courses in this plan. It isn't on your plan: take it first unless your placement lets you skip it.
-        {% if g.note %}<div class="small text-muted mt-1">Catalog prerequisite for {{ g.direct[0] }}: &ldquo;{{ g.note }}&rdquo;</div>{% endif %}
-      </div>
-    </div>
-  </div>
-  {% endfor %}
-
   {% if warnings %}
   <div class="alert alert-danger prereq-warning mb-4">
     <strong>⚠ Plan warning{{ 's' if warnings|length != 1 }}:</strong> {{ warnings|length }} issue{{ 's' if warnings|length != 1 }} found — review before registering.
@@ -143,7 +129,8 @@
     <div class="bachelors-list">
       {% for row in bachelors %}
       <div class="bachelors-row bachelors-{{ row.status }}">
-        <span class="bachelors-icon" aria-hidden="true">{% if row.status == 'ok' %}<i class="bi bi-check-circle-fill"></i>{% elif row.status == 'warn' %}<i class="bi bi-exclamation-triangle-fill"></i>{% else %}<i class="bi bi-info-circle"></i>{% endif %}</span>
+        {% set status_help = {'ok': 'Met: this plan covers it.', 'warn': 'Not met yet: see the note next to it.', 'info': "GradPath can't confirm this from your plan alone: read the note next to it, then check Degree Works."}[row.status] %}
+        <span class="bachelors-icon" tabindex="0" role="img" aria-label="{{ status_help }}" data-bs-toggle="tooltip" data-bs-placement="right" title="{{ status_help }}">{% if row.status == 'ok' %}<i class="bi bi-check-circle-fill"></i>{% elif row.status == 'warn' %}<i class="bi bi-exclamation-triangle-fill"></i>{% else %}<i class="bi bi-info-circle"></i>{% endif %}</span>
         <div>
           <div class="bachelors-title">{{ row.title }}<span class="visually-hidden"> &mdash; {{ {'ok': 'met in this plan', 'warn': 'not met yet', 'info': 'check in Degree Works'}[row.status] }}</span></div>
           <div class="bachelors-detail">{{ row.detail }}</div>
@@ -302,7 +289,6 @@
       <span class="legend-item"><span class="legend-swatch" style="background:#2563eb;"></span>Next up</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#bfdbfe;border:1px solid #3b82f6;"></span>Planned</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#f1f5f9;border:1px dashed #cbd5e1;"></span>External prerequisite</span>
-      {% if gateways %}<span class="legend-item"><span class="legend-swatch" style="background:#fef3c7;border:2px dashed #d97706;"></span>Gateway course (not on your plan)</span>{% endif %}
     </div>
     {% if personal_mermaid %}
     <div class="map-viewer">

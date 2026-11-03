@@ -190,6 +190,11 @@ PREREQUISITE_MAP = {
 
 TARGET_HOURS_PER_TERM = 15
 MAX_HOURS_PER_TERM = 17  # only when a plan would otherwise run past its last term
+# MTSU's full load without an overload request; the final balancing pass may
+# go up to it to fold a near-empty last term into earlier ones
+TERM_HOUR_LIMIT = 18
+# A last term this light (one or two classes) is folded into earlier terms when it fits
+STRAGGLER_HOURS = 7
 
 # When supporting course prerequisites are outside the CSCI catalog information
 SUPPORTING_PREREQUISITE_MAP = {
@@ -651,6 +656,185 @@ def split_requirement_hours(hours) -> List[float]:
 
 # Function that generates the graduation plan
 # Accepts an optional degree_cfg for multi-major support; defaults to CS.
+def _is_major_item(item) -> bool:
+    """A named course or a program pick-list row of 3+ credits (labs don't count)."""
+    return (item.get("kind") == "course" or bool(item.get("program"))) and (item.get("hours") or 0) >= 3
+
+
+def _is_gen_item(item) -> bool:
+    return item.get("kind") == "requirement" and not item.get("program")
+
+
+def _balance_terms(plan, leftover, prereqs_of, offered, min_hours, year_of, fixed, start_earned, course_cap,
+                   grades_ok=lambda code: True, map_year=None, level_of=None):
+    """Final pass over a finished plan (in place):
+
+    1. Courses and rows that didn't fit go into terms that still have room
+       (up to MTSU's 18-hour load).
+    2. A near-empty last term (one or two classes) is folded into earlier
+       terms with room, so a plan doesn't end on a lone elective.
+    3. With the healthy course mix on: terms that are all major courses or
+       all gen-eds trade one for one, so each term mixes the two where the
+       plan allows. (Off means "pack as tightly as prerequisites allow".)
+
+    Nothing moves unless every rule still holds: prerequisites (and numbered
+    sequences) strictly before, offered that term, class standing, reported
+    grades, no course more than a year ahead of the student, MTSU's four-year
+    map order, at most TERM_HOUR_LIMIT hours and the course-mix limit. Labs
+    and corequisite groups stay where they are."""
+    map_year = map_year or {}
+    level_of = level_of or (lambda code: 4)
+    terms = [t for t in plan if any(i.get("kind") in ("course", "requirement") for i in plan[t])]
+    if not terms:
+        return
+    season_year = {t: (t.split()[0], int(t.split()[1])) for t in terms}
+
+    def hours(t):
+        return sum(i.get("hours") or 0 for i in plan[t] if i.get("kind") in ("course", "requirement"))
+
+    def majors(t):
+        return sum(1 for i in plan[t] if _is_major_item(i))
+
+    cap = max([course_cap or 0] + [majors(t) for t in terms])
+
+    def snapshot():
+        pos, before, total = {}, {}, start_earned
+        for idx, t in enumerate(terms):
+            before[t] = total
+            for item in plan[t]:
+                if item.get("kind") == "course":
+                    pos[item["code"]] = idx
+            total += hours(t)
+        return pos, before
+
+    def course_ok(code, idx, pos, before):
+        t = terms[idx]
+        if code in fixed or not offered(code, *season_year[t]):
+            return False
+        if min_hours(code) > before[t]:
+            return False
+        if year_of(code) > 1 + int(before[t] // 30) + 1:
+            return False  # no senior seminar in a freshman term
+        unplanned = {i["code"] for i in leftover if i.get("kind") == "course"}
+        if any((p in pos and pos[p] >= idx) or p in unplanned for p in prereqs_of(code)):
+            return False
+        if not grades_ok(code):
+            return False
+        # MTSU's map order: nothing it puts two or more years apart swaps
+        # places, and no 1000-level course after a 3000/4000 one in its subject
+        for other, at in pos.items():
+            if other == code or at == idx:
+                continue
+            first, then = (other, code) if at < idx else (code, other)
+            y1, y2 = map_year.get(first), map_year.get(then)
+            if y1 and y2 and y2 + 2 <= y1:
+                return False
+            if (first.split()[0] == then.split()[0] and level_of(then) == 1 and level_of(first) >= 3
+                    and not (y1 and y2 and y2 >= y1)):
+                return False
+        return True
+
+    def still_valid(moved_codes, original_ok):
+        """Every moved course fits its new term, nothing that needs a moved
+        course now comes before it, and no course loses class standing."""
+        pos, before = snapshot()
+        for code in moved_codes:
+            if not course_ok(code, pos[code], pos, before):
+                return False
+        for code, idx in pos.items():
+            if moved_codes and any(m in prereqs_of(code) and pos[m] >= idx for m in moved_codes):
+                return False
+            if code in original_ok and min_hours(code) > before[terms[idx]]:
+                return False
+        return True
+
+    def standing_ok_now():
+        pos, before = snapshot()
+        return {code for code, idx in pos.items() if min_hours(code) <= before[terms[idx]]}
+
+    def room(t, item):
+        if hours(t) + (item.get("hours") or 0) > TERM_HOUR_LIMIT:
+            return False
+        if _is_major_item(item) and majors(t) >= cap:
+            return False
+        # A sequence row (Science I/II) never twice in one term
+        if item.get("kind") == "requirement" and "sequence" in (item.get("label") or "").lower() and any(
+                i.get("id") == item.get("id") for i in plan[t]):
+            return False
+        return True
+
+    def place(item, choices, original_ok):
+        """Put *item* in the lightest term of *choices* where it's allowed."""
+        for t in sorted(choices, key=lambda t: (hours(t), -terms.index(t))):
+            if not room(t, item):
+                continue
+            plan[t].append(item)
+            if item.get("kind") != "course" or still_valid([item["code"]], original_ok):
+                return True
+            plan[t].remove(item)
+        return False
+
+    # 1. Leftovers into terms with room, earliest course level first
+    original_ok = standing_ok_now()
+    for item in sorted(list(leftover), key=lambda i: (i.get("kind") != "course", i.get("code") or "")):
+        if place(item, terms, original_ok):
+            leftover.remove(item)
+
+    # 2. A lone elective (or two) at the end
+    last = terms[-1]
+    if len(terms) > 1 and not leftover and hours(last) <= STRAGGLER_HOURS:
+        items = [i for i in plan[last] if i.get("kind") in ("course", "requirement")]
+        saved = {t: list(plan[t]) for t in terms}
+        plan[last] = [i for i in plan[last] if i not in items]
+        original_ok = standing_ok_now()
+        if all(place(item, terms[:-1], original_ok) for item in items):
+            if not plan[last]:
+                del plan[last]
+            terms.pop()
+        else:
+            for t, kept in saved.items():
+                plan[t] = kept
+
+    # 3. Even out major courses vs gen-eds, one swap at a time
+    for _ in range(40 if course_cap else 0):
+        original_ok = standing_ok_now()
+        ranked = sorted(terms, key=lambda t: (majors(t), -sum(1 for i in plan[t] if _is_gen_item(i))))
+        swapped = False
+        for light in ranked:
+            # (the nearest busy term first, so courses move as little as possible)
+            busy = [t for t in terms if majors(t) - majors(light) >= 2]
+            for heavy in sorted(busy, key=lambda t: (-majors(t), abs(terms.index(t) - terms.index(light)))):
+                gens = [i for i in plan[light] if _is_gen_item(i)]
+                courses = [i for i in plan[heavy] if i.get("kind") == "course" and (i.get("hours") or 0) >= 3
+                           and i["code"] not in fixed]
+                for course in sorted(courses, key=lambda i: -year_of(i["code"])):
+                    for gen in sorted(gens, key=lambda g: abs((g.get("hours") or 0) - (course.get("hours") or 0))):
+                        plan[heavy].remove(course)
+                        plan[light].remove(gen)
+                        ok = room(light, course) and room(heavy, gen)
+                        plan[light].append(course)
+                        plan[heavy].append(gen)
+                        if ok and still_valid([course["code"]], original_ok):
+                            swapped = True
+                            break
+                        plan[light].remove(course)
+                        plan[heavy].remove(gen)
+                        plan[heavy].append(course)
+                        plan[light].append(gen)
+                    if swapped:
+                        break
+                if swapped:
+                    break
+            if swapped:
+                break
+        if not swapped:
+            break
+
+    # Courses first in each term, then requirement rows, as the planner lists them
+    for t in terms:
+        plan[t].sort(key=lambda i: (i.get("kind") != "course", 0 if _is_major_item(i) else 1))
+
+
 def generate_plan(
     completed_courses: Set[str],
     generic_hours: Dict[str, float],
@@ -722,6 +906,14 @@ def generate_plan(
 
     def _offered(code, season, year):
         return _offered_in_term(code, season, year, cfg)
+
+    def _grades_ok(code):
+        """A prerequisite the student reported with too low a grade holds the course back."""
+        for prereq_code, minimum_grade in (catalog.get(code, {}).get("prereq_grades", {}) or {}).items():
+            if prereq_code in completed_courses and course_grades.get(prereq_code) and not meets_minimum_grade(
+                    course_grades.get(prereq_code), minimum_grade):
+                return False
+        return True
 
     def _prereqs_satisfied(code, completed):
         prereqs = _full_prereqs(code, cfg, catalog)
@@ -843,6 +1035,7 @@ def generate_plan(
 
     plan = {}
     idle_terms = 0
+    start_earned = earned_hours
 
     def _work_left():
         pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
@@ -1064,6 +1257,9 @@ def generate_plan(
                     continue
                 if not _fits(chunk["hours"]):
                     continue
+                if "sequence" in (chunk.get("label") or "").lower() and any(
+                        i.get("id") == chunk["id"] for i in term_items):
+                    continue  # a year-long sequence: one part a term
                 term_items.append(chunk)
                 hours_used += chunk["hours"]
                 share_used += chunk["hours"]
@@ -1187,18 +1383,33 @@ def generate_plan(
         current_completed.update(newly_completed)
         earned_hours += hours_used
 
-    remaining_items = []
-
     # Uses anything that could not fit in the requested number of terms
     cs_pool = _remaining_pool_cfg(current_completed, catalog, required_codes, cfg, elective_exclude)
+    leftover_items = [_course_item(code, catalog, supporting_info, config_hours) for code in sorted_course_codes(cs_pool)]
+    leftover_items += [_course_item(code, catalog, supporting_info, config_hours) for code in supporting_remaining]
+    leftover_items += generic_queue
 
-    for code in sorted_course_codes(cs_pool):
-        remaining_items.append(_course_item(code, catalog, supporting_info, config_hours))
+    _balance_terms(
+        plan, leftover_items,
+        prereqs_of=lambda code: (_full_prereqs(code, cfg, catalog) | supporting_prereq_map.get(code, set())
+                                 | set(catalog_store.previous_part(code))
+                                 # (every catalog prerequisite, so one on the plan from outside the
+                                 # program -- a pick-list's course -- still comes first)
+                                 | set((catalog_store.course(code) or {}).get("prereqs") or ())),
+        offered=_offered,
+        min_hours=lambda code: (catalog.get(code) or {}).get("min_hours", 0),
+        year_of=lambda code: map_year.get(code) or _level(code),
+        fixed={*lab_partners, *lecture_of, *coreqs_of, *(c for cs in coreqs_of.values() for c in cs)},
+        start_earned=start_earned,
+        course_cap=max_courses_per_term,
+        grades_ok=_grades_ok,
+        map_year=map_year,
+        level_of=_level,
+    )
 
-    for code in supporting_remaining:
-        remaining_items.append(_course_item(code, catalog, supporting_info, config_hours))
+    remaining_items = []
 
-    remaining_items.extend(generic_queue)
+    remaining_items.extend(leftover_items)
 
     if remaining_items:
         plan[f"Remaining after {target_terms} terms"] = remaining_items
@@ -1447,6 +1658,29 @@ def build_personal_prereq_graph(
 # Function that renders a student-specific top-down Mermaid prerequisite tree.
 # Completed nodes are green, next-up nodes are blue, planned nodes are light
 # blue, and external prerequisites are gray/dashed.
+def drop_implied_edges(edges: List[tuple]) -> List[tuple]:
+    """Prerequisite arrows minus the ones a longer path already shows: with
+    MATH 1730 -> CSCI 1170 -> CSCI 2170, a direct MATH 1730 -> CSCI 2170
+    arrow adds nothing but a long line across the map. Keeps the order."""
+    edges = list(dict.fromkeys(edges))
+    after = {}
+    for a, b in edges:
+        after.setdefault(a, set()).add(b)
+
+    def reachable_without(start, skip_edge_to):
+        # Courses reachable from *start* without using its direct edge to *skip_edge_to*
+        seen, stack = set(), [n for n in after.get(start, ()) if n != skip_edge_to]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(after.get(node, ()))
+        return seen
+
+    return [(a, b) for a, b in edges if a == b or b not in reachable_without(a, b)]
+
+
 def render_personal_prereq_mermaid(
     nodes: Dict[str, Dict[str, object]],
     edges: List[tuple],
@@ -1460,13 +1694,14 @@ def render_personal_prereq_mermaid(
         title = _mermaid_text(info.get("title", ""))
         return f"{check}{code}<br/>{title}" if title else f"{check}{code}"
 
-    # Left to right, like the Prerequisite Map page: each chain reads as a row
+    # Left to right in the source; the map viewer switches it to the direction
+    # the student picked (top-down by default)
     lines = ["graph LR"]
 
     for code, info in nodes.items():
         lines.append(f'  {node_id(code)}["{node_label(code, info)}"]')
 
-    for prereq, course in edges:
+    for prereq, course in drop_implied_edges(edges):
         lines.append(f"  {node_id(prereq)} --> {node_id(course)}")
 
     status_class_map = {
@@ -1474,7 +1709,6 @@ def render_personal_prereq_mermaid(
         "next": "nextNode",
         "planned": "plannedNode",
         "external": "extNode",
-        "gateway": "gateNode",
     }
     for code, info in nodes.items():
         cls = status_class_map.get(info.get("status"), "plannedNode")
@@ -1485,7 +1719,6 @@ def render_personal_prereq_mermaid(
         "  classDef nextNode fill:#2563eb,color:#ffffff,stroke:#1e40af,stroke-width:3px",
         "  classDef plannedNode fill:#bfdbfe,color:#1e3a5f,stroke:#3b82f6,stroke-width:1px",
         "  classDef extNode fill:#f1f5f9,color:#475569,stroke:#cbd5e1,stroke-dasharray: 4 2",
-        "  classDef gateNode fill:#fef3c7,color:#78350f,stroke:#d97706,stroke-width:2px,stroke-dasharray: 5 3",
     ])
 
     return "\n".join(lines)
@@ -1514,7 +1747,7 @@ def render_prereq_mermaid(nodes: Dict[str, Dict[str, object]], edges: List[tuple
     for code, info in nodes.items():
         lines.append(f'  {node_id(code)}["{node_label(code, info)}"]')
 
-    for prereq, course in edges:
+    for prereq, course in drop_implied_edges(edges):
         lines.append(f"  {node_id(prereq)} --> {node_id(course)}")
 
     class_names = {

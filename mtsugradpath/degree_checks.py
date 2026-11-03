@@ -1,7 +1,5 @@
 """University-wide checks a plan has to pass besides its program's courses
-(Degree Works' "Bachelor's Degree" block), clear elective wording, and the
-"gateway" courses a plan depends on but doesn't schedule (MATH 1730 for most
-computing and science majors).
+(Degree Works' "Bachelor's Degree" block) and clear elective wording.
 
 Everything comes from the catalog: the bachelor's rules from its "Undergraduate
 Degree Requirements" page (catalog_store.degree_rules), prerequisites from its
@@ -166,68 +164,6 @@ def bachelors_checks(plan: dict, completed: set, cfg: dict, programs=()) -> list
                    f"{rules['senior_college_hours']} of your hours must come from four-year schools such as MTSU."),
     })
     return rows
-
-
-def gateway_courses(plan: dict, completed: set, limit: int = 3, ignore=(), covered=()) -> list:
-    """Prerequisites the plan depends on but doesn't schedule -- a course
-    (or one of a few) that has to come before planned courses and, through
-    them, many more. MATH 1730 Pre-Calculus comes before MATH 1910 and CSCI
-    1170 and so ahead of most of a computing degree; students can often skip
-    it with their math placement (ACT/SAT), which the catalog wording says."""
-    term_of = {item["code"]: t for t, items in enumerate(plan.values()) for item in items if item.get("kind") == "course"}
-    planned = set(term_of)
-    later = {code: set() for code in planned}  # course -> planned courses that need it
-    gated = {}  # outside course -> planned courses it comes directly before
-    for code in planned:
-        required, groups = catalog_store.prerequisite_options(code)
-        for need in [[p] for p in required] + groups:
-            if any(p in completed for p in need):
-                continue
-            inside = [p for p in need if p in planned]
-            if inside:
-                for p in inside:
-                    later[p].add(code)
-                continue
-            for p in need:
-                # (labs that go with a program's lectures aren't outside courses)
-                # *covered*: options of a gen-ed / pick-list row on the plan
-                # (ENGL 1010 is the Written Communication row) -- not outside it
-                if (catalog_store.course(p) and p not in ignore and p not in covered
-                        and catalog_store.credits(p, default=3)):
-                    gated.setdefault(p, set()).add(code)
-
-    def downstream(codes):
-        seen, stack = set(), list(codes)
-        while stack:
-            code = stack.pop()
-            if code in seen:
-                continue
-            seen.add(code)
-            stack += later.get(code, ())
-        return seen
-
-    found = []
-    for code, direct in gated.items():
-        reach = downstream(direct)
-        if len(reach) < 3:
-            continue
-        found.append({
-            "code": code,
-            "title": catalog_store.title(code),
-            "direct": sorted(direct, key=lambda c: term_of[c]),
-            "count": len(reach),
-            "note": next(((catalog_store.course(c) or {}).get("prereq_text") for c in sorted(direct, key=lambda c: term_of[c])
-                          if (catalog_store.course(c) or {}).get("prereq_text")), ""),
-        })
-    # A course whose reach is inside another's (MATH 1810, an alternative to
-    # MATH 1730 for one course) adds nothing
-    found.sort(key=lambda g: (-g["count"], g["code"]))
-    kept = []
-    for g in found:
-        if any(set(g["direct"]) <= set(k["direct"]) and g["count"] <= k["count"] for k in kept):
-            continue
-        kept.append(g)
-    return kept[:limit]
 
 
 def _nice(value):

@@ -2034,19 +2034,7 @@ body.map-viewer-open {
 .prereq-chip-planned { background: #bfdbfe; color: #1e3a5f; border-color: #3b82f6; }
 .prereq-chip-external { background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1; }
 
-/* ── Plan page: gateway courses and the bachelor's degree checks ───────── */
-
-.gateway-alert {
-    background: #fffbeb;
-    border: 1px solid #fcd34d;
-    color: #78350f;
-}
-
-.gateway-icon {
-    color: #d97706;
-    font-size: 1.15rem;
-    line-height: 1.4;
-}
+/* ── Plan page: the bachelor's degree checks ───────── */
 
 .bachelors-list {
     background: #ffffff;
@@ -2069,6 +2057,7 @@ body.map-viewer-open {
 .bachelors-icon {
     font-size: 1.05rem;
     line-height: 1.4;
+    cursor: help;
 }
 
 .bachelors-ok .bachelors-icon { color: #16a34a; }
@@ -2087,8 +2076,7 @@ body.map-viewer-open {
 }
 
 @media print {
-    .plan-bachelors,
-    .gateway-alert {
+    .plan-bachelors {
         break-inside: avoid;
         page-break-inside: avoid;
     }

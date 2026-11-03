@@ -24,7 +24,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mtsugradpath import catalog_store
 from mtsugradpath.catalog_programs import auto_generic_hours, tbc_area_options
-from mtsugradpath.degree_checks import bachelors_checks, clarify_label, gateway_courses
+from mtsugradpath.degree_checks import bachelors_checks, clarify_label
 from mtsugradpath.config import SYNC_ADMIN_PASSWORD, SYNC_ADMIN_USER
 from mtsugradpath.db import SessionLocal, init_db
 from mtsugradpath.degree import (
@@ -437,6 +437,7 @@ def _second_major_cfg(primary_cfg, key):
 # "More BIOL courses" group when the program has upper-division electives.
 # 0-credit labs that ride along with a lecture are left out -- checking the
 # lecture counts both. Hand-curated majors list their subject by level.
+
 def _checklist_sections(cfg, exclude=()):
     listed = set(exclude)
     required = _required_codes(cfg)
@@ -513,6 +514,10 @@ def _course_card(code, required, min_grades, on_page=()):
         note.append("Required by name for this program")
     if min_grades.get(code):
         note.append(f"Requires a {min_grades[code]} or better (a later course needs it)")
+    # The catalog's own prerequisite wording, placement/ACT alternatives
+    # included ("MATH 1730 ... or Math ACT of 26 or better ...")
+    if info.get("prereq_text"):
+        note.append("Prerequisite: " + " ".join(str(info["prereq_text"]).split()))
     if info.get("desc"):
         note.append(info["desc"])
     return {
@@ -934,26 +939,30 @@ def _plan():
     minor_only_codes = set().union(*(m["course_codes"] for m in minor_audits)) - major_codes - second_only_codes
 
     # Generates the plan, audits, and prerequisite warnings
-    plan = generate_plan(
-        completed_courses,
-        planning_generic_hours,
-        target_semesters,
-        include_summer,
-        start_season=start_season,
-        start_year=start_year,
-        degree_cfg=planning_cfg,
-        catalog=catalog,
-        course_grades=course_grades,
-        earned_hours=earned_hours,
-        max_courses_per_term=HEALTHY_MIX_COURSES if healthy_mix else None,
-    )
-    if not include_summer:
-        # "No summers": skipped summers are left out of the plan entirely
-        # (no empty cards, no 0-hour bars) rather than shown as empty terms
-        plan = {
-            term: items for term, items in plan.items()
-            if not (term.startswith("Summer") and all(item.get("kind") == "note" for item in items))
-        }
+    def make_plan(cfg, row_hours):
+        made = generate_plan(
+            completed_courses,
+            row_hours,
+            target_semesters,
+            include_summer,
+            start_season=start_season,
+            start_year=start_year,
+            degree_cfg=cfg,
+            catalog=catalog,
+            course_grades=course_grades,
+            earned_hours=earned_hours,
+            max_courses_per_term=HEALTHY_MIX_COURSES if healthy_mix else None,
+        )
+        if not include_summer:
+            # "No summers": skipped summers are left out of the plan entirely
+            # (no empty cards, no 0-hour bars) rather than shown as empty terms
+            made = {
+                term: items for term, items in made.items()
+                if not (term.startswith("Summer") and all(item.get("kind") == "note" for item in items))
+            }
+        return made
+
+    plan = make_plan(planning_cfg, planning_generic_hours)
 
     # Degree Works' "Bachelor's Degree" block: university-wide rules from the
     # catalog (36 upper-division hours, 30 through MTSU, ...). Late free
@@ -964,15 +973,6 @@ def _plan():
         degree_programs.append((second_cfg["name"], second_cfg, rules["major_upper_division_at_mtsu"]))
     degree_programs += [(m["name"], m, rules["minor_upper_division_at_mtsu"]) for m in minor_cfgs]
     bachelors = bachelors_checks(plan, validated_completed_courses, planning_cfg, degree_programs)
-    # Courses the plan depends on but doesn't schedule (MATH 1730 before
-    # CSCI 1170 and MATH 1910 -- often skippable with a placement score)
-    program_labs = {lab for c in (degree_cfg, second_cfg, *minor_cfgs) if c
-                    for labs in (c.get("coreq_map") or {}).values() for lab in labs}
-    gen_ed_options = tbc_area_options()
-    plan_row_ids = {item.get("id") for items in plan.values() for item in items if item.get("kind") == "requirement"}
-    covered_by_rows = {code for gid in plan_row_ids
-                       for code in ((planning_cfg.get("generic_options") or {}).get(gid) or gen_ed_options.get(gid) or [])}
-    gateways = gateway_courses(plan, validated_completed_courses, ignore=program_labs, covered=covered_by_rows)
 
     audit = build_audit(
         validated_completed_courses,
@@ -1056,12 +1056,6 @@ def _plan():
     personal_nodes, personal_edges = build_personal_prereq_graph(
         catalog, validated_completed_courses, plan, degree_cfg=planning_cfg
     )
-    for gateway in gateways:
-        personal_nodes.setdefault(gateway["code"], {"title": gateway["title"], "status": "gateway"})
-        personal_nodes[gateway["code"]]["status"] = "gateway"
-        for code in gateway["direct"]:
-            if code in personal_nodes and (gateway["code"], code) not in personal_edges:
-                personal_edges.append((gateway["code"], code))
     # Courses with no prerequisite links on the plan would just stack down the
     # side of the graph -- list them separately (as the Prerequisite Map does)
     personal_linked = {code for edge in personal_edges for code in edge}
@@ -1144,8 +1138,23 @@ def _plan():
     # usually a gen-ed course the plan covers with a "GEN" row, an ACT-score
     # alternative, or "permission of instructor"; the tag shows the catalog's
     # own wording so the student can check
+    # A course done (or planned earlier) also vouches for its own
+    # prerequisites: with MATH 1910 Calculus I done, MATH 1730 Pre-Calculus
+    # (or the ACT / placement score that stood in for it) is covered too.
+    def with_implied(codes):
+        known, stack = set(), list(codes)
+        while stack:
+            code = stack.pop()
+            if code in known:
+                continue
+            known.add(code)
+            info = catalog_store.course(code) or {}
+            stack += list(info.get("prereqs", []))
+            stack += [p for group in info.get("prereq_any", []) for p in group]
+        return known
+
     prereq_notes = {}
-    seen = set(completed_courses)
+    seen = with_implied(completed_courses)
     for term, term_items in plan.items():
         codes = {item["code"] for item in term_items if item.get("kind") == "course"}
         if not term.startswith("Remaining"):
@@ -1154,8 +1163,11 @@ def _plan():
                 missing = [p for p in info.get("prereqs", []) if p not in seen and catalog_store.course(p)]
                 missing += [" or ".join(g) for g in info.get("prereq_any", []) if not seen.intersection(g)]
                 if missing and info.get("prereq_text"):
-                    prereq_notes[code] = "Prerequisite (catalog): " + info["prereq_text"]
-        seen |= codes
+                    text = " ".join(str(info["prereq_text"]).split())
+                    test_out = re.search(r"\b(ACT|SAT|placement|score|exam)\b", text, re.I)
+                    prereq_notes[code] = ("Needs " + ", ".join(missing) + (" (or test out of it)" if test_out else "")
+                                          + " first. Catalog: " + text)
+        seen |= with_implied(codes)
 
     # Convert planner data into display structures
     completed_display = [completed_label(code) for code in sorted(completed_courses)]
@@ -1228,7 +1240,6 @@ def _plan():
         gpa_next=gpa_next,
         bachelors=bachelors,
         degree_rules=rules,
-        gateways=gateways,
         degree_name=degree_cfg["name"],
         catalog_url=degree_cfg.get("catalog_url"),
         second_audit=second_audit,

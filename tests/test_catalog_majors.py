@@ -502,7 +502,7 @@ def test_plan_flags_a_prerequisite_from_outside_the_plan():
         "major": "accounting-bba", "target_semesters": "8", "start_season": "Fall", "start_year": "2026",
     }).get_data(as_text=True)
     # ACTG 3000 needs ENGL 1010, which the plan covers with a gen-ed row
-    assert 'class="plan-item-offered plan-item-prereq" title="Prerequisite (catalog):' in html
+    assert 'class="plan-item-offered plan-item-prereq" title="Needs ENGL 1010 first. Catalog:' in html
 
 
 _PART = _re.compile(r"^(.*\S)\s+(VI|IV|V|I{1,3}|[1-6])$")
@@ -923,7 +923,7 @@ def test_elective_labels_say_exactly_what_counts():
     assert clarify_label("HIST upper-division (3000-4000 level) elective") == "HIST upper-division (3000-4000 level) elective"
 
 
-def test_plan_page_has_the_bachelors_degree_block_and_gateways():
+def test_plan_page_has_the_bachelors_degree_block():
     """Lisa Eddy (advising): MATH 1730 is the gatekeeper to the CSCI courses, and
     the Degree Works "Bachelor's Degree" block (36 upper-division hours, 30
     through MTSU, ...) blocks graduation even with every course done."""
@@ -932,8 +932,10 @@ def test_plan_page_has_the_bachelors_degree_block_and_gateways():
     assert "Bachelor's degree requirements" in html
     assert f"{rules['upper_division_hours']} upper-division hours" in html
     assert f"{rules['residence_hours']} hours earned through MTSU" in html
-    assert "Gateway course: MATH 1730" in html and "gateNode" in html
-    assert "Gateway course: ENGL 1010" not in html  # the Written Communication row covers it
+    # MATH 1730 isn't a CS requirement: it stays off the plan, and the courses
+    # that need it say so on hover (with the catalog's ACT / placement wording)
+    assert 'plan-item-code">MATH 1730<' not in html and "Gateway" not in html
+    assert "Needs MATH 1730 (or test out of it) first" in html and "Math ACT of 26" in html
     # Both map layouts are offered; top-down is the default
     assert 'data-map-dir="TD" aria-pressed="true"' in html and 'data-map-dir="LR"' in html
 
@@ -949,3 +951,39 @@ def test_short_plans_turn_late_free_electives_into_upper_division_ones():
     if before < catalog_store.degree_rules()["upper_division_hours"]:
         assert relabeled and upper_division_hours(plan, set(), cfg) > before
     assert rows[0]["status"] in ("ok", "info")
+
+
+def test_course_hover_shows_the_catalog_prerequisite():
+    html = app.test_client().get("/?major=cs").get_data(as_text=True)
+    assert "Prerequisite: MATH 1730 or MATH 1810" in html and "Math ACT of 26" in html
+
+
+def test_maps_drop_arrows_a_longer_path_already_shows():
+    from mtsugradpath.planner import drop_implied_edges
+    edges = [("MATH 1730", "CSCI 1170"), ("CSCI 1170", "CSCI 2170"), ("MATH 1730", "CSCI 2170"), ("A", "B"), ("B", "A")]
+    assert drop_implied_edges(edges) == [("MATH 1730", "CSCI 1170"), ("CSCI 1170", "CSCI 2170"), ("A", "B"), ("B", "A")]
+
+
+def test_a_completed_course_covers_its_own_prerequisites():
+    """Calculus I done means Pre-Calculus (or the ACT score) was too: no
+    "needs MATH 1730" note on later courses."""
+    html = _cs_plan_page(completed_courses="MATH 1910\nCSCI 1170\nCSCI 2170")
+    assert "Needs MATH 1730" not in html and 'plan-item-code">MATH 1730<' not in html
+
+
+def test_plans_dont_end_on_a_lone_elective_and_mix_each_term():
+    """A student's screenshot: 60 hours left ended in a 3-hour last term after
+    a term of only gen-eds. The final pass folds the straggler into terms with
+    room (up to 18 hours) and trades courses for gen-eds so each term mixes."""
+    data = {"major": "cs", "target_semesters": "8", "start_season": "Fall", "start_year": "2026", "healthy_mix": "on",
+            "completed_courses": "CSCI 1010\nCSCI 1150\nCSCI 1170\nCSCI 2170\nCSCI 3033\nCSCI 3080\nCSCI 3110\nMATH 1910",
+            "hours_tbc_written_comm": "3", "hours_p3306_1": "3", "hours_p3306_2": "3", "hours_p3306_3": "8",
+            "hours_p3306_4": "4"}
+    html = app.test_client().post("/", data=data).get_data(as_text=True)
+    terms = _plan_page_terms(html)
+    assert "Plan warning" not in html and not any(name.startswith("Remaining") for name, _, _ in terms)
+    assert terms[-1][2] > 7 and all(hours <= 18 for _, _, hours in terms)
+    bodies = _re.split(r'(?=<span class="term-card-title">)', html)[1:]
+    for body in bodies:
+        tags = _re.findall(r'plan-item-tag">([^<]+)<', body)
+        assert "MAJ" in tags and "GEN" in tags, tags
