@@ -206,13 +206,62 @@ def test_search_boxes_are_keyboard_and_screen_reader_friendly():
     assert 'id="major_input"' in html and 'role="combobox"' in html
 
 
-def test_data_refresh_runs_at_three_am_central():
-    """Scheduled at 08:00 and 09:00 UTC; the timing job lets through only the
-    one that is 3:00 AM in Central time (daylight / standard)."""
+def test_data_refresh_runs_early_morning_central_with_backups():
+    """Scheduled in Chicago time (off the busy top of the hour), each main run
+    with a next-day backup that only refreshes if the main run didn't."""
     import yaml
     from pathlib import Path
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/refresh-data.yml").read_text())
-    crons = sorted(item["cron"] for item in workflow[True]["schedule"])
-    assert crons == ["0 8 * * 1", "0 8 1 * *", "0 9 * * 1", "0 9 1 * *"]
-    assert workflow["jobs"]["refresh"]["needs"] == "timing"
-    assert "America/Chicago" in workflow["jobs"]["timing"]["steps"][0]["run"]
+    schedule = workflow[True]["schedule"]
+    assert sorted(item["cron"] for item in schedule) == ["17 3 * * 1", "17 3 * * 2", "17 3 1 * *", "17 3 2 * *"]
+    assert all(item["timezone"] == "America/Chicago" for item in schedule)
+    assert workflow["jobs"]["refresh"]["needs"] == "gate"
+
+
+def _gate():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / ".github/scripts/refresh_gate.py"
+    spec = importlib.util.spec_from_file_location("refresh_gate", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_refresh_gate_main_runs_and_manual_runs(tmp_path):
+    from datetime import datetime
+    gate = _gate()
+    monday = datetime(2026, 11, 9, 9, 17)  # 3:17 AM CST
+    assert gate.decide("", False, tmp_path, monday)[:2] == (True, False)
+    assert gate.decide("", True, tmp_path, monday)[:2] == (True, True)
+    assert gate.decide(gate.WEEKLY, False, tmp_path, monday)[:2] == (True, False)
+    assert gate.decide(gate.MONTHLY, False, tmp_path, datetime(2026, 12, 1, 9, 17))[:2] == (True, True)
+    # A Monday the 1st: the monthly run does the schedule too
+    assert gate.decide(gate.WEEKLY, False, tmp_path, datetime(2027, 3, 1, 9, 17))[:2] == (False, False)
+    # Every schedule in the workflow is one the gate knows
+    import yaml
+    from pathlib import Path
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/refresh-data.yml").read_text())
+    assert {item["cron"] for item in workflow[True]["schedule"]} == set(gate.SCHEDULES)
+
+
+def test_refresh_gate_backup_runs_only_if_main_run_missed(tmp_path):
+    import json
+    from datetime import datetime
+    gate = _gate()
+    tuesday = datetime(2026, 11, 10, 9, 17)
+    # Monday's run published: the backup skips
+    (tmp_path / "schedule.json").write_text(json.dumps({"fetched_at": "2026-11-09T19:43:17"}))
+    assert gate.decide(gate.WEEKLY_BACKUP, False, tmp_path, tuesday)[:2] == (False, False)
+    # Monday's run never happened (data from last week): the backup refreshes
+    (tmp_path / "schedule.json").write_text(json.dumps({"fetched_at": "2026-11-02T19:14:00"}))
+    assert gate.decide(gate.WEEKLY_BACKUP, False, tmp_path, tuesday)[:2] == (True, False)
+    # Missing or unreadable data: refresh
+    (tmp_path / "schedule.json").unlink()
+    assert gate.decide(gate.WEEKLY_BACKUP, False, tmp_path, tuesday)[0] is True
+    # Monthly backup reads the catalog's own timestamp
+    second = datetime(2026, 12, 2, 9, 17)
+    (tmp_path / "catalog.json").write_text(json.dumps({"catalog": {"fetched_at": "2026-12-01T10:00:00"}}))
+    assert gate.decide(gate.MONTHLY_BACKUP, False, tmp_path, second)[:2] == (False, True)
+    (tmp_path / "catalog.json").write_text(json.dumps({"catalog": {"fetched_at": "2026-11-01T15:38:46"}}))
+    assert gate.decide(gate.MONTHLY_BACKUP, False, tmp_path, second)[:2] == (True, True)
