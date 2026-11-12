@@ -106,6 +106,19 @@ def _credits(code: str) -> float:
     return 3 if c is None else c
 
 
+def _language_options(text: str) -> list:
+    """Courses for a "CSCI high-level language" row: that prefix's
+    "Computer Languages: Java / Python / ..." courses."""
+    m = re.match(r"\s*([A-Z]{2,4})\s+high[- ]level language", text or "", re.I)
+    if not m:
+        return []
+    prefix = m.group(1).upper() + " "
+    return sorted(
+        code for code, info in store.courses().items()
+        if code.startswith(prefix) and str(info.get("title", "")).lower().startswith("computer languages")
+    )
+
+
 def _nice(n):
     return int(n) if float(n).is_integer() else n
 
@@ -632,7 +645,8 @@ class _Builder:
                     # A plain "Electives N credit hours" line is part of free electives
                     continue
                 else:
-                    gid = self.add_generic(unit["text"], h, rows=rows, role=role,
+                    gid = self.add_generic(unit["text"], h, options=_language_options(unit["text"]),
+                                           rows=rows, role=role,
                                            suggestions=[re.sub(r"\s+", " ", text)[:140]] if text else [])
                     if gid:
                         self.text_generic.add(gid)
@@ -1065,6 +1079,24 @@ def tbc_area_options() -> dict:
 
 # ── Auto-credit for hours requirements that list specific courses ────────────
 
+def auto_fill_rules(cfg: dict) -> tuple[list, dict, dict]:
+    """(order, options, caps) for the requirement rows that fill in from
+    completed courses -- shared by auto_generic_hours and the planner form's
+    live preview, so the two can't disagree."""
+    options = dict(cfg.get("generic_options") or {})
+    caps = {gid: hours for gid, _, hours, _ in cfg.get("supporting_generic", [])}
+    # Gen-ed rows fill from the True Blue Core course lists, after the
+    # program's own choices have had first pick
+    tbc_options = tbc_area_options()
+    tbc_ids = [gid for gid, _, _, _ in cfg.get("tbc_generic", []) if gid in tbc_options]
+    for gid, _, hours, _ in cfg.get("tbc_generic", []):
+        caps[gid] = hours
+    # Narrowest choices first so a course that fits only one requirement lands there
+    order = [gid for gid in sorted(options, key=lambda g: len(options[g])) + tbc_ids if gid in caps]
+    options.update({gid: tbc_options[gid] for gid in tbc_ids})
+    return order, options, caps
+
+
 def auto_generic_hours(cfg: dict, completed: set, required: set | None = None,
                        typed: dict | None = None) -> tuple[dict, dict]:
     """Hours each listed-course requirement gets from completed courses.
@@ -1074,6 +1106,7 @@ def auto_generic_hours(cfg: dict, completed: set, required: set | None = None,
     Hours the student *typed* for a row come first: a course only fills what
     the typed hours leave open, so it stays free for electives otherwise.
     Returned hours include the typed part.
+    (templates/index.html mirrors this loop for its live preview.)
     """
     typed = typed or {}
 
@@ -1083,25 +1116,13 @@ def auto_generic_hours(cfg: dict, completed: set, required: set | None = None,
         except (TypeError, ValueError):
             return 0.0
 
-    options = dict(cfg.get("generic_options") or {})
-    caps = {gid: hours for gid, _, hours, _ in cfg.get("supporting_generic", [])}
-    # Gen-ed rows fill from the True Blue Core course lists, after the
-    # program's own choices have had first pick
-    tbc_options = tbc_area_options()
-    tbc_ids = [gid for gid, _, _, _ in cfg.get("tbc_generic", []) if gid in tbc_options]
-    for gid, _, hours, _ in cfg.get("tbc_generic", []):
-        caps[gid] = hours
+    order, options, caps = auto_fill_rules(cfg)
     if required is None:
         required = {c for key in ("core_courses", "concentration_courses", "supporting_courses") for c, _, _ in cfg.get(key, [])}
     used: set = set()
     hours_by_id, applied = {}, {}
-    # Narrowest choices first so a course that fits only one requirement lands there
-    order = sorted(options, key=lambda g: len(options[g])) + tbc_ids
-    options.update({gid: tbc_options[gid] for gid in tbc_ids})
     for gid in order:
-        cap = caps.get(gid)
-        if cap is None:
-            continue
+        cap = caps[gid]
         already = min(_typed(gid), cap)
         total = already
         for code in options[gid]:

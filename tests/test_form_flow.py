@@ -236,3 +236,35 @@ def test_checklist_has_season_filters_and_hover_details():
     assert 'id="checklist-search"' in html
     card = re.search(r'<div class="form-check cs-course-check[^"]*" title="([^"]*)" data-seasons="([^"]*)"[^>]*>\s*<input[^>]+data-code="CSCI 1170"', html)
     assert card and "credit hours" in card.group(1) and "fall" in card.group(2)
+
+
+# ── Requirement rows that fill in from completed courses ──────────────────────
+
+
+def _hll_row_id():
+    from mtsugradpath.degree_configs import find_degree_config
+    cfg = find_degree_config("cs")
+    return next(gid for gid, label, _, _ in cfg["supporting_generic"] if "high-level language" in label.lower())
+
+
+def test_java_fills_high_level_language_row():
+    """CSCI 3033 (Java) counts toward "CSCI high-level language" -- not as an
+    upper-division elective."""
+    html = post_plan(completed=["CSCI 1170", "CSCI 2170", "CSCI 3033"]).get_data(as_text=True)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+    assert re.search(r"CSCI high-level language 3 / 3 cr hrs Counted: CSCI 3033", text)
+    assert re.search(r"CSCI upper-division electives \([^)]*\) 0 / 9", text)
+
+
+def test_form_previews_auto_rows_live():
+    """The form carries the auto-fill rules so checking ENGL 1010 or Java
+    fills those rows before the plan is generated."""
+    html = get_html()
+    m = re.search(r"const AUTO_FILL = (\{.*?\});\n", html)
+    assert m, "AUTO_FILL data missing from the form"
+    rules = json.loads(m.group(1))
+    hll = _hll_row_id()
+    assert "CSCI 3033" in rules["options"][hll]
+    assert "ENGL 1010" in rules["options"]["tbc_written_comm"]
+    assert {hll, "tbc_written_comm"} <= set(rules["order"])
+    assert f'data-auto-for="{hll}"' in html and 'data-auto-for="tbc_written_comm"' in html

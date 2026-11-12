@@ -360,6 +360,12 @@ footer a {
     margin-top: 0.4rem;
 }
 
+.requirement-auto-note {
+    font-size: 0.76rem;
+    color: #15803d;
+    margin-top: 0.4rem;
+}
+
 .term-chart {
     display: flex;
     align-items: flex-end;

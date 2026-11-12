@@ -285,6 +285,8 @@ const addCourseButton = document.getElementById('add-course');
 const courseInput = document.getElementById('course_input');
 const selectedCourses = document.getElementById('selected-courses');
 const completedCoursesField = document.getElementById('completed_courses');
+// Which requirement rows fill in from checked-off courses (see refreshRequirementRows)
+const AUTO_FILL = {{ auto_fill | tojson }};
 const courseGradesField = document.getElementById('course_grades');
 const plannerForm = document.getElementById('planner-form');
 const clearCoursesButton = document.getElementById('clear-courses');
@@ -467,6 +469,7 @@ function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
   document.getElementById('side-count').textContent = values.length;
+  refreshRequirementRows();
   saveState();
 }
 
@@ -757,17 +760,59 @@ document.querySelectorAll('.requirement-mark-complete').forEach(button => {
   });
 });
 
-document.querySelectorAll('.requirement-hours-input').forEach(input => {
-  const updateFill = () => {
-    const pct = input.max > 0 ? Math.min(100, 100 * input.value / input.max) : 0;
+// Rows marked "auto" preview the credit they'll get from courses checked off
+// or added, using the same rules the plan uses (auto_generic_hours in
+// catalog_programs.py): narrowest rows pick first, each course counts once,
+// courses the major requires by name don't count, and typed hours come
+// first. Only the bar and note change -- the typed value is left alone, so
+// course credit isn't sent twice. (Rules: AUTO_FILL, at the top.)
+function autoFillPreview() {
+  const completed = new Set(Array.from(selectedCourses.querySelectorAll('.badge')).map(b => b.dataset.course));
+  const required = new Set(AUTO_FILL.required);
+  const used = new Set();
+  const result = {};
+  AUTO_FILL.order.forEach(gid => {
+    const cap = AUTO_FILL.caps[gid];
+    const input = document.getElementById(`hours_${gid}`);
+    const typed = input ? Math.max(Number(input.value) || 0, 0) : 0;
+    let total = Math.min(typed, cap);
+    const applied = [];
+    AUTO_FILL.options[gid].forEach(code => {
+      if (completed.has(code) && !used.has(code) && !required.has(code) && total < cap) {
+        used.add(code);
+        total += AUTO_FILL.credits[code] ?? 3;
+        applied.push(code);
+      }
+    });
+    if (applied.length) result[gid] = { hours: Math.min(total, cap), applied };
+  });
+  return result;
+}
+
+function refreshRequirementRows() {
+  const auto = autoFillPreview();
+  document.querySelectorAll('.requirement-hours-input').forEach(input => {
+    const gid = input.id.replace(/^hours_/, '');
+    const max = Number(input.max);
+    const filled = auto[gid] ? auto[gid].hours : Math.min(Math.max(Number(input.value) || 0, 0), max);
     const row = input.closest('.requirement-row');
-    row.classList.toggle('requirement-row-complete', Number(input.value) >= Number(input.max));
+    row.classList.toggle('requirement-row-complete', max > 0 && filled >= max);
     const fill = row.querySelector('.requirement-fill');
-    if (fill) fill.style.width = `${pct}%`;
-  };
-  input.addEventListener('input', updateFill);
-  updateFill();
+    if (fill) fill.style.width = `${max > 0 ? Math.min(100, 100 * filled / max) : 0}%`;
+    const note = row.querySelector('.requirement-auto-note');
+    if (note) {
+      note.hidden = !auto[gid];
+      note.textContent = auto[gid]
+        ? `${filled} / ${max} cr hrs, counting ${auto[gid].applied.join(', ')}`
+        : '';
+    }
+  });
+}
+
+document.querySelectorAll('.requirement-hours-input').forEach(input => {
+  input.addEventListener('input', refreshRequirementRows);
 });
+refreshRequirementRows();
 
 // ── Program search bars ──
 // Each field is a search bar that shows the current pick. Focusing it lists

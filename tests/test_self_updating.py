@@ -111,6 +111,10 @@ def test_offering_patterns_from_the_schedule(fake_schedule):
     assert store.offering_summary("BBB 2000") == "Fall only"
     assert store.offering_summary("CCC 3000") == "Odd-year springs"
     assert store.offering_summary("AAA 1000") == ""
+    # ...and isn't labelled "X only" either, so the label matches the
+    # checklist's season filters
+    assert store.offering_summary("NEW 1000") == ""
+    assert "Fall" in store.offered_seasons("NEW 1000") and "Spring" in store.offered_seasons("NEW 1000")
 
 
 def test_planner_never_places_a_course_in_a_term_it_does_not_run(fake_schedule):

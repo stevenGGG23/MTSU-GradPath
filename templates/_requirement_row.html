@@ -16,6 +16,9 @@
     </div>
   </div>
   <div class="requirement-progress"><div class="requirement-fill"></div></div>
+  {% if auto_generic_ids is defined and generic_id in auto_generic_ids %}
+  <div class="requirement-auto-note" data-auto-for="{{ generic_id }}" hidden></div>
+  {% endif %}
   {% if suggestions %}
   <div class="requirement-suggestions">e.g. {{ suggestions | join(', ') }}</div>
   {% endif %}

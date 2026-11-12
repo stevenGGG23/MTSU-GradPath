@@ -23,7 +23,7 @@ from sqlalchemy import or_, update
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mtsugradpath import catalog_store
-from mtsugradpath.catalog_programs import auto_generic_hours, tbc_area_options
+from mtsugradpath.catalog_programs import auto_fill_rules, auto_generic_hours
 from mtsugradpath.degree_checks import bachelors_checks, clarify_label
 from mtsugradpath.config import SYNC_ADMIN_PASSWORD, SYNC_ADMIN_USER
 from mtsugradpath.db import SessionLocal, init_db
@@ -646,9 +646,18 @@ def index():
         row for row in form_cfg["supporting_generic"]
         if not row[0].startswith(SECOND_MAJOR_ELECTIVE_ID_PREFIX)
     ]
-    auto_ids = sorted((form_cfg.get("generic_options") or {}).keys()) + [
-        gid for gid, _, _, _ in degree_cfg["tbc_generic"] if gid in tbc_area_options()
-    ]
+    # Rows that fill in from checked-off courses, and the rules for filling
+    # them (the same ones the plan uses), so the form can preview it live
+    auto_order, auto_options, auto_caps = auto_fill_rules(form_cfg)
+    auto_ids = auto_order
+    auto_codes = {code for gid in auto_order for code in auto_options[gid]}
+    auto_fill = {
+        "order": auto_order,
+        "options": {gid: auto_options[gid] for gid in auto_order},
+        "caps": {gid: auto_caps[gid] for gid in auto_order},
+        "required": sorted(_required_codes(degree_cfg) & auto_codes),
+        "credits": {code: catalog_store.credits(code, default=3) for code in sorted(auto_codes)},
+    }
 
     return render_template(
         "index.html",
@@ -661,6 +670,7 @@ def index():
         checklist_prefixes=display_prefixes,
         supporting_generic=manual_supporting_generic,
         auto_generic_ids=auto_ids,
+        auto_fill=auto_fill,
         generic_options={gid: opts for gid, opts in (form_cfg.get("generic_options") or {}).items()},
         tbc_generic=degree_cfg["tbc_generic"],
         electives_generic_id=ELECTIVES_GENERIC_ID,

@@ -462,7 +462,11 @@ def offering_summary(code: str) -> str:
         pattern = _season_pattern(sched, sched["offered"][code], season)
         if pattern in ("odd", "even"):
             seasons.append(f"{pattern}-year {season.lower()}s")
-        elif pattern == "every":
+        elif pattern == "every" or (pattern is None and season != "Summer"):
+            # Too little history to rule out a fall/spring (a course first
+            # seen last spring): don't call it "Spring only" -- the same
+            # assumption offered_seasons, the checklist filters and the
+            # planner make
             seasons.append(season.lower())
     if not seasons or (len(seasons) >= 2 and {"fall", "spring"} <= set(seasons)):
         return ""
