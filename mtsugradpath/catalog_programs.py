@@ -440,6 +440,15 @@ def _walk(sections, depth=0, parent=None):
         yield from _walk(sec.get("children"), depth + 1, sec)
 
 
+def _hint(text, limit=140):
+    """Catalog prose as a one-line example, cut at a word (not mid-word)."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:(")
+    return cut + "…"
+
+
 def _clean_label(name: str) -> str:
     name = re.sub(r"\s*\((?:[^()]*\bhours?\b[^()]*)\)\s*:?", "", name).strip(" :")
     return name or "Requirement"
@@ -574,7 +583,7 @@ class _Builder:
             else:
                 filled = self._fill_from_curriculum(H, role, rows, curriculum_extra) if not _ELECTIVE_TEXT.search(sec["name"]) else 0
                 if H - filled >= 1:
-                    hint = re.sub(r"\s+", " ", text)[:140]
+                    hint = _hint(text)
                     self.add_generic(label if not filled else f"{label} (other)", H - filled, rows=rows,
                                      suggestions=[hint] if hint else [], role=role)
             return rows
@@ -645,9 +654,12 @@ class _Builder:
                     # A plain "Electives N credit hours" line is part of free electives
                     continue
                 else:
-                    gid = self.add_generic(unit["text"], h, options=_language_options(unit["text"]),
+                    lang = _language_options(unit["text"])
+                    # Real course options beat the section's prose as examples
+                    gid = self.add_generic(unit["text"], h, options=lang,
                                            rows=rows, role=role,
-                                           suggestions=[re.sub(r"\s+", " ", text)[:140]] if text else [])
+                                           suggestions=([store.label(c) for c in lang[:3]] + (["…"] if len(lang) > 3 else []))
+                                           if lang else ([_hint(text)] if text else []))
                     if gid:
                         self.text_generic.add(gid)
 
@@ -668,7 +680,7 @@ class _Builder:
                 rows.append({"type": "ud", "hours": rest})
             else:
                 self.add_generic(f"{label}: additional hours", rest, rows=rows, role=role,
-                                 suggestions=[re.sub(r"\s+", " ", words)[:140]] if words else [])
+                                 suggestions=[_hint(words)] if words else [])
         return rows
 
     def _matching_generic(self, label, hours):

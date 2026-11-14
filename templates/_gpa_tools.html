@@ -1,7 +1,7 @@
 <!-- GPA tools: a small tab on the right edge that slides out a panel with a
      what-if calculator and a target-GPA calculator. Everything runs in the
      browser; numbers are kept in sessionStorage for this tab only. -->
-<button type="button" class="gpa-tab" data-bs-toggle="offcanvas" data-bs-target="#gpaTools" aria-controls="gpaTools">GPA</button>
+<button type="button" class="gpa-tab" data-bs-toggle="offcanvas" data-bs-target="#gpaTools" aria-controls="gpaTools"><i class="bi bi-calculator" aria-hidden="true"></i><span>GPA Calculator</span></button>
 
 <div class="offcanvas offcanvas-end gpa-panel" tabindex="-1" id="gpaTools" aria-labelledby="gpaToolsLabel">
   <div class="offcanvas-header gpa-panel-header">
@@ -10,7 +10,7 @@
   </div>
   <div class="offcanvas-body">
     <div class="gpa-current-card mb-3">
-      <p class="gpa-hint mb-2">Use the overall GPA and GPA hours from your Degree Works audit.</p>
+      <p class="gpa-hint mb-2">See how future grades would change your GPA. Start with the overall GPA and GPA hours from your Degree Works audit.</p>
       <div class="row g-2">
         <div class="col-6">
           <label class="form-label gpa-label" for="gpa_current">Current GPA</label>
@@ -34,8 +34,9 @@
 
     <div class="tab-content">
       <div class="tab-pane fade show active" id="gpaWhatIf" role="tabpanel">
+        <div class="gpa-sources" id="gpa_sources" role="group" aria-label="Which courses" hidden></div>
         <p class="gpa-hint gpa-prefill-note" id="gpa_prefill_note" hidden></p>
-        <p class="gpa-hint">Add courses you plan to take. For a retake, set "Replaces" to the old grade — MTSU removes it from your GPA.</p>
+        <p class="gpa-hint" id="gpa_custom_hint">Add courses you plan to take. For a retake, set "Replaces" to the old grade — MTSU removes it from your GPA.</p>
         <div class="gpa-row-head">
           <span>Course</span><span>Hrs</span><span>Grade</span><span>Replaces</span><span></span>
         </div>
@@ -84,28 +85,36 @@
     const el = $('gpa-next-term');
     try { return el ? JSON.parse(el.textContent) : null; } catch (e) { return null; }
   })();
-  let prefillKey = '';
 
-  // The plan page's rows (its next semester) and rows typed on other pages
-  // are kept apart, so neither overwrites the other
-  function save() {
-    const previous = load();
-    const rows = [...rowsBox.children].map(row => ({
+  // The What-if tab's course lists, each with its own rows and grades:
+  //   now    -- classes in progress, from a Degree Works import (grades not
+  //             out yet, whatever the plan counts them as)
+  //   next   -- the plan's next semester
+  //   custom -- courses the student adds
+  const SOURCES = ['now', 'next', 'custom'];
+  let state = load();
+  if (!state.lists) {
+    // Earlier versions kept typed rows in "rows" and the plan's in "planRows"
+    state.lists = { custom: { rows: state.rows || [] } };
+    if (state.prefill) {
+      state.lists.next = { key: state.prefill, term: state.prefill.split(':')[0], rows: state.planRows || [] };
+    }
+  }
+  let active = null;
+
+  function readRows() {
+    return [...rowsBox.children].map(row => ({
       name: row.querySelector('.gpa-name').value,
       hours: row.querySelector('.gpa-hrs').value,
       grade: row.querySelector('.gpa-grade').value,
       old: row.querySelector('.gpa-old').value,
     }));
-    const state = {
-      // (pages without a plan keep the last plan's marker and rows)
-      prefill: prefillKey || previous.prefill || '',
-      current: $('gpa_current').value,
-      hours: $('gpa_hours').value,
-      goal: $('gpa_goal').value,
-      more: $('gpa_more').value,
-      planRows: prefillKey ? rows : (previous.planRows || []),
-      rows: prefillKey ? (previous.rows || []) : rows,
-    };
+  }
+
+  function save() {
+    if (active) state.lists[active].rows = readRows();
+    ['current', 'hours', 'goal', 'more'].forEach(key => { state[key] = $(`gpa_${key}`).value; });
+    state.source = active;
     try { sessionStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
   }
 
@@ -254,44 +263,126 @@
       <div>Average you need over your next ${more} hours &mdash; roughly ${atLeast === letter ? letter : `${letter}/${atLeast}`} grades in every course.</div>`;
   }
 
+  // Outline the boxes a result is still waiting for, so it's clear why
+  // nothing was calculated yet
+  function markMissing() {
+    const blank = id => !$(id).value.trim();
+    const graded = [...rowsBox.children].some(row => row.querySelector('.gpa-grade').value);
+    const anyInput = graded || !blank('gpa_goal') || !blank('gpa_current') || !blank('gpa_hours');
+    const needCurrent = anyInput;
+    $('gpa_current').classList.toggle('gpa-missing', needCurrent && blank('gpa_current'));
+    $('gpa_hours').classList.toggle('gpa-missing', needCurrent && blank('gpa_hours'));
+    $('gpa_goal').classList.toggle('gpa-missing', !blank('gpa_current') && !blank('gpa_hours') && blank('gpa_goal')
+      && document.getElementById('gpaTarget').classList.contains('active'));
+    [...rowsBox.children].forEach(row => {
+      const hrs = row.querySelector('.gpa-hrs');
+      hrs.classList.toggle('gpa-missing', !!row.querySelector('.gpa-grade').value && !(parseFloat(hrs.value) > 0));
+    });
+  }
+
   function update() {
     $('gpa_whatif_result').innerHTML = whatIf();
     $('gpa_target_result').innerHTML = target();
+    markMissing();
     save();
   }
 
-  const saved = load();
-  ['current', 'hours', 'goal', 'more'].forEach(key => {
-    if (saved[key]) $(`gpa_${key}`).value = saved[key];
-  });
-  // Earlier versions kept a plan's rows in "rows"
-  if (saved.prefill && !saved.planRows) {
-    saved.planRows = saved.rows || [];
-    saved.rows = [];
-  }
-  // Until a plan is generated the rows start blank
-  let rows = saved.rows && saved.rows.length ? saved.rows : [{}];
-  if (nextTerm && nextTerm.courses && nextTerm.courses.length) {
-    // Start from the upcoming semester's courses (grades left for the
-    // student); edits made for this same semester are kept
-    const courses = nextTerm.courses.filter(c => c && typeof c.code === 'string');
-    prefillKey = `${nextTerm.term}:${courses.map(c => c.code).join(',')}`;
-    if (saved.prefill === prefillKey && saved.planRows && saved.planRows.length) {
-      rows = saved.planRows;
+  const courseRows = courses => courses
+    .filter(c => c && typeof c.code === 'string')
+    .map(c => ({ name: c.code, hours: Number(c.hours) || 0, grade: '' }));
+  const keyOf = (term, courses) => `${term}:${courses.map(c => c.code).join(',')}`;
+
+  // Bring the lists up to date with the audit and this page's plan; a list
+  // for the same courses as before keeps the grades already picked
+  function syncSources() {
+    const now = state.nowCourses;
+    if (now && Array.isArray(now.courses) && now.courses.length) {
+      const key = keyOf(now.term, now.courses);
+      if (!state.lists.now || state.lists.now.key !== key) {
+        state.lists.now = { key, term: now.term, rows: courseRows(now.courses) };
+      }
     } else {
-      rows = courses.map(c => ({ name: c.code, hours: Number(c.hours) || 0, grade: '' }));
-      const total = courses.reduce((sum, c) => sum + (Number(c.hours) || 0), 0);
-      if (total) $('gpa_more').value = total;
+      delete state.lists.now;
     }
-    const note = $('gpa_prefill_note');
-    note.textContent = `Filled in with your next semester (${nextTerm.term}). Enter your current GPA and hours above, then pick the grade you expect in each course.`;
-    note.hidden = false;
+    if (nextTerm && Array.isArray(nextTerm.courses) && nextTerm.courses.length) {
+      const key = keyOf(nextTerm.term, nextTerm.courses);
+      if (!state.lists.next || state.lists.next.key !== key) {
+        state.lists.next = { key, term: nextTerm.term, rows: courseRows(nextTerm.courses) };
+        // "Hours left to take": everything still planned for the degree
+        const left = Number(nextTerm.hours_left);
+        if (left) $('gpa_more').value = left;
+      }
+    }
+    // The plan's "next" term can be the one already under way
+    if (state.lists.next && state.lists.now && state.lists.next.term === state.lists.now.term) {
+      delete state.lists.next;
+    }
+    state.lists.custom = state.lists.custom || { rows: [] };
   }
-  rows.forEach(addRow);
+
+  function available() {
+    return SOURCES.filter(source => state.lists[source]);
+  }
+
+  function renderSources() {
+    const box = $('gpa_sources');
+    const list = available();
+    box.hidden = list.length < 2;
+    box.innerHTML = '';
+    list.forEach(source => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'gpa-source' + (source === active ? ' is-active' : '');
+      button.setAttribute('aria-pressed', source === active ? 'true' : 'false');
+      const term = state.lists[source].term;
+      button.textContent = source === 'now' ? `Now: ${term}` : source === 'next' ? `Next: ${term}` : 'My list';
+      button.addEventListener('click', () => switchTo(source));
+      box.appendChild(button);
+    });
+  }
+
+  function switchTo(source) {
+    if (active && state.lists[active]) state.lists[active].rows = readRows();
+    active = state.lists[source] ? source : 'custom';
+    rowsBox.innerHTML = '';
+    const rows = state.lists[active].rows;
+    (rows && rows.length ? rows : [{}]).forEach(addRow);
+    const note = $('gpa_prefill_note');
+    const term = state.lists[active].term;
+    note.textContent = active === 'now'
+      ? `Your classes in progress (${term}), from your Degree Works audit. Pick the grade you expect in each.`
+      : active === 'next'
+        ? `Your next semester in the plan (${term}). Pick the grade you expect in each.`
+        : '';
+    note.hidden = active === 'custom';
+    $('gpa_custom_hint').hidden = active !== 'custom';
+    renderSources();
+    update();
+  }
+
+  ['current', 'hours', 'goal', 'more'].forEach(key => {
+    if (state[key]) $(`gpa_${key}`).value = state[key];
+  });
+  syncSources();
+  // Classes in progress first: their grades are what's coming next
+  const preferred = state.lists.now ? 'now' : state.lists.next && nextTerm ? 'next'
+    : (state.source && state.lists[state.source] ? state.source : available()[0]);
+  switchTo(preferred);
+
+  // A Degree Works import on this page: its GPA, GPA hours and the classes
+  // in progress (see the planner page's import)
+  window.addEventListener('gradpath:gpa-import', event => {
+    const detail = event.detail || {};
+    if (detail.current) $('gpa_current').value = detail.current;
+    if (detail.hours) $('gpa_hours').value = detail.hours;
+    state.nowCourses = detail.now || null;
+    syncSources();
+    switchTo(state.lists.now ? 'now' : active);
+  });
 
   $('gpa_add').addEventListener('click', () => { addRow(); update(); rowsBox.lastElementChild.querySelector('.gpa-name').focus(); });
   $('gpaTools').addEventListener('input', update);
   $('gpaTools').addEventListener('change', update);
-  update();
+  $('gpaTools').addEventListener('shown.bs.tab', update);
 })();
 </script>

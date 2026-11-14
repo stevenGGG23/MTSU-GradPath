@@ -208,16 +208,19 @@ GENERIC_CHUNK_SIZE = 3
 SEASON_CYCLE = ["Spring", "Summer", "Fall"]
 
 # Function that returns the default starting semester by month
+def default_start_term(today=None):
+    """(season, year) of the first term a student is likely not registered
+    for yet -- where a plan should start. During fall (August-December) that's
+    next spring; during spring and summer (January-July) it's the coming fall.
+    (A student who also wants summer can pick it in step 4.)"""
+    today = today or date.today()
+    if today.month >= 8:
+        return "Spring", today.year + 1
+    return "Fall", today.year
+
+
 def default_start_season(today=None):
-    month = (today or date.today()).month
-
-    if month in (1, 2, 3, 4):
-        return "Spring"
-
-    if month in (5, 6, 7):
-        return "Summer"
-
-    return "Fall"
+    return default_start_term(today)[0]
 
 # Function that creates a semester label
 def term_label(term_index: int, start_season: str, start_year: int) -> str:
@@ -933,7 +936,7 @@ def generate_plan(
         start_season = default_start_season()
 
     if not start_year:
-        start_year = date.today().year
+        start_year = default_start_term()[1]
 
     # Callers that already loaded the catalog (e.g. the web app, which also
     # needs it for the audit/warnings) can pass it in to skip a second,

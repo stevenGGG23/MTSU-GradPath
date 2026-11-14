@@ -11,12 +11,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ static_url('styles.css') }}">
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <nav class="navbar navbar-expand-lg navbar-dark navbar-top mb-4" style="position:relative">
     <div class="container">
       <a class="navbar-brand d-flex align-items-center gap-2" href="/">
         <img src="/static/Middle-Tennessee-Blue-Raiders-logo.png" alt="MTSU" class="navbar-logo">
-        GradPath <span class="navbar-sub">MTSU degree planner</span>
+        GradPath <span class="navbar-sub">MTSU Degree Planner</span>
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
@@ -34,6 +34,9 @@
           </li>
           <li class="nav-item">
             <a class="nav-link" href="/prerequisites{% if saved_state is defined and saved_state.major %}?major={{ saved_state.major }}{% endif %}"><i class="bi bi-diagram-3 me-1"></i>Prerequisite Map</a>
+          </li>
+          <li class="nav-item">
+            <button type="button" class="nav-link nav-link-button" data-bs-toggle="offcanvas" data-bs-target="#gpaTools" aria-controls="gpaTools"><i class="bi bi-calculator me-1"></i>GPA Calculator</button>
           </li>
         </ul>
       </div>

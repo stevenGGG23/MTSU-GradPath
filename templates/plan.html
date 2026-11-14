@@ -12,7 +12,7 @@
     <div>
       <h2 class="mb-2">Your recommended plan</h2>
       {% set extras = ([second_audit.label] if second_audit else []) + (minor_audits | map(attribute='label') | list) %}
-      <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}.</p>
+      <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %}{% if plan %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}{% else %} — every requirement is covered{% endif %}.</p>
       {% if catalog_url %}<p class="small mb-0 mt-1 no-print"><a class="program-link" href="{{ catalog_url }}" target="_blank" rel="noopener">Check the official requirements in the catalog <i class="bi bi-box-arrow-up-right"></i></a></p>{% endif %}
     </div>
     <div class="d-flex gap-2 plan-actions">
@@ -60,7 +60,7 @@
   {% if unrecognized_courses %}
   <div class="alert alert-warning unrecognized-alert mb-4">
     <strong>Unrecognized course{{ 's' if unrecognized_courses|length != 1 }} ({{ unrecognized_courses|length }}):</strong>
-    {{ 'These courses were' if unrecognized_courses|length != 1 else 'This course was' }} not matched to any {{ degree_name }} requirement. If {{ 'they count' if unrecognized_courses|length != 1 else 'it counts' }} toward free electives or gen-ed, add the hours manually in Step&nbsp;3.
+    {{ 'These courses were' if unrecognized_courses|length != 1 else 'This course was' }} not matched to any {{ degree_name }} requirement. If Degree Works counts {{ 'them' if unrecognized_courses|length != 1 else 'it' }} toward a requirement, go back with <em>Edit completed courses</em> and enter the hours in that requirement's row in step&nbsp;3 (or in <em>Free electives</em> at the bottom of step&nbsp;3).
     <div class="mt-2 d-flex flex-wrap gap-2">
       {% for code in unrecognized_courses %}
       <span class="badge bg-secondary">{{ code }}</span>
@@ -82,6 +82,9 @@
     <div class="progress-summary-detail">
       <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
       <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree.</p>
+      {% if degree_works %}
+      <p class="dw-plan-note mb-3"><i class="bi bi-file-earmark-check me-1"></i>Using your Degree Works audit{% if degree_works.percent is not none %} ({{ degree_works.percent }}% there{% if degree_works.catalog_year %}, {{ degree_works.catalog_year }} catalog{% endif %}){% endif %}: requirements it shows as met count here{% if degree_works.all_done %}, and it shows every requirement met{% endif %}.</p>
+      {% endif %}
       <div class="category-bars">
         {% for group in audit.groups %}
         <div class="category-bar-row">
@@ -231,6 +234,17 @@
   <div class="mb-4 plan-section plan-overview">
     <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-calendar3-range text-primary"></i>Plan overview</h4>
     {% if faster_without_mix %}<p class="small text-muted mb-2 no-print"><i class="bi bi-lightning-charge me-1"></i>With <strong>Healthy course mix</strong> off, this plan finishes by <strong>{{ faster_without_mix }}</strong>, with more major courses in some terms. <a href="/">Change it on the first page</a>.</p>{% endif %}
+    <div class="plan-tag-legend" aria-label="What the tags mean">
+      <span class="plan-item-course"><span class="plan-item-tag">MAJ</span>Required major course</span>
+      <span class="plan-item-requirement"><span class="plan-item-tag">MAJ</span>Major choice: pick a course from a list</span>
+      <span class="plan-item-requirement"><span class="plan-item-tag">GEN</span>Gen-ed (True Blue Core) or elective</span>
+      {% if second_audit %}<span class="plan-item-second"><span class="plan-item-tag">2ND</span>Second major</span>{% endif %}
+      {% if minor_audits %}<span class="plan-item-minor"><span class="plan-item-tag">MIN</span>Minor</span>{% endif %}
+      <span class="text-muted">Hover a course to see its prerequisites.</span>
+    </div>
+    {% if not plan %}
+    <div class="plan-done mb-3"><i class="bi bi-mortarboard-fill me-2"></i><strong>Nothing left to plan.</strong>{% if degree_works and degree_works.all_done %} Your Degree Works audit shows every requirement met{% if degree_works.count_ip %}, counting the classes you're taking now{% endif %}. Check with your advisor that your graduation application is filed.{% endif %}</div>
+    {% endif %}
     <div class="term-grid{{ ' term-grid-years' if not include_summer }}">
       {% for term, items in plan.items() %}
       <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
@@ -238,9 +252,12 @@
           <span class="term-card-title">{{ term }}</span>
           {% if term in term_hours %}<span class="badge bg-secondary">{{ term_hours[term] }} cr hrs</span>{% endif %}
         </div>
+        {% if term.startswith('Remaining') %}
+        <p class="small text-muted px-3 pt-2 mb-0">These didn't fit in {{ semesters }} terms, usually because of a chain of prerequisites or a course offered only in fall or spring. Add a term{% if not include_summer %} or include summers{% endif %} in step&nbsp;4 to fit them in.</p>
+        {% endif %}
         <div class="plan-item-table">
           {% for item in items %}
-          <div class="plan-item-row plan-item-{{ item.kind }}{{ ' plan-item-minor' if item.minor }}{{ ' plan-item-second' if item.second }}">
+          <div class="plan-item-row plan-item-{{ item.kind }}{{ ' plan-item-minor' if item.minor }}{{ ' plan-item-second' if item.second }}"{% if item.prereq_text %} title="Prerequisites: {{ item.prereq_text }}"{% endif %}>
             <span class="plan-item-tag">{{ 'MIN' if item.minor else ('2ND' if item.second else ('MAJ' if item.kind == 'course' or item.program else ('GEN' if item.kind == 'requirement' else '—'))) }}</span>
             <div class="plan-item-main">
               {% if item.code %}<span class="plan-item-code">{{ item.code }}</span>{% endif %}
@@ -284,7 +301,7 @@
   {% if personal_mermaid or personal_standalone %}
   <div class="mb-2 plan-section plan-prereq-path">
     <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-diagram-2 text-primary"></i>Your prerequisite path</h4>
-    <p class="text-muted mb-3">Courses are shown based on your selections. Green = completed, blue = next up (first two terms), light blue = later in your plan, gray = supporting prerequisites.</p>
+    <p class="text-muted mb-3">How your courses unlock each other: an arrow from one course to another means the first is a prerequisite for the second. Hover a course in the plan above to read its prerequisites in words.</p>
     <div class="personal-prereq-legend mb-3">
       <span class="legend-item"><span class="legend-swatch" style="background:#16a34a;"></span>Completed</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#2563eb;"></span>Next up</span>
@@ -305,7 +322,7 @@
           <button type="button" class="btn btn-outline-secondary" data-map-dir="TD" aria-pressed="true"><i class="bi bi-arrow-down me-1"></i>Top-down</button>
           <button type="button" class="btn btn-outline-secondary" data-map-dir="LR" aria-pressed="false"><i class="bi bi-arrow-right me-1"></i>Left to right</button>
         </div>
-        <span class="map-viewer-hint">Drag to move around</span>
+        <span class="map-viewer-hint" data-map-pan-hint hidden>Drag to move around</span>
       </div>
       <div class="prereq-graph-wrap">
         <pre class="mermaid personal-mermaid">{{ personal_mermaid }}</pre>

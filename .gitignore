@@ -12,3 +12,7 @@ data/
 .pytest_cache/
 venv/
 submission.zip
+
+# Student data: feedback exports and Degree Works audits
+Feedback.zip
+audit-*.pdf

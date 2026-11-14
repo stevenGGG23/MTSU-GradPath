@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 
+{# First visit (no major yet): the two boxes fill the screen #}
+{% block body_class %}{% if major_chosen is defined and not major_chosen %}first-visit{% endif %}{% endblock %}
+
 {% block content %}
 
 {% set saved_state = saved_state | default({}) %}
@@ -8,12 +11,67 @@
 {% set saved_year = saved_state.get('start_year', default_year) %}
 {% set saved_semesters = saved_state.get('target_semesters', 8) %}
 {% set saved_summer = saved_state.get('include_summer', false) %}
+{% set major_chosen = major_chosen | default(true) %}
+
+<!-- Degree Works import: the PDF is read in this browser and never uploaded -->
+<div class="card dw-card" id="dw-import">
+  <input type="file" id="dw-file" accept="application/pdf,.pdf" hidden>
+  <label for="dw-file" class="dw-drop" id="dw-drop">
+    <span class="dw-icon"><i class="bi bi-file-earmark-arrow-up" aria-hidden="true"></i></span>
+    <span class="dw-text">
+      <span class="dw-title">Drop your Degree Works audit</span>
+      <span class="dw-sub">GradPath reads your major, minor and every course you've finished, then fills in the whole plan.</span>
+    </span>
+    <span class="dw-action">
+      <span class="btn btn-primary dw-button"><i class="bi bi-upload me-2" aria-hidden="true"></i>Choose PDF file</span>
+      <span class="dw-private"><i class="bi bi-lock" aria-hidden="true"></i> Never uploaded</span>
+    </span>
+  </label>
+  <!-- Where the PDF comes from (hidden once an audit is in use) -->
+  <div class="dw-howto" id="dw-howto">
+    <p class="dw-howto-line mb-0">
+      <i class="bi bi-question-circle" aria-hidden="true"></i>
+      No PDF yet? In Degree Works, click the <span class="dw-chip-print"><i class="bi bi-printer" aria-hidden="true"></i> Create PDF</span> button at the top right of your audit.
+      <button type="button" class="btn btn-link btn-sm dw-howto-toggle" data-bs-toggle="collapse" data-bs-target="#dwHowtoMore" aria-expanded="false" aria-controls="dwHowtoMore">Show me</button>
+    </p>
+    <div class="collapse" id="dwHowtoMore">
+      <div class="dw-howto-panel">
+        <div class="dw-art" aria-hidden="true">
+          <div class="dw-art-bar">
+            <span class="dw-art-btn dw-art-target"><i class="bi bi-printer"></i></span>
+            <span class="dw-art-btn"><i class="bi bi-envelope"></i></span>
+            <span class="dw-art-btn dw-art-more"><i class="bi bi-three-dots-vertical"></i></span>
+          </div>
+          <svg class="dw-art-arrow" viewBox="0 0 60 44" focusable="false"><path d="M6 40 C 18 38, 34 30, 44 10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M36 12 L45 7 L47 17" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="dw-art-tip">Create PDF</span>
+        </div>
+        <ol class="dw-howto-steps">
+          <li>Open Degree Works from <a href="https://pipeline.mtsu.edu/" target="_blank" rel="noopener">PipelineMT</a>.</li>
+          <li>At the top right of your audit, click the <strong>printer</strong> icon (<em>Create PDF</em>).</li>
+          <li>Save the PDF, then drop it in the box above.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!-- Shown instead of the drop box once an audit is in use -->
+  <div class="dw-loaded" id="dw-loaded" hidden>
+    <span class="dw-icon dw-icon-done"><i class="bi bi-check-lg" aria-hidden="true"></i></span>
+    <span class="dw-text">
+      <span class="dw-title">Using your Degree Works audit</span>
+      <span class="dw-sub" id="dw-loaded-detail"></span>
+    </span>
+    <span class="dw-loaded-actions">
+      <label for="dw-file" class="btn btn-outline-primary btn-sm dw-replace">Replace PDF</label>
+      <button type="button" class="btn btn-link btn-sm dw-remove" id="dw-remove">Stop using it</button>
+    </span>
+  </div>
+  <div class="dw-status" id="dw-status" role="status" aria-live="polite" hidden></div>
+</div>
 
 <form method="post" id="planner-form">
 <div class="planner-layout">
   <div class="card planner-main">
       <h2 class="mb-2">Build your academic plan</h2>
-      <p class="text-muted mb-4">Work through each step, then generate a plan toward graduation.</p>
 
         <!-- Program fields: each is a search bar that keeps showing what's
              picked, so a long catalog of majors/minors stays one line each.
@@ -25,18 +83,13 @@
             <label class="program-label" for="major_input">Major</label>
             <div class="combo-row">
               <div class="combo" id="major_combo">
-                <input type="text" id="major_input" class="form-control combo-input" value="{{ degree_display_name }}" placeholder="Search {{ majors | length }} majors, e.g. Nursing, Accounting or CSCI" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                <input type="text" id="major_input" class="form-control combo-input" value="{{ degree_display_name if major_chosen }}" placeholder="Choose your major: search {{ majors | length }} majors, e.g. Nursing, Accounting or CSCI" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
                 <div class="program-menu d-none" role="listbox"></div>
               </div>
-              <button type="button" class="combo-btn" id="second_add" title="Add a second major" aria-label="Add a second major"{% if second_cfg %} hidden{% endif %}>+</button>
+              <button type="button" class="combo-btn" id="second_add" title="Add a second major" aria-label="Add a second major"{% if second_cfg or not major_chosen %} hidden{% endif %}>+</button>
             </div>
             <input type="hidden" name="major" id="major_field" value="{{ saved_state.major }}">
-            <div class="program-info">
-              {% if degree_cfg.catalog_driven %}
-              <span class="program-chip" title="Requirements read from the {{ catalog_meta.name or 'MTSU catalog' }}"><i class="bi bi-journal-check me-1"></i>From the {{ (catalog_meta.name or 'MTSU catalog') | replace(' Undergraduate Catalog', '') }} catalog</span>
-              {% else %}
-              <span class="program-chip program-chip-verified"><i class="bi bi-patch-check-fill me-1"></i>Team-verified, with course offering seasons</span>
-              {% endif %}
+            <div class="program-info"{% if not major_chosen %} hidden{% endif %}>
               {% if degree_cfg.catalog_url %}<a class="program-link" href="{{ degree_cfg.catalog_url }}" target="_blank" rel="noopener">View in catalog <i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
             </div>
 
@@ -81,6 +134,7 @@
           {% endif %}
         </div>
 
+        <div id="planner-steps"{% if not major_chosen %} hidden{% endif %}>
         <div class="accordion" id="plannerAccordion">
 
           <div class="accordion-item">
@@ -90,9 +144,9 @@
                 <span class="badge bg-primary ms-3" id="cs-selected-count">0 selected</span>
               </button>
             </h2>
-            <div id="stepCs" class="accordion-collapse collapse show" data-bs-parent="#plannerAccordion">
+            <div id="stepCs" class="accordion-collapse collapse show">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-3">Check off every course you've already completed. Hover over a course for details.</p>
+                <p class="step-help">Check off the courses you've already passed. Hover over a course for details.</p>
                 {% if not course_count %}
                 <div class="alert alert-info mb-0">
                   No catalog courses loaded yet &mdash; the catalog data file is missing. Run <code>python scrape_courses.py</code> to create it.
@@ -101,10 +155,10 @@
                 <div class="checklist-filters" role="group" aria-label="Filter courses">
                   <div class="btn-group btn-group-sm" role="group">
                     <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="required">Required</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="fall">Fall</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="spring">Spring</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="summer">Summer</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="required" title="Courses this program requires by name">Required</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="fall-only" title="Courses MTSU offers only in fall">Fall only</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="spring-only" title="Courses MTSU offers only in spring">Spring only</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="summer" title="Courses MTSU offers in summer">Offered in summer</button>
                   </div>
                   <input type="search" class="form-control form-control-sm checklist-search" id="checklist-search" placeholder="Filter by code or title" aria-label="Filter courses by code or title">
                 </div>
@@ -126,6 +180,7 @@
                       <span class="cs-course-title">{{ course.title }}</span>
                       {% if course.offered %}<span class="cs-course-offered">{{ course.offered }}</span>{% endif %}
                     </label>
+                    <button type="button" class="cs-info-btn" aria-label="Details for {{ course.code }}"><i class="bi bi-info-circle" aria-hidden="true"></i></button>
                   </div>
                   {% endfor %}
                 </div>
@@ -133,6 +188,7 @@
                 {% endfor %}
                 {% endfor %}
                 {% endif %}
+                <div class="step-next-row"><button type="button" class="btn btn-sm btn-link step-next" data-next="#stepSearch">Next: add other courses <i class="bi bi-arrow-down-short"></i></button></div>
               </div>
             </div>
           </div>
@@ -143,14 +199,20 @@
                 <span class="step-badge">2</span>Add other completed courses
               </button>
             </h2>
-            <div id="stepSearch" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+            <div id="stepSearch" class="accordion-collapse collapse">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Anything not in the checklist &mdash; every course in the {{ catalog_meta.name or 'catalog' }} is searchable.</p>
+                <p class="step-help">Any other course you've passed, including AP, dual-enrollment and transfer credit.</p>
                 <div class="input-group position-relative">
                   <input id="course_input" class="form-control" placeholder="Search course code or name, e.g. MATH 1910 or Calculus" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="course_suggestions" aria-label="Search for a completed course">
                   <button type="button" class="btn btn-primary" id="add-course">Add</button>
                   <div id="course_suggestions" class="autocomplete-list shadow-sm" role="listbox" aria-label="Matching courses"></div>
                 </div>
+                <div class="course-add-status" id="course-add-status" role="status" aria-live="polite"></div>
+                <div class="step-added" id="step2-added" hidden>
+                  <div class="step-added-title">Added here</div>
+                  <div class="d-flex flex-wrap gap-2" id="step2-added-list"></div>
+                </div>
+                <div class="step-next-row"><button type="button" class="btn btn-sm btn-link step-next" data-next="#stepRequirements">Next: gen-ed and other requirements <i class="bi bi-arrow-down-short"></i></button></div>
               </div>
             </div>
           </div>
@@ -158,12 +220,12 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepRequirements" aria-expanded="false">
-                <span class="step-badge">3</span>Other degree requirements
+                <span class="step-badge">3</span>Gen-ed and other requirements
               </button>
             </h2>
-            <div id="stepRequirements" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+            <div id="stepRequirements" class="accordion-collapse collapse">
               <div class="accordion-body">
-                <p class="form-text mt-0 mb-2">Enter how many hours you've completed toward each requirement. Rows marked <span class="auto-pill">auto</span> also fill in from courses you checked off. Use "Mark complete" for a quick fill.</p>
+                <p class="step-help">Enter the hours you've passed toward each requirement, or open <em>Pick courses</em> and check off the classes. Courses you've already added count automatically.</p>
 
                 <div class="requirement-group">
                   <h6 class="requirement-group-title">{{ 'Program requirements' if degree_cfg.catalog_driven else 'Supporting courses' }}</h6>
@@ -187,6 +249,7 @@
                   {% set suggestions = ["Any elective course; at least 4 hrs must be upper-division"] %}
                   {% include "_requirement_row.html" %}
                 </div>
+                <div class="step-next-row"><button type="button" class="btn btn-sm btn-link step-next" data-next="#stepTerms">Next: when your plan starts <i class="bi bi-arrow-down-short"></i></button></div>
               </div>
             </div>
           </div>
@@ -194,14 +257,15 @@
           <div class="accordion-item">
             <h2 class="accordion-header">
               <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#stepTerms" aria-expanded="false">
-                <span class="step-badge">4</span>Target terms
+                <span class="step-badge">4</span>When your plan starts
               </button>
             </h2>
-            <div id="stepTerms" class="accordion-collapse collapse" data-bs-parent="#plannerAccordion">
+            <div id="stepTerms" class="accordion-collapse collapse">
               <div class="accordion-body">
+                <p class="step-help">Start with the first term you haven't registered for. Taking classes now? Check them off above and start next term.</p>
                 <div class="row gy-3">
                   <div class="col-md-4">
-                    <label for="start_season" class="form-label">Starting term</label>
+                    <label for="start_season" class="form-label">First term to plan</label>
                     <select class="form-select" id="start_season" name="start_season">
                       {% for season in season_options %}
                       <option value="{{ season }}" {{ 'selected' if season == saved_season }}>{{ season }}</option>
@@ -209,17 +273,18 @@
                     </select>
                   </div>
                   <div class="col-md-4">
-                    <label for="start_year" class="form-label">Starting year</label>
+                    <label for="start_year" class="form-label">Year of that term</label>
                     <input type="number" class="form-control" id="start_year" name="start_year" value="{{ saved_year }}" min="2020" max="2099">
                   </div>
                   <div class="col-md-4">
-                    <label for="target_semesters" class="form-label">Number of terms</label>
-                    <input type="number" class="form-control" id="target_semesters" name="target_semesters" value="{{ saved_semesters }}" min="1" max="12">
+                    <label for="target_semesters" class="form-label">Terms you want to finish in</label>
+                    <input type="number" class="form-control" id="target_semesters" name="target_semesters" value="{{ saved_semesters }}" min="1" max="12" aria-describedby="target_semesters_help">
+                    <div class="form-text" id="target_semesters_help">Fall and spring each count as one.</div>
                   </div>
                   <div class="col-12">
                     <div class="form-check">
                       <input class="form-check-input" type="checkbox" id="include_summer" name="include_summer" {% if saved_summer %}checked{% endif %}>
-                      <label class="form-check-label" for="include_summer">Include summer term planning</label>
+                      <label class="form-check-label" for="include_summer">Include summer terms</label>
                     </div>
                   </div>
                   <div class="col-12">
@@ -248,6 +313,7 @@
         <div class="d-flex flex-wrap gap-2" id="selected-courses"></div>
         <textarea name="completed_courses" id="completed_courses" class="d-none"></textarea>
         <input type="hidden" name="course_grades" id="course_grades" value="{}">
+        <input type="hidden" name="degree_works" id="degree_works" value="">
       </div>
 
       <div class="mt-4">
@@ -256,9 +322,26 @@
           <span id="generate-btn-spinner" class="d-none ms-2" style="display:inline-block;width:1em;height:1em;border:2px solid rgba(255,255,255,0.5);border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;"></span>
         </button>
       </div>
+      </div>
   </div>
 </div>
 </form>
+
+<div class="modal fade" id="dwModal" tabindex="-1" aria-labelledby="dwModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dwModalTitle"><i class="bi bi-file-earmark-check text-primary me-2"></i>From your Degree Works audit</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="dwModalBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="dwApply">Fill in my plan</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal fade" id="autoPrereqModal" tabindex="-1" aria-labelledby="autoPrereqTitle" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -389,9 +472,41 @@ let selectedMinors = [];
 // survive switching majors and going to the plan page and back, but a new tab
 // or a reopened link starts blank. Nothing is stored server-side.
 const STORAGE_KEY = 'gradpath-planner';
-const currentMajor = {{ saved_state.major | tojson }};
+// Empty until the student picks a major (first visit)
+const currentMajor = {{ (saved_state.major if major_chosen else '') | tojson }};
 const currentSecond = {{ saved_state.second_major | tojson }};
 let restoring = false;
+// Where a plan starts by default: the first term not registered for yet
+// (computed from today's date on the server)
+const DEFAULT_START = { season: {{ default_season | tojson }}, year: {{ default_year | tojson }} };
+// What the plan uses from an imported Degree Works audit (see the import below)
+let degreeWorksData = null;
+function setDegreeWorks(data) {
+  degreeWorksData = data && typeof data === 'object' ? data : null;
+  const field = document.getElementById('degree_works');
+  if (field) field.value = degreeWorksData ? JSON.stringify(degreeWorksData) : '';
+  if (typeof scheduleDwPreview === 'function') scheduleDwPreview();
+  renderDwCard();
+}
+
+// The Degree Works box: a drop zone, or (with an audit in use) what's in use
+function renderDwCard() {
+  const loaded = document.getElementById('dw-loaded');
+  const drop = document.getElementById('dw-drop');
+  if (!loaded || !drop) return;
+  const on = !!degreeWorksData;
+  loaded.hidden = !on;
+  drop.hidden = on;
+  const howto = document.getElementById('dw-howto');
+  if (howto) howto.hidden = on;
+  if (on) {
+    const bits = [];
+    if (degreeWorksData.catalog_year) bits.push(`${degreeWorksData.catalog_year} catalog`);
+    if (typeof degreeWorksData.percent === 'number') bits.push(`${degreeWorksData.percent}% complete in Degree Works`);
+    bits.push('your courses are filled in below');
+    document.getElementById('dw-loaded-detail').textContent = bits.join(' \u00b7 ');
+  }
+}
 
 function loadSaved() {
   try {
@@ -420,6 +535,7 @@ function saveState() {
     healthy_mix: document.getElementById('healthy_mix').checked,
     minors: selectedMinors.slice(),
     auto: autoAdded,
+    dw: degreeWorksData,
   };
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -469,8 +585,34 @@ function updateHiddenField() {
   const values = Array.from(selectedCourses.querySelectorAll('.badge')).map(badge => badge.dataset.course);
   completedCoursesField.value = values.join('\n');
   document.getElementById('side-count').textContent = values.length;
+  refreshStep2List();
   refreshRequirementRows();
+  scheduleDwPreview();
   saveState();
+}
+
+// Courses that aren't on the step 1 checklist, shown in step 2 as well
+function refreshStep2List() {
+  const box = document.getElementById('step2-added');
+  const list = document.getElementById('step2-added-list');
+  if (!box || !list) return;
+  list.innerHTML = '';
+  selectedCourses.querySelectorAll('.badge').forEach(badge => {
+    const code = badge.dataset.course;
+    if (checkboxFor(code)) return;
+    const chip = document.createElement('span');
+    chip.className = 'step-added-chip';
+    chip.textContent = code;
+    chip.title = badge.firstChild ? badge.firstChild.textContent : code;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'btn-close btn-close-sm';
+    x.setAttribute('aria-label', `Remove ${code}`);
+    x.addEventListener('click', () => removeCourse(code));
+    chip.appendChild(x);
+    list.appendChild(chip);
+  });
+  box.hidden = !list.children.length;
 }
 
 function updateCsSelectedCount() {
@@ -479,6 +621,9 @@ function updateCsSelectedCount() {
 }
 
 function syncCheckboxForCode(code, checked) {
+  document.querySelectorAll(`.requirement-pick-box[data-code="${CSS.escape(code)}"]`).forEach(pick => {
+    pick.checked = checked;
+  });
   const box = document.querySelector(`.cs-course-checkbox[data-code="${CSS.escape(code)}"]`);
   if (box) {
     box.checked = checked;
@@ -511,7 +656,7 @@ let courseActive = -1;
 function pickCourseSuggestion(index) {
   const match = courseSuggestions[index];
   if (!match) return;
-  addCourse(match.code, match.label);
+  announceAdd(match.code, addCourse(match.code, match.label));
   courseInput.value = '';
   clearSuggestions();
   courseInput.focus();
@@ -570,6 +715,7 @@ function clearSuggestions() {
   courseInput.removeAttribute('aria-activedescendant');
 }
 
+// Returns 'added', 'duplicate' or 'invalid'
 function addCourse(code, label = null) {
   const normalized = normalizeCourse(code);
   if (!COURSE_CODE.test(normalized)) {
@@ -577,13 +723,18 @@ function addCourse(code, label = null) {
       courseInput.classList.add('is-invalid');
       setTimeout(() => courseInput.classList.remove('is-invalid'), 900);
     }
-    return;
+    return 'invalid';
   }
   const existing = Array.from(selectedCourses.querySelectorAll('.badge')).some(badge => badge.dataset.course === normalized);
   if (existing) {
     courseInput.classList.add('is-invalid');
     setTimeout(() => courseInput.classList.remove('is-invalid'), 900);
-    return;
+    return 'duplicate';
+  }
+  // A typed code ("math1910") gets its catalog title too
+  if (!label) {
+    const match = courseOptions.find(c => c.code === normalized);
+    if (match) label = match.label;
   }
 
   const badge = document.createElement('span');
@@ -616,10 +767,39 @@ function addCourse(code, label = null) {
   });
 
   badge.appendChild(remove);
-  selectedCourses.appendChild(badge);
+  // Kept in course-code order, so the list is easy to scan
+  const after = Array.from(selectedCourses.querySelectorAll('.badge')).find(b => b.dataset.course > normalized);
+  selectedCourses.insertBefore(badge, after || null);
   updateHiddenField();
   syncCheckboxForCode(normalized, true);
   if (!restoring) autoSelectPrereqs(normalized);
+  return 'added';
+}
+
+// Step 2: say what happened, since the course lands in the list further down
+const addStatus = document.getElementById('course-add-status');
+let addStatusTimer = null;
+function announceAdd(code, result) {
+  const normalized = normalizeCourse(code);
+  if (!normalized) return;
+  const match = courseOptions.find(c => c.code === normalized);
+  const name = match ? match.label : normalized;
+  let text = '', kind = 'ok';
+  if (result === 'added') {
+    text = match
+      ? `\u2713 Added ${name}. It's in your Completed courses list below.`
+      : `\u2713 Added ${normalized}. It isn't in the current catalog, so if it counts toward a requirement, enter its hours in step 3.`;
+  } else if (result === 'duplicate') {
+    text = `${name} is already in your list.`;
+    kind = 'info';
+  } else {
+    text = `\u201c${code.trim()}\u201d isn't a course code. Pick a course from the list, or type a code like MATH 1910.`;
+    kind = 'warn';
+  }
+  addStatus.textContent = text;
+  addStatus.className = `course-add-status course-add-status-${kind} is-visible`;
+  clearTimeout(addStatusTimer);
+  addStatusTimer = setTimeout(() => addStatus.classList.remove('is-visible'), 6000);
 }
 
 function removeCourse(code) {
@@ -656,7 +836,12 @@ function updateCourseSearch() {
 }
 
 addCourseButton.addEventListener('click', () => {
-  addCourse(courseInput.value);
+  // With a highlighted suggestion, Add takes that one
+  if (courseActive >= 0) {
+    pickCourseSuggestion(courseActive);
+    return;
+  }
+  if (courseInput.value.trim()) announceAdd(courseInput.value, addCourse(courseInput.value));
   courseInput.value = '';
   clearSuggestions();
   courseInput.focus();
@@ -683,7 +868,7 @@ courseInput.addEventListener('keydown', event => {
       pickCourseSuggestion(courseActive);
       return;
     }
-    addCourse(courseInput.value);
+    if (courseInput.value.trim()) announceAdd(courseInput.value, addCourse(courseInput.value));
     courseInput.value = '';
     clearSuggestions();
   } else if (event.key === 'Escape') {
@@ -698,6 +883,7 @@ courseInput.addEventListener('blur', () => setTimeout(clearSuggestions, 150));
 
 clearCoursesButton.addEventListener('click', () => {
   selectedCourses.innerHTML = '';
+  setDegreeWorks(null);
   const wasAuto = Object.keys(autoAdded);
   autoAdded = {};
   wasAuto.forEach(markAuto);
@@ -706,6 +892,7 @@ clearCoursesButton.addEventListener('click', () => {
     box.checked = false;
     box.closest('.cs-course-check').classList.remove('is-checked');
   });
+  document.querySelectorAll('.requirement-pick-box').forEach(box => { box.checked = false; });
 
   document.querySelectorAll('.course-grade-select').forEach(select => {
     select.value = '';
@@ -751,12 +938,70 @@ document.querySelectorAll('.course-grade-select').forEach(select => {
   });
 });
 
+// "Mark complete" fills the row; pressed again ("Undo") it puts back what
+// was there before
+function syncMarkButton(button) {
+  const input = document.getElementById(button.dataset.target);
+  if (!input) return;
+  const full = Number(input.max) > 0 && Number(input.value) >= Number(input.max);
+  button.textContent = full ? 'Undo' : 'Mark complete';
+  button.setAttribute('aria-pressed', full ? 'true' : 'false');
+  button.classList.toggle('is-undo', full);
+}
+
 document.querySelectorAll('.requirement-mark-complete').forEach(button => {
+  const input = document.getElementById(button.dataset.target);
+  if (!input) return;
   button.addEventListener('click', () => {
-    const input = document.getElementById(button.dataset.target);
-    if (!input) return;
-    input.value = input.max;
+    if (Number(input.value) >= Number(input.max)) {
+      input.value = button.dataset.before && Number(button.dataset.before) < Number(input.max) ? button.dataset.before : 0;
+    } else {
+      button.dataset.before = input.value || 0;
+      input.value = input.max;
+    }
     input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  input.addEventListener('input', () => syncMarkButton(button));
+  syncMarkButton(button);
+});
+
+// Step 3 "Pick courses": checking one adds it like any other completed course
+document.querySelectorAll('.requirement-pick-box').forEach(box => {
+  box.addEventListener('change', () => {
+    if (box.checked) addCourse(box.dataset.code, box.dataset.label);
+    else removeCourse(box.dataset.code);
+    updateCourseGrades();
+  });
+});
+
+// Course details on touch screens (no hover): the (i) button shows the same text
+document.querySelectorAll('.cs-info-btn').forEach(button => {
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    const card = button.closest('.cs-course-check');
+    const text = card.dataset.note !== undefined ? card.dataset.note : card.title;
+    const pop = bootstrap.Popover.getOrCreateInstance(button, {
+      content: text, trigger: 'manual', placement: 'auto', customClass: 'course-popover',
+    });
+    document.querySelectorAll('.cs-info-btn[aria-describedby]').forEach(other => {
+      if (other !== button) bootstrap.Popover.getInstance(other)?.hide();
+    });
+    pop.toggle();
+  });
+});
+document.addEventListener('click', event => {
+  if (event.target.closest('.cs-info-btn, .popover')) return;
+  document.querySelectorAll('.cs-info-btn[aria-describedby]').forEach(b => bootstrap.Popover.getInstance(b)?.hide());
+});
+
+// "Next: ..." buttons open the following step (steps can all stay open)
+document.querySelectorAll('.step-next').forEach(button => {
+  button.addEventListener('click', () => {
+    const step = document.querySelector(button.dataset.next);
+    if (!step) return;
+    bootstrap.Collapse.getOrCreateInstance(step, { toggle: false }).show();
+    const header = step.previousElementSibling || step;
+    setTimeout(() => header.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
   });
 });
 
@@ -789,22 +1034,49 @@ function autoFillPreview() {
   return result;
 }
 
+// What an imported Degree Works audit fills in, from the server (the same
+// rules the plan uses): {gid: {hours, codes, full}}
+var dwPreview = {};
+var dwPreviewTimer = null;
+function scheduleDwPreview() {
+  clearTimeout(dwPreviewTimer);
+  if (!degreeWorksData || !currentMajor) {
+    if (Object.keys(dwPreview).length) { dwPreview = {}; refreshRequirementRows(); }
+    return;
+  }
+  dwPreviewTimer = setTimeout(() => {
+    fetch('/degreeworks/preview', { method: 'POST', body: new FormData(plannerForm) })
+      .then(r => (r.ok ? r.json() : {}))
+      .then(data => { dwPreview = data || {}; refreshRequirementRows(); })
+      .catch(() => {});
+  }, 250);
+}
+
 function refreshRequirementRows() {
   const auto = autoFillPreview();
   document.querySelectorAll('.requirement-hours-input').forEach(input => {
     const gid = input.id.replace(/^hours_/, '');
     const max = Number(input.max);
-    const filled = auto[gid] ? auto[gid].hours : Math.min(Math.max(Number(input.value) || 0, 0), max);
+    const typed = Math.min(Math.max(Number(input.value) || 0, 0), max);
+    const fromDw = dwPreview[gid];
+    let filled = auto[gid] ? auto[gid].hours : typed;
+    if (fromDw) filled = Math.max(filled, Math.min(fromDw.hours, max));
     const row = input.closest('.requirement-row');
-    row.classList.toggle('requirement-row-complete', max > 0 && filled >= max);
+    const complete = max > 0 && filled >= max;
+    row.classList.toggle('requirement-row-complete', complete);
+    // Filled by courses or the audit, not typed: show that it's done instead
+    // of an hours box that still says 0
+    row.classList.toggle('is-auto-done', complete && typed < max);
     const fill = row.querySelector('.requirement-fill');
     if (fill) fill.style.width = `${max > 0 ? Math.min(100, 100 * filled / max) : 0}%`;
     const note = row.querySelector('.requirement-auto-note');
     if (note) {
-      note.hidden = !auto[gid];
-      note.textContent = auto[gid]
-        ? `${filled} / ${max} cr hrs, counting ${auto[gid].applied.join(', ')}`
-        : '';
+      const parts = [];
+      if (auto[gid]) parts.push(`counting ${auto[gid].applied.join(', ')}`);
+      if (fromDw && fromDw.codes.length) parts.push(`from Degree Works: ${fromDw.codes.join(', ')}`);
+      else if (fromDw && fromDw.full) parts.push('Degree Works shows this complete');
+      note.hidden = !parts.length;
+      note.textContent = parts.length ? `${filled} / ${max} cr hrs, ${parts.join('; ')}` : '';
     }
   });
 }
@@ -820,7 +1092,8 @@ refreshRequirementRows();
 // concentration, or course prefix, so "bio", "CSCI", or "pilot" all narrow a
 // long list quickly, and names that start with the query sort first. Arrow
 // keys + Enter pick; Escape or clicking away puts the current pick back.
-const MENU_LIMIT = 50;
+// High enough that an empty search lists every major and minor
+const MENU_LIMIT = 400;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -1154,11 +1427,20 @@ updateCourseGrades();
     }
   });
 
-  if (saved.start_season) document.getElementById('start_season').value = saved.start_season;
-  if (saved.start_year) document.getElementById('start_year').value = saved.start_year;
+  // A start term saved on an earlier visit that's now in the past (or under
+  // way) moves up to today's default: the first term not registered for yet
+  const TERM_INDEX = { Spring: 0, Summer: 1, Fall: 2 };
+  const termOrder = (season, year) => Number(year) * 3 + (TERM_INDEX[season] ?? 0);
+  const startIsCurrent = saved.start_season && saved.start_year
+    && termOrder(saved.start_season, saved.start_year) >= termOrder(DEFAULT_START.season, DEFAULT_START.year);
+  if (startIsCurrent) {
+    document.getElementById('start_season').value = saved.start_season;
+    document.getElementById('start_year').value = saved.start_year;
+  }
   if (saved.target_semesters) document.getElementById('target_semesters').value = saved.target_semesters;
   if (saved.include_summer !== undefined) document.getElementById('include_summer').checked = saved.include_summer;
   if (saved.healthy_mix !== undefined) document.getElementById('healthy_mix').checked = saved.healthy_mix;
+  setDegreeWorks(saved.dw);
   // Older saved state held a single "minor" string
   setMinors(saved.minors || (saved.minor ? [saved.minor] : []));
 
@@ -1186,7 +1468,9 @@ updateCsSelectedCount();
       const seasons = (card.dataset.seasons || '').split(' ');
       const okMode = mode === 'all'
         || (mode === 'required' && card.dataset.required === '1')
-        || seasons.includes(mode);
+        || (mode === 'fall-only' && seasons.includes('fall') && !seasons.includes('spring'))
+        || (mode === 'spring-only' && seasons.includes('spring') && !seasons.includes('fall'))
+        || (mode === 'summer' && seasons.includes('summer'));
       const okText = !q || (card.dataset.search || '').includes(q);
       const visible = okMode && okText;
       card.hidden = !visible;
@@ -1221,6 +1505,214 @@ updateCsSelectedCount();
 })();
 
 plannerForm.addEventListener('input', saveState);
+
+// ── Degree Works import ──
+// The audit PDF is read here (static/degreeworks.js + pdf.js) and never
+// uploaded. What the plan uses -- course codes, which requirement each met,
+// and each block's status -- goes with the plan form like any other
+// selection; the student's name, ID and grades don't. Only the PDF Degree
+// Works itself makes is accepted.
+(function () {
+  const drop = document.getElementById('dw-drop');
+  const fileInput = document.getElementById('dw-file');
+  const status = document.getElementById('dw-status');
+  const modalEl = document.getElementById('dwModal');
+  const body = document.getElementById('dwModalBody');
+  const applyButton = document.getElementById('dwApply');
+  if (!drop) return;
+  document.body.appendChild(modalEl);
+  const CATALOG_YEAR = {{ ((catalog_meta.name or '')[:9]) | tojson }};
+  let pending = null;
+
+  function say(text, kind = 'info') {
+    status.hidden = !text;
+    status.className = `dw-status dw-status-${kind}`;
+    status.textContent = text;
+  }
+
+  const ERRORS = {
+    'not-degree-works': "That isn't a Degree Works audit. In Degree Works, download your audit as a PDF and drop that file here. Screenshots, transcripts and printed web pages won't work.",
+    'no-courses': "GradPath couldn't find any courses in that audit. Check that it's your full Degree Works audit.",
+    'not-pdf': 'That file isn\u2019t a PDF. Drop the PDF you downloaded from Degree Works.',
+    'too-big': 'That file is too large to be a Degree Works audit.',
+    'read-failed': "GradPath couldn't open that PDF. Try downloading it from Degree Works again.",
+  };
+
+  function chips(list, extra = '') {
+    return `<div class="dw-chips">${list.map(c => `<span class="dw-chip${extra}">${escapeHtml(c)}</span>`).join('')}</div>`;
+  }
+
+  async function handle(file) {
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return say(ERRORS['not-pdf'], 'warn');
+    if (file.size > 15 * 1024 * 1024) return say(ERRORS['too-big'], 'warn');
+    say('Reading your audit\u2026');
+    let result;
+    try {
+      const dw = await import({{ static_url('degreeworks.js') | tojson }});
+      result = dw.parseAudit(await dw.readAuditFile(file));
+      result.dw = dw;
+    } catch (error) {
+      return say(ERRORS['read-failed'], 'warn');
+    } finally {
+      fileInput.value = '';
+    }
+    if (!result.ok) return say(ERRORS[result.error] || ERRORS['read-failed'], 'warn');
+    say('');
+    review(result);
+  }
+
+  function review(result) {
+    const dw = result.dw;
+    const major = dw.matchMajor(majorOptions, result.majors[0], result.concentrations[0]);
+    const minors = result.minors.map(name => ({ name, match: dw.matchMinor(minorOptions, name) }));
+    const current = loadSaved();
+    const ipTerm = dw.latestTerm(result.inProgress.map(c => c.term));
+    const start = ipTerm ? dw.termAfter(ipTerm, document.getElementById('include_summer').checked) : null;
+    pending = { result, major, minors, start, current };
+
+    const auditMajor = [result.majors[0], result.concentrations[0]].filter(Boolean).join(', ');
+    let html = '<dl class="dw-summary">';
+    html += `<dt>Major</dt><dd>${major
+      ? escapeHtml(major.name) + (major.key !== currentMajor ? ' <span class="dw-note">(GradPath will switch to it)</span>' : '')
+      : `${escapeHtml(auditMajor || 'Not found')} <span class="dw-note">(choose it above; GradPath couldn't match it exactly)</span>`}</dd>`;
+    if (minors.length) {
+      html += `<dt>Minor</dt><dd>${minors.map(m => m.match ? escapeHtml(m.match.name)
+        : `${escapeHtml(m.name)} <span class="dw-note">(not in the current catalog)</span>`).join('<br>')}</dd>`;
+    }
+    html += '</dl>';
+    html += `<h6 class="dw-heading">${result.completed.length} completed course${result.completed.length === 1 ? '' : 's'}</h6>`;
+    html += chips(result.completed.map(c => c.code));
+    if (result.inProgress.length) {
+      html += `<h6 class="dw-heading">${result.inProgress.length} in progress${ipTerm ? ` (${escapeHtml(ipTerm)})` : ''}</h6>`;
+      html += chips(result.inProgress.map(c => c.code), ' dw-chip-ip');
+      html += `<div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="dwCountIp" checked>
+        <label class="form-check-label" for="dwCountIp">Count these as finished${start ? ` and start my plan in <strong>${start.season} ${start.year}</strong>` : ''}</label></div>`;
+    }
+    if (result.notCounted.length) {
+      html += `<p class="dw-note mt-3 mb-0">Not counted: ${result.notCounted.map(c => `${escapeHtml(c.code)}${c.grade ? ` (${escapeHtml(c.grade)})` : ''}`).join(', ')}. Withdrawn, failed, or not enough for credit.</p>`;
+    }
+    if (result.catalogYear && CATALOG_YEAR && result.catalogYear !== CATALOG_YEAR) {
+      html += `<p class="dw-note mt-3 mb-0">Your audit follows the ${escapeHtml(result.catalogYear)} catalog; GradPath plans with ${escapeHtml(CATALOG_YEAR)} requirements, so a few may differ.</p>`;
+    }
+    html += '<p class="dw-note mt-3 mb-0">Courses you already entered are kept. Gen-ed and other requirements fill in from these courses.</p>';
+    body.innerHTML = html;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+
+  // The GPA calculator starts from the audit: its Overall GPA and the GPA
+  // hours behind it (MTSU letter grades, retakes once), plus the classes in
+  // progress as rows to pick expected grades for
+  function fillGpa(result) {
+    const dw = result.dw;
+    const worked = dw.gpaFromAttempts(result.attempts || []);
+    const gpa = result.gpa ?? worked.gpa;
+    // Only trust the hours when they reproduce the audit's own GPA
+    const hoursOk = worked.hours > 0 && (result.gpa == null || Math.abs(worked.gpa - result.gpa) < 0.02);
+    const credits = Object.fromEntries((result.attempts || []).map(a => [a.code, a.credits]));
+    const term = dw.latestTerm(result.inProgress.map(c => c.term));
+    // The GPA calculator (base page) takes it from here and saves it
+    window.dispatchEvent(new CustomEvent('gradpath:gpa-import', { detail: {
+      current: gpa == null ? '' : gpa.toFixed(3),
+      hours: hoursOk ? String(worked.hours) : '',
+      now: result.inProgress.length
+        ? { term: term || '', courses: result.inProgress.map(c => ({ code: c.code, hours: credits[c.code] || 3 })) }
+        : null,
+    } }));
+  }
+
+  applyButton.addEventListener('click', () => {
+    if (!pending) return;
+    const { result, major, minors, start } = pending;
+    const countIp = !!(document.getElementById('dwCountIp') || {}).checked;
+    fillGpa(result);
+    const codes = result.completed.map(c => c.code).concat(countIp ? result.inProgress.map(c => c.code) : []);
+    const minorKeys = [...new Set([...selectedMinors, ...minors.filter(m => m.match).map(m => m.match.key)])];
+    const startTerm = countIp && start ? start : null;
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+
+    const targetMajor = major ? major.key : currentMajor;
+    // Which course met which requirement, for the plan (only when the major
+    // matched -- the audit's blocks describe that major)
+    setDegreeWorks(major ? result.dw.planPayload(result, major.key, countIp) : null);
+    if (targetMajor && targetMajor !== currentMajor) {
+      // A different major reloads the page; the courses ride along in this
+      // tab's saved selections and are put back on load
+      saveState();
+      const saved = loadSaved();
+      const state = {
+        ...saved,
+        major: targetMajor,
+        second_major: '',
+        courses: [...new Set([...(saved.courses || []), ...codes])],
+        minors: minorKeys,
+        auto: {},
+        dw: degreeWorksData,
+      };
+      if (startTerm) {
+        state.start_season = startTerm.season;
+        state.start_year = String(startTerm.year);
+      }
+      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      window.location.href = programUrl(targetMajor, '') + '#dw-imported';
+      return;
+    }
+
+    // Same major: fill in place. Prerequisites aren't auto-checked -- the
+    // audit already lists what was taken.
+    restoring = true;
+    codes.forEach(code => {
+      const match = courseOptions.find(c => c.code === code);
+      addCourse(code, match ? match.label : null);
+    });
+    restoring = false;
+    setMinors(minorKeys);
+    if (startTerm) {
+      document.getElementById('start_season').value = startTerm.season;
+      document.getElementById('start_year').value = startTerm.year;
+    }
+    updateCsSelectedCount();
+    updateHiddenField();
+    say(!currentMajor || !major
+      ? `\u2713 Read ${codes.length} courses from your audit. Now choose your major above.` : '', 'ok');
+  });
+
+  fileInput.addEventListener('change', () => handle(fileInput.files[0]));
+
+  // Dropping the PDF anywhere on the page works (not just on the box), and
+  // stops the browser from opening the file instead
+  let depth = 0;
+  const hasFiles = event => event.dataTransfer && [...event.dataTransfer.types].includes('Files');
+  document.addEventListener('dragenter', event => {
+    if (!hasFiles(event)) return;
+    depth += 1;
+    drop.classList.add('is-dragging');
+  });
+  document.addEventListener('dragleave', event => {
+    if (!hasFiles(event)) return;
+    depth = Math.max(depth - 1, 0);
+    if (!depth) drop.classList.remove('is-dragging');
+  });
+  document.addEventListener('dragover', event => {
+    if (hasFiles(event)) event.preventDefault();
+  });
+  document.addEventListener('drop', event => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    drop.classList.remove('is-dragging');
+    handle(event.dataTransfer.files[0]);
+  });
+
+  if (window.location.hash === '#dw-imported') {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  document.getElementById('dw-remove').addEventListener('click', () => {
+    // The courses stay; the plan just stops using the audit's requirement data
+    setDegreeWorks(null);
+    saveState();
+  });
+})();
 plannerForm.addEventListener('change', saveState);
 
 // ── Generate Plan: confirm prerequisites that were checked automatically ──

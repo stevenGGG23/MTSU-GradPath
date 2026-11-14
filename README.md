@@ -1,6 +1,6 @@
 # MTSU GradPath
 
-A degree-progress and term-planning tool for MTSU undergraduates. Pick a major (and optionally a second major or minors), check off what you've taken, and GradPath audits your progress and builds a term-by-term plan that respects prerequisites.
+A degree-progress and term-planning tool for MTSU undergraduates. Drop in your Degree Works audit PDF (or pick a major and check off what you've taken), and GradPath audits your progress and builds a term-by-term plan that respects prerequisites.
 
 **Every undergraduate major and minor in the 2026-2027 MTSU catalog is supported** — 223 majors and concentrations, 152 minors, and 3,475 courses — read straight from MTSU's official catalog data rather than hand-coded.
 
@@ -27,6 +27,58 @@ Video walkthrough: **https://youtu.be/ePZ4cazj3Gw**
 | **3. Build my schedule** — hands off to MTSU's own Schedule Planner (`sched.mtsu.edu`) to pick sections by days, times and open seats. | **4. Results** — percent complete, credit hours by requirement section, and buttons to edit, build a schedule, or download a PDF. |
 | ![GPA calculator side panel next to the personal prerequisite path](docs/screenshots/05-gpa-calculator.png) | ![Term-by-term plan with the next-step card for the Schedule Planner](docs/screenshots/06-semester-plan.png) |
 | **5. GPA calculator** — side panel for "what if" grades and reaching a target GPA, next to the student's personal prerequisite path. | **6. Term-by-term plan** — courses placed by prerequisites and the terms MTSU actually offers them; the next term's courses are ready to copy into the Schedule Planner. |
+
+---
+
+## Student feedback (November 2026)
+
+Real MTSU students used GradPath and told us what worked and what didn't. Two surveys ran in four sections of CSCI 1170 and CSCI 2170 (October 26 – November 11, 2026):
+
+- **Round 1 — first impressions, design and usability:** 63 responses.
+- **Round 2 — the generated plan and the GPA calculator:** 43 responses.
+
+Students came from Computer Science, Data Science, Cybersecurity, Aerospace, Mechatronics, Engineering Technology, Mathematics, Physics and more. Most already track their degree in Degree Works or with an advisor.
+
+### What students liked
+
+| | Agreed or strongly agreed |
+|---|---|
+| The application looked professional and complete | **90%** (55 of 61) |
+| Text is easy to read | **90%** (55 of 61) |
+| The purpose was clear when they first opened it | **84%** (51 of 61) |
+| A tool like this would be very or moderately useful for planning their real degree | **79%** (34 of 43) |
+| The generated plan was easy to understand | **74%** (32 of 43) |
+
+In their own words (anonymous):
+
+> "I find this webpage easier to navigate than degree works."
+
+> "It looked very professional and I didn't [realize] this was a student made website."
+
+> "I wish I had this when I was a [freshman]… seeing all the options like in this web would have saved me a lot of time."
+
+> "Basically everything on the site lined up exactly with what my advisor told me my college career would look like."
+
+Favorite parts: the term-by-term plan, the fall-only / spring-only tags, the credit-hours chart, the completion percentage, the school colors, and the prerequisite path for students who learn visually.
+
+### What they criticized, and what we changed
+
+We went through every written answer, grouped the complaints, and fixed the most common ones:
+
+| What students said | How many | What changed |
+|---|---|---|
+| "I couldn't find the GPA calculator" | 29 of 43 never noticed it | It's now in the top menu, and the side tab is white, larger and labeled. A Degree Works import fills in the current GPA and GPA hours. |
+| "Let me import from Degree Works instead of entering every class" | The most requested feature | **Degree Works import:** drop your audit PDF and GradPath fills in your major, minor, completed courses, start term and GPA. |
+| Not sure what goes in step 2 vs step 3; adding a course gave no feedback | ~15 comments | Clearer step names and one-line instructions. Step 2 confirms each course ("✓ Added MATH 1910 – Calculus I"). Step 3 has *Pick courses* lists showing which classes count. |
+| The prerequisite map is confusing | ~15 comments | A legend for the plan's tags. Hovering a course shows its prerequisites in words. The duplicate legend and the misleading "drag" cursor are gone. |
+| "Target terms" was unclear | ~8 comments | Renamed *When your plan starts*, with plain labels. It now defaults to the first term you haven't registered for. |
+| Light-gray text, too much on screen | ~12 comments | Darker, larger helper text. Fewer boxes inside boxes. Shorter instructions. |
+| Steps closed each other; the page jumped | Several | All steps can stay open, with a *Next* button at the end of each. |
+| Computer Science was pre-selected | Several | A first visit starts with no major chosen. |
+| "Fall" filter seemed to do nothing | Several | The filters now read *Fall only*, *Spring only* and *Offered in summer*. |
+| Hover details don't work on phones | 2 | An ⓘ button on each course shows the same details on touch screens. |
+
+Ideas students suggested that are still open: dragging courses between semesters, a maximum-hours-per-term setting, a guided tour, and dark mode.
 
 ---
 
@@ -163,6 +215,16 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Recent Changes
 
+- **Degree Works import** — drop your Degree Works audit PDF (Degree Works → printer icon, *Create PDF*) on the planner page:
+  - GradPath reads it in the browser; the PDF is never uploaded.
+  - It fills in your major, concentration and minor, every passed course, your in-progress classes (counted as finished if you choose) and the term after them.
+  - Only the PDF Degree Works itself makes is accepted. Anything else gets a clear message.
+  - It also reads which course Degree Works used for which requirement, so requirements the catalog only describes in words ("Math elective", "Science, different prefix") count the same way Degree Works counted them.
+  - A General Education or minor block that Degree Works marks complete is complete in GradPath. When the audit shows everything met, the plan says *Nothing left to plan*.
+  - Step 3 shows what came from the audit ("3 / 3 cr hrs, from Degree Works: MATH 2010").
+- **GPA from Degree Works** — the import fills in the GPA calculator with your Overall GPA and GPA hours. The hours come from MTSU letter grades, with retakes counted once, and must reproduce the audit's GPA exactly. Your current classes become the *Now* list, so you can pick expected grades and see where your GPA lands. The calculator also keeps separate *Next semester* and *My list* lists.
+- **Changes from student feedback** — see [Student feedback](#student-feedback-november-2026). The GPA calculator is in the top menu. The steps and labels are clearer, step 2 confirms each course, step 3 has *Pick courses* lists, and the page has fewer boxes and words. The plan start defaults to the first term not yet registered for. The plan page has a tag legend and prerequisite hover text.
+- **Layering fix** — the footer could paint over dropdowns that ran past a card (the major search). Fixed site-wide. Every dropdown, popup and panel was checked at three screen sizes.
 - **Balanced terms** — a final pass over every plan (any major):
   - courses that didn't fit go into terms that still have room, up to MTSU's 18-hour load;
   - a near-empty last term (one or two classes) is folded into earlier terms, so a plan doesn't end on a lone elective (one term may go one course over the course-mix limit to save the semester); one that can't fold in is brought up to full time (12 hours) with gen-eds from busier terms;
@@ -213,10 +275,11 @@ Read via `mtsugradpath/config.py`, settable in `.env` or as shell env vars:
 
 ## Usage
 
+0. **Fastest:** in Degree Works, click the printer icon (*Create PDF*), save the PDF, and drop it in the box at the top of the planner. GradPath fills in steps 1–4 and the GPA calculator. Check them, then **Generate Plan**.
 1. Search for a major in the **Major** box (e.g. "nursing", "accounting", "CSCI"). Optionally add a second major and up to four minors.
-2. Check off completed courses, grouped by the catalog's own sections. Checking a course also checks its prerequisites on the list (you'll be asked to confirm them when you generate the plan). Hover a course for its credits, when it's offered, whether it's required, and any minimum grade. Filter the list with **All / Required / Fall / Spring / Summer** or by typing a code or title. Use search (step 2) to add anything else in the catalog — type, then **Up/Down** and **Enter** to pick a result.
-3. Review **Other degree requirements**: rows marked *auto* fill in from checked-off courses; enter hours for anything else.
-4. Pick a starting term/year, number of terms (8 by default), whether to include summers, and whether to keep a **healthy course mix** (on by default), then **Generate Plan**.
+2. **Step 1:** check off completed courses, grouped by the catalog's own sections. Checking a course also checks its prerequisites on the list (you'll be asked to confirm them when you generate the plan). Hover a course (or tap ⓘ on a phone) for its credits, when it's offered, whether it's required, and any minimum grade. Filter with **All / Required / Fall only / Spring only / Offered in summer** or by typing a code or title. **Step 2:** search the whole catalog for anything else (gen-eds, AP, transfer credit). Type, then **Up/Down** and **Enter** to pick a result.
+3. **Step 3 — Gen-ed and other requirements:** rows fill in from your courses. Open **Pick courses** under a row to check off the classes that count, or enter hours. **Mark complete** fills a row and **Undo** puts it back.
+4. **Step 4 — When your plan starts:** the first term you haven't registered for (filled in from today's date), the number of terms (8 by default), whether to include summers, and whether to keep a **healthy course mix** (on by default). Then **Generate Plan**.
 5. Review completion progress, the per-section breakdown, the term-by-term schedule, and any prerequisite warnings. **View in catalog** links to the official program page.
 6. **Build my schedule** (or *Build Schedule* in the nav) opens MTSU's Schedule Planner (`sched.mtsu.edu`) to pick sections by days, times and open seats; the plan page lists the next term's courses with a button to copy them.
 7. **Prerequisite Map** in the nav bar shows the course dependency graph for any major (with full screen and zoom).
@@ -233,11 +296,15 @@ python -m pytest tests
 
 ### Test results
 
-Everything below passed on the current version (October 2026). The automated suite also runs on every push through GitHub Actions, and the data-refresh workflow re-checks every major before publishing new data.
+Everything below passed on the current version (November 2026). The automated suite also runs on every push through GitHub Actions, and the data-refresh workflow re-checks every major before publishing new data.
 
 | What was checked | Scope | Result |
 |---|---|---|
-| **Automated test suite** (`pytest`) | 2,535 tests | **2,534 passed, 0 failed** (1 skipped by design) |
+| **Automated test suite** (`pytest`) | 2,581 tests | **2,580 passed, 0 failed** (1 skipped by design) |
+| **Degree Works import** — every major's word-only requirement rows matched by a Degree Works requirement worded the same way, no neighbor picked instead | All 223 majors, 315 rows | 315 / 315 |
+| An audit showing every requirement met reads 100% with nothing left to plan; every minor matches its "Minor – …" block | All 223 majors, all 152 minors | 223 / 223, 152 / 152 |
+| A real student's Degree Works audit imported end to end | 1 audit (with permission; a major plus a minor, older catalog year) | Same courses, same requirement assignments, 100% (Degree Works shows every block met), and the audit's GPA reproduced exactly from its grades |
+| Dropdowns, popups and panels never covered by other parts of the page | 38 checks at 3 screen sizes | 38 / 38 |
 | Every major planned from scratch — no prerequisite or offering-term violations, every required course scheduled | All 223 majors/concentrations | 223 / 223 |
 | Every major's required hours add up to at least its catalog total | All 223 | 223 / 223 |
 | **Every major matches its catalog page** — each course a page lists on its own line (not in a "choose" list or an "or") is planned as required, checked with a plain reading independent of the converter | All 223 | 223 / 223 (the same check flags 29 majors on the previous version, e.g. Professional Pilot, Pre-Law, Theatre) |
@@ -275,7 +342,7 @@ Students flagged Professional Pilot plans with Flight Lab I and II too close tog
 
 After the fixes: 0 problems in 2,676 random single-major plans and 9,200 random major/minor/double-major plans through the real site, and 0 page errors in browser trials. The heaviest setups (double major + four minors, 16 terms) take a median of 14 ms, at most 86 ms.
 
-**Degree Works:** it needs a student's PipelineMT login, so it couldn't be checked directly. Plans were compared against the live catalog instead (the source Degree Works audits against): 7 programs downloaded fresh matched the saved data exactly. A program-by-program Degree Works comparison is planned (see [next steps](#status-and-next-steps)).
+**Degree Works:** students can now import their own audit (see *Degree Works import* above). One real audit was checked end to end and matched Degree Works exactly. Earlier, plans were compared against the live catalog (the source Degree Works audits against), and 7 programs downloaded fresh matched the saved data exactly. A program-by-program Degree Works comparison is still planned (see [next steps](#status-and-next-steps)). More real audits, especially double majors and ones with "Still needed" items, will tighten the import.
 
 ### What the test files cover
 
@@ -284,6 +351,7 @@ After the fixes: 0 problems in 2,676 random single-major plans and 9,200 random 
 - `tests/test_production.py` covers security headers, input limits, malformed input, Row-Level Security on Supabase tables, an unreachable database, and the admin re-export route.
 - `tests/test_catalog_build.py` covers parsing catalog text (prerequisite sentences, OR groups, concurrent courses, minimum grades, credit hours, program sections).
 - `tests/test_catalog_programs.py` covers turning catalog sections into planner configs on a small made-up catalog.
+- `tests/test_degreeworks_import.py` runs the in-browser audit reader (`static/degreeworks.js`) under Node on a made-up audit: courses, in-progress classes, withdrawn/failed attempts, programs, requirement rows, block status, GPA and GPA hours, and rejecting PDFs that aren't from Degree Works. `tests/test_degreeworks_plan.py` covers applying an audit to plans for every major and minor.
 - `tests/test_plan_integrity.py`, `test_planner.py`, `test_minors.py`, `test_double_major.py`, `test_form_flow.py`, `test_session_persistence.py`, `test_sync_status.py` cover the planner, audits, double majors/minors, the web form, and session handling.
 
 GitHub Actions runs the suite on every push and pull request.
@@ -360,7 +428,7 @@ flowchart TB
 ### Files
 
 ```
-app.py                  Flask routes: / (form + plan), /prerequisites, /courses.json, /healthz, /sync (admin)
+app.py                  Flask routes: / (form + plan), /degreeworks/preview, /prerequisites, /courses.json, /healthz, /sync (admin)
 scrape_courses.py       CLI: export the catalog and class schedule
 catalog_data/
 ├── catalog.json        Exported catalog (courses + programs), committed to the repo
@@ -376,9 +444,10 @@ mtsugradpath/
 ├── minors.py           Catalog minors, minor audit
 ├── double_major.py     Folding a second major into a plan
 ├── planner.py          Term scheduling (generate_plan) + independent validation (validate_plan)
+├── degreeworks.py      Applies an imported Degree Works audit to the plan (requirement matching, complete blocks)
 ├── models.py / db.py   Small shared state (export status, course equivalencies)
 └── config.py           Env configuration
-templates/, static/     Jinja templates, CSS/assets
+templates/, static/     Jinja templates, CSS/assets; static/degreeworks.js reads the audit PDF in the browser (pdf.js)
 tests/                  pytest suite
 .github/workflows/      Tests on push; weekly schedule + monthly catalog refresh
 ```
@@ -546,7 +615,8 @@ Everything needed to run the site is in this repository; nothing depends on a te
 4. **Retire Supabase** (remove `DATABASE_URL`, then delete the project).
 5. **Spot-check majors** with advisors in each department and report anything that doesn't match the catalog.
 6. **Degree Works system test (planned):** before a release, check every major and minor against Degree Works — same required courses, same choices, same hours — so each program is verified by hand-level comparison before it's pushed. Not started yet.
-7. **Later features:** saved plans and accounts, older catalog years for students who started earlier, a Degree Works import, and a short user guide.
+7. **Test the Degree Works import with more real audits** (with students' permission): double majors, other colleges, and audits with "Still needed" items.
+8. **Later features (several from student feedback):** dragging courses between semesters, a maximum-hours-per-term setting, a guided tour, saved plans and accounts, older catalog years for students who started earlier, and dark mode.
 
 ---
 
@@ -561,7 +631,8 @@ Everything needed to run the site is in this repository; nothing depends on a te
 - **A few corequisite lines in the catalog contradict the prerequisites** (e.g. Interior Architecture: IDES 3330 lists IDES 4100 as a corequisite, but IDES 4100 needs IDES 3320, which goes with IDES 3330). The planner drops the one-way link that makes the set impossible and keeps the rest.
 - **Some degrees don't fit 8 semesters at a normal load** (e.g. Aerospace Maintenance Management is 133 hours, and some sequences only run in one season); the plan lists what's left in a *Remaining* box instead of overloading terms.
 - **Rate limiting counts per gunicorn worker** (or per serverless instance on Vercel), not globally — in-memory storage. A stricter global limit would need Redis or the host's firewall rules.
-- **Only the newest catalog year.** A student who started under an older catalog sees the newest requirements.
+- **Only the newest catalog year.** A student who started under an older catalog sees the newest requirements. A Degree Works import narrows the gap: requirements the audit shows as met count as met.
+- **The Degree Works import has been checked on one real audit.** Requirements are matched to the audit by their wording, which works for every major's rows in testing, but unusual audits (double majors, exceptions, "Still needed" items) haven't been seen yet. The PDF reader (pdf.js) loads from a CDN the first time someone imports.
 - **Planner input only lasts for the browser tab** (`sessionStorage`). Saved plans tied to accounts are a future item.
 
 ---

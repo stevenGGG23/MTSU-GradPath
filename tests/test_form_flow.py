@@ -231,7 +231,9 @@ def test_plan_hands_off_to_mtsu_schedule_planner():
 
 def test_checklist_has_season_filters_and_hover_details():
     html = get_html()
-    for f in ("all", "required", "fall", "spring", "summer"):
+    # Students expected "Fall" to mean fall-only courses, so the season
+    # filters say exactly that
+    for f in ("all", "required", "fall-only", "spring-only", "summer"):
         assert f'data-filter="{f}"' in html
     assert 'id="checklist-search"' in html
     card = re.search(r'<div class="form-check cs-course-check[^"]*" title="([^"]*)" data-seasons="([^"]*)"[^>]*>\s*<input[^>]+data-code="CSCI 1170"', html)
@@ -268,3 +270,79 @@ def test_form_previews_auto_rows_live():
     assert "ENGL 1010" in rules["options"]["tbc_written_comm"]
     assert {hll, "tbc_written_comm"} <= set(rules["order"])
     assert f'data-auto-for="{hll}"' in html and 'data-auto-for="tbc_written_comm"' in html
+
+
+
+# ── Student feedback round (Nov 2026) ─────────────────────────────────────────
+
+
+def test_first_visit_asks_for_a_major():
+    # No major chosen yet: the major box is empty and the steps wait for one
+    html = app.test_client().get("/").get_data(as_text=True)
+    assert re.search(r'id="major_input" class="form-control combo-input" value=""', html)
+    assert re.search(r'<div id="planner-steps" hidden>', html)
+    # With a major in the link, the steps show right away
+    assert re.search(r'<div id="planner-steps">', get_html())
+
+
+def test_degree_works_is_its_own_box_above_the_planner():
+    for html in (app.test_client().get("/").get_data(as_text=True), get_html()):
+        assert html.index('class="card dw-card" id="dw-import"') < html.index('id="planner-form"')
+
+
+def test_steps_can_stay_open_together():
+    # The steps used to close each other (data-bs-parent), which jumped the
+    # page and hid what had been checked off
+    html = get_html()
+    assert "data-bs-parent=\"#plannerAccordion\"" not in html
+    assert html.count('class="btn btn-sm btn-link step-next"') == 3
+
+
+def test_gpa_calculator_is_in_the_top_navigation():
+    html = get_html()
+    assert re.search(r'class="nav-link nav-link-button" data-bs-toggle="offcanvas" data-bs-target="#gpaTools"', html)
+    assert "GPA Calculator</span></button>" in html
+
+
+def test_requirement_rows_list_courses_to_pick():
+    html = get_html()
+    row = re.search(r'id="hours_tbc_hssr".*?<details class="requirement-picks">(.*?)</details>', html, re.S)
+    assert row, "Human Society row has a Pick courses list"
+    assert 'class="form-check-input requirement-pick-box" data-code="PSY 1410"' in row.group(1)
+
+
+def test_requirement_examples_are_courses_not_cut_off_prose():
+    from mtsugradpath.degree_configs import find_degree_config
+    cfg = find_degree_config("cs")
+    hints = next(s for gid, _, _, s in cfg["supporting_generic"] if gid == _hll_row_id())
+    assert hints and hints[0].startswith("CSCI 3033")
+
+
+def test_plan_has_tag_legend_and_prerequisite_hover():
+    html = post_plan(completed=["CSCI 1170"]).get_data(as_text=True)
+    assert 'class="plan-tag-legend"' in html
+    assert re.search(r'class="plan-item-row plan-item-course[^"]*" title="Prerequisites: [^"]+"', html)
+
+
+def test_gpa_prefill_has_hours_left_on_the_plan():
+    import json
+    html = post_plan(completed=["CSCI 1170"]).get_data(as_text=True)
+    data = json.loads(re.search(r'<script type="application/json" id="gpa-next-term">(.*?)</script>', html, re.S).group(1))
+    assert data["hours_left"] > 60
+
+
+
+def test_plans_start_with_the_first_term_not_registered_for():
+    from datetime import date
+    from mtsugradpath.planner import default_start_term
+    # Fall under way (registration for spring) -> next spring
+    for day in (date(2026, 8, 20), date(2026, 11, 14), date(2026, 12, 31)):
+        assert default_start_term(day) == ("Spring", 2027), day
+    # Spring under way, or summer -> the coming fall
+    for day in (date(2027, 1, 10), date(2027, 4, 1), date(2027, 7, 31)):
+        assert default_start_term(day) == ("Fall", 2027), day
+    # The planner page starts there
+    season, year = default_start_term()
+    html = get_html()
+    assert re.search(rf'<option value="{season}" selected>', html)
+    assert f'id="start_year" name="start_year" value="{year}"' in html

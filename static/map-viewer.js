@@ -51,6 +51,14 @@
     svg.style.height = "auto";
     const label = viewer.querySelector("[data-map-zoom-label]");
     if (label) label.textContent = Math.round(zoom * 100) + "%";
+    // The grab cursor and "Drag to move around" only when the map is bigger
+    // than its box (students saw the cursor but nothing moved)
+    requestAnimationFrame(function () {
+      const canPan = wrap.scrollWidth > wrap.clientWidth + 2 || wrap.scrollHeight > wrap.clientHeight + 2;
+      wrap.classList.toggle("can-pan", canPan);
+      const hint = viewer.querySelector("[data-map-pan-hint]");
+      if (hint) hint.hidden = !canPan;
+    });
   }
 
   function readableZoom() {

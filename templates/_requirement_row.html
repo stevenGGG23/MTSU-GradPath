@@ -1,6 +1,6 @@
 <div class="requirement-row">
   <div class="requirement-row-top">
-    <label for="hours_{{ generic_id }}" class="requirement-row-label">{{ label }}{% if auto_generic_ids is defined and generic_id in auto_generic_ids %} <span class="auto-pill" title="Fills in from courses you check off">auto</span>{% endif %}</label>
+    <label for="hours_{{ generic_id }}" class="requirement-row-label">{{ label }}</label>
     <div class="requirement-row-controls">
       <input
         type="number"
@@ -12,14 +12,31 @@
         step="0.5"
         value="{{ saved_hours.get(generic_id, 0) }}">
       <span class="requirement-hours-max">/ {{ hours }} cr hr{{ 's' if hours != 1 else '' }}</span>
-      <button type="button" class="btn btn-sm btn-outline-primary requirement-mark-complete" data-target="hours_{{ generic_id }}">Mark complete</button>
+      <button type="button" class="btn btn-sm btn-outline-primary requirement-mark-complete" data-target="hours_{{ generic_id }}" aria-pressed="false">Mark complete</button>
+      {# Shown instead of the box when courses (or Degree Works) fill the row #}
+      <span class="requirement-done-label"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> {{ hours }} / {{ hours }} cr hrs</span>
     </div>
   </div>
   <div class="requirement-progress"><div class="requirement-fill"></div></div>
-  {% if auto_generic_ids is defined and generic_id in auto_generic_ids %}
   <div class="requirement-auto-note" data-auto-for="{{ generic_id }}" hidden></div>
-  {% endif %}
-  {% if suggestions %}
+  {# The courses that count toward this row, to check off right here
+     (students asked which classes fit "Human Society", "Scientific Literacy", ...);
+     rows with a list don't also need "e.g." examples #}
+  {% set picks = (pick_lists or {}).get(generic_id, []) if pick_lists is defined else [] %}
+  {% if suggestions and not picks %}
   <div class="requirement-suggestions">e.g. {{ suggestions | join(', ') }}</div>
+  {% endif %}
+  {% if picks %}
+  <details class="requirement-picks">
+    <summary>Pick courses <span class="checklist-count">{{ picks | length }}</span></summary>
+    <div class="requirement-pick-grid">
+      {% for code, title in picks %}
+      <label class="requirement-pick">
+        <input type="checkbox" class="form-check-input requirement-pick-box" data-code="{{ code }}" data-label="{{ code }} - {{ title }}">
+        <span><span class="cs-course-code">{{ code }}</span> {{ title }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </details>
   {% endif %}
 </div>

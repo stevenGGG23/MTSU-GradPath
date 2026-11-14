@@ -22,7 +22,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import or_, update
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from mtsugradpath import catalog_store
+from mtsugradpath import catalog_store, degreeworks
 from mtsugradpath.catalog_programs import auto_fill_rules, auto_generic_hours
 from mtsugradpath.degree_checks import bachelors_checks, clarify_label
 from mtsugradpath.config import SYNC_ADMIN_PASSWORD, SYNC_ADMIN_USER
@@ -64,6 +64,7 @@ from mtsugradpath.planner import (
     clear_catalog_cache,
     config_course_codes_all,
     default_start_season,
+    default_start_term,
     generate_plan,
     load_catalog_for,
     GRADE_RANK,
@@ -190,6 +191,9 @@ def _security_headers(response):
             f"font-src 'self' {_CDN}",
             "img-src 'self' data:",
             "connect-src 'self'",
+            # pdf.js (Degree Works import) reads the PDF in a worker it
+            # starts from a blob: wrapper around its CDN script
+            f"worker-src 'self' blob: {_CDN}",
             "object-src 'none'",
             "base-uri 'self'",
             "form-action 'self'",
@@ -580,6 +584,9 @@ def index():
         "major": request.args.get("major", "cs"),
         "second_major": request.args.get("second_major", ""),
     }
+    # A first visit (no ?major=) asks for a major instead of quietly showing
+    # Computer Science; the page still renders a default config underneath
+    major_chosen = bool(request.args.get("major"))
 
     degree_cfg = get_full_degree_config(saved_state["major"])
     saved_state["major"] = degree_cfg["key"]
@@ -658,6 +665,16 @@ def index():
         "required": sorted(_required_codes(degree_cfg) & auto_codes),
         "credits": {code: catalog_store.credits(code, default=3) for code in sorted(auto_codes)},
     }
+    # Step 3's "Pick courses" lists: each auto row's courses, minus the ones
+    # the major requires by name (those count toward their own row)
+    pick_lists = {
+        gid: [
+            (code, (catalog_store.course(code) or {}).get("title", ""))
+            for code in auto_options[gid]
+            if code not in auto_fill["required"] and catalog_store.course(code)
+        ]
+        for gid in auto_order
+    }
 
     return render_template(
         "index.html",
@@ -671,14 +688,16 @@ def index():
         supporting_generic=manual_supporting_generic,
         auto_generic_ids=auto_ids,
         auto_fill=auto_fill,
+        pick_lists=pick_lists,
         generic_options={gid: opts for gid, opts in (form_cfg.get("generic_options") or {}).items()},
         tbc_generic=degree_cfg["tbc_generic"],
         electives_generic_id=ELECTIVES_GENERIC_ID,
         electives_hours=display_elective_hours,
         season_options=SEASON_CYCLE,
-        default_season=default_start_season(),
-        default_year=date.today().year,
+        default_season=default_start_term()[0],
+        default_year=default_start_term()[1],
         saved_state=saved_state,
+        major_chosen=major_chosen,
         majors=majors,
         minors=[
             {
@@ -755,6 +774,51 @@ def _read_course_grades(raw):
     return grades
 
 
+def _apply_degree_works(dw, planning_cfg, programs, completed, generic_hours, auto_applied):
+    """Requirement hours with the student's Degree Works audit applied.
+
+    Rows the catalog only describes in words get the courses Degree Works
+    used for them; a complete General Education block fills the True Blue
+    Core; an audit with everything met fills every row. Returns
+    (generic_hours, auto_applied, {gid: {"codes": [...], "full": bool}}) --
+    the last, for the planner page's step 3, says what came from the audit.
+    """
+    generic_hours = dict(generic_hours)
+    rows = [(gid, label, hours) for gid, label, hours, _ in
+            planning_cfg["supporting_generic"] + planning_cfg["tbc_generic"]]
+    gen_ed_ids = {gid for gid, _, _, _ in planning_cfg["tbc_generic"]}
+    used_major = {code for gid, codes in auto_applied.items() if gid not in gen_ed_ids for code in codes}
+    used_gen_ed = {code for gid, codes in auto_applied.items() if gid in gen_ed_ids for code in codes}
+    for cfg_item in programs:
+        if cfg_item:
+            used_major |= _required_codes(cfg_item) | {c for c, _, _ in cfg_item.get("required_courses", [])}
+    added, applied = degreeworks.match_rows(
+        rows, dw, completed, used_major,
+        {gid: _as_float(generic_hours.get(gid)) for gid, _, _ in rows},
+        lambda code: catalog_store.credits(code, default=3) or 0,
+        gen_ed_ids=gen_ed_ids, used_gen_ed=used_gen_ed,
+    )
+    details = {gid: {"codes": codes, "full": False} for gid, codes in applied.items()}
+    for gid, hours in added.items():
+        generic_hours[gid] = _as_float(generic_hours.get(gid)) + hours
+    auto_applied = {**auto_applied, **{
+        gid: list(dict.fromkeys(auto_applied.get(gid, []) + codes)) for gid, codes in applied.items()
+    }}
+    everything_met = degreeworks.all_complete(dw)
+    full_rows = list(rows) if everything_met else []
+    if not everything_met and degreeworks.gen_ed_complete(dw):
+        full_rows = [row for row in rows if row[0] in gen_ed_ids]
+    for gid, _, hours in full_rows:
+        if _as_float(generic_hours.get(gid)) < float(hours):
+            details.setdefault(gid, {"codes": [], "full": False})["full"] = True
+        generic_hours[gid] = max(_as_float(generic_hours.get(gid)), float(hours))
+    if everything_met:
+        # (capped at the degree's free-elective hours wherever it's read)
+        generic_hours[ELECTIVES_GENERIC_ID] = 999
+        details[ELECTIVES_GENERIC_ID] = {"codes": [], "full": True}
+    return generic_hours, auto_applied, details
+
+
 def _plan():
     completed_text = request.form.get("completed_courses", "")
 
@@ -804,9 +868,9 @@ def _plan():
     start_season = request.form.get("start_season") or default_start_season()
 
     try:
-        start_year = int(request.form.get("start_year") or date.today().year)
+        start_year = int(request.form.get("start_year") or default_start_term()[1])
     except ValueError:
-        start_year = date.today().year
+        start_year = default_start_term()[1]
 
     # A checked lecture counts for its 0-credit lab (catalog majors don't
     # even list those labs); labs that carry credit still get a warning
@@ -876,8 +940,24 @@ def _plan():
     for gid, hours in auto_hours.items():
         generic_hours[gid] = max(_as_float(generic_hours.get(gid)), hours)
 
+    # The student's Degree Works audit (imported on the planner page), when
+    # it's for this major: it says which courses met the requirements the
+    # catalog only describes in words, and which blocks are already done
+    dw = degreeworks.read_payload(request.form.get("degree_works"))
+    if dw and dw["major"] != degree_cfg["key"]:
+        dw = None
+    if dw:
+        generic_hours, auto_applied, _ = _apply_degree_works(
+            dw, planning_cfg, (degree_cfg, second_cfg, *minor_cfgs),
+            validated_completed_courses, generic_hours, auto_applied,
+        )
+
     minor_audits = []
     for minor_cfg in minor_cfgs:
+        if dw and degreeworks.minor_complete(dw, minor_cfg["name"]):
+            # Degree Works counts this minor done: nothing of it left to plan
+            minor_audits.append(degreeworks.mark_complete(build_minor_audit(minor_cfg, completed_courses, catalog)))
+            continue
         planning_cfg, minor_generic_hours = apply_minor_to_config(
             planning_cfg, minor_cfg, completed_courses, catalog
         )
@@ -977,6 +1057,12 @@ def _plan():
         return made
 
     plan = make_plan(planning_cfg, planning_generic_hours)
+    # Degree Works shows every requirement met (in-progress classes counted
+    # when the student chose to): nothing is left to plan, whatever this
+    # catalog year would add
+    dw_all_done = bool(dw) and degreeworks.all_complete(dw)
+    if dw_all_done:
+        plan = {}
 
     # The healthy mix can cost a term (at most 3 major courses a term): say
     # so, so the student can choose the faster plan
@@ -987,7 +1073,7 @@ def _plan():
         return terms[-1] if terms else None, len(terms), overflow
 
     faster_without_mix = None
-    if healthy_mix:
+    if healthy_mix and not dw_all_done:
         packed_last, packed_count, packed_overflow = last_real_term(make_plan(planning_cfg, planning_generic_hours, mix=False))
         _, mixed_count, mixed_overflow = last_real_term(plan)
         if packed_last and not packed_overflow and (mixed_overflow or packed_count < mixed_count):
@@ -1011,6 +1097,11 @@ def _plan():
         degree_cfg={**degree_cfg, "_applied": auto_applied},
         equivalencies=equivalencies,
     )
+
+    if dw_all_done:
+        audit = degreeworks.mark_degree_complete(audit)
+        if second_audit:
+            second_audit = degreeworks.mark_degree_complete(second_audit)
 
     prereq_warnings = validate_plan(
         plan,
@@ -1147,6 +1238,8 @@ def _plan():
                 "offered": catalog_store.offering_summary(item["code"]),
                 "check_prereq": prereq_notes.get(item["code"]),
                 "second": item["code"] in second_only_codes,
+                # Hover text: the catalog's prerequisite wording
+                "prereq_text": " ".join(str((catalog_store.course(item["code"]) or {}).get("prereq_text") or "").split()),
             }
 
         if kind == "requirement":
@@ -1239,7 +1332,13 @@ def _plan():
                 if seen[name] > 1:
                     name = f"{name} {seen[name]}"
             rows.append({"code": name, "hours": hours})
-        gpa_next = {"term": next_term, "courses": rows}
+        # Every hour still on the plan, for "Hours left to take" (reach a target GPA)
+        hours_left = sum(
+            item.get("hours") or 0
+            for term_items in plan.values() for item in term_items
+            if item.get("kind") in ("course", "requirement")
+        )
+        gpa_next = {"term": next_term, "courses": rows, "hours_left": round(hours_left)}
 
     # Calculates the total number of planned hours for each semester
     term_hours_display = {
@@ -1281,9 +1380,51 @@ def _plan():
         schedule_planner_url=SCHEDULE_PLANNER_URL,
         uncounted_courses=[c for c in uncounted_courses if c not in unrecognized_courses],
         hide_sync=True,
+        degree_works=({"percent": dw["percent"], "catalog_year": dw["catalog_year"],
+                       "all_done": degreeworks.all_complete(dw), "count_ip": dw["count_ip"]} if dw else None),
         catalog_meta=catalog_store.meta(),
         generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
     )
+
+
+# Step 3's preview of what an imported Degree Works audit fills in -- the same
+# rules the plan applies (_apply_degree_works), for the planner form as it is now
+@app.route("/degreeworks/preview", methods=["POST"])
+@limiter.limit("60 per minute")
+def degreeworks_preview():
+    dw = degreeworks.read_payload(request.form.get("degree_works"))
+    degree_cfg = get_full_degree_config(request.form.get("major", "cs"))
+    if not dw or dw["major"] != degree_cfg["key"]:
+        return jsonify({})
+    second_cfg = _second_major_cfg(degree_cfg, request.form.get("second_major"))
+    prefixes = major_prefixes(degree_cfg) + (major_prefixes(second_cfg) if second_cfg else [])
+    minor_cfgs = []
+    for key in request.form.getlist("minor")[:MAX_MINORS * 3]:
+        minor_cfg = get_minor_config(key)
+        if (len(minor_cfgs) < MAX_MINORS and minor_cfg and minor_allowed_for_major(minor_cfg, prefixes)
+                and minor_cfg["name"] not in {m["name"] for m in minor_cfgs}):
+            minor_cfgs.append(minor_cfg)
+    completed = set()
+    for line in request.form.get("completed_courses", "").splitlines():
+        code = " ".join(line.split()).upper()
+        if _COURSE_CODE_RE.fullmatch(code) and len(completed) < MAX_COMPLETED_COURSES:
+            completed.add(code)
+    planning_cfg = degree_cfg
+    if second_cfg:
+        catalog = load_catalog_for(degree_cfg, second_cfg, *minor_cfgs, completed=completed)
+        planning_cfg, _ = apply_second_major_to_config(degree_cfg, second_cfg, completed, catalog)
+    generic_hours = read_generic_hours(request.form, planning_cfg)
+    auto_hours, auto_applied = auto_generic_hours(
+        planning_cfg, completed, required=_required_codes(degree_cfg), typed=generic_hours,
+    )
+    for gid, hours in auto_hours.items():
+        generic_hours[gid] = max(_as_float(generic_hours.get(gid)), hours)
+    filled, _, details = _apply_degree_works(
+        dw, planning_cfg, (degree_cfg, second_cfg, *minor_cfgs), completed, generic_hours, auto_applied,
+    )
+    return jsonify({
+        gid: {**info, "hours": _as_float(filled.get(gid))} for gid, info in details.items()
+    })
 
 
 # Function that builds and displays the dependency graph for any major
