@@ -2394,25 +2394,53 @@ body.map-viewer-open {
     height: 4px;
 }
 
-/* Quieter buttons: the hour box is the main control */
+/* "Mark complete": a small outlined button, the same height as the hours
+   box beside it; "Undo" is the same button in gray */
 .requirement-mark-complete {
-    border-color: transparent;
-    background: none;
+    /* one width for "Mark complete" and "Undo", so every row lines up */
+    width: 7.75rem;
+    min-width: 0;
+    height: 31px;
+    padding: 0 0.75rem;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #ffffff;
     box-shadow: none;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    min-width: 6.2rem;
+    color: #1d4ed8;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .requirement-mark-complete:hover,
 .requirement-mark-complete:focus-visible {
+    border-color: #2563eb;
     background: #eff6ff;
     color: #1d4ed8;
-    border-color: transparent;
+}
+
+.requirement-mark-complete:active {
+    background: #dbeafe;
 }
 
 .requirement-mark-complete.is-undo {
-    border-color: transparent;
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.requirement-mark-complete.is-undo:hover,
+.requirement-mark-complete.is-undo:focus-visible {
+    border-color: #94a3b8;
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.requirement-hours-input {
+    height: 31px;
+    border-radius: 8px;
 }
 
 .step-next {
@@ -2646,9 +2674,6 @@ body.first-visit main {
 }
 
 body.first-visit .dw-card {
-    flex: 1.15 1 auto;
-    display: flex;
-    flex-direction: column;
     padding: 1.25rem;
 }
 
@@ -2678,40 +2703,6 @@ body.first-visit .dw-button {
     font-size: 1.1rem;
 }
 
-body.first-visit #planner-form,
-body.first-visit .planner-layout {
-    flex: 1 1 auto;
-    display: flex;
-    width: 100%;
-}
-
-body.first-visit .planner-main {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 2.75rem 3rem;
-}
-
-body.first-visit .planner-main > h2 {
-    font-size: 2rem;
-    margin-bottom: 1.5rem !important;
-}
-
-body.first-visit .program-label {
-    font-size: 1rem;
-}
-
-body.first-visit .combo-input {
-    min-height: 3.25rem;
-    font-size: 1.1rem;
-}
-
-body.first-visit .combo-btn {
-    min-width: 3.25rem;
-    min-height: 3.25rem;
-}
-
 @media (max-width: 760px) {
     body.first-visit .dw-card .dw-drop {
         gap: 0.9rem;
@@ -2719,12 +2710,6 @@ body.first-visit .combo-btn {
     }
     body.first-visit .dw-title {
         font-size: 1.35rem;
-    }
-    body.first-visit .planner-main {
-        padding: 1.75rem 1.25rem;
-    }
-    body.first-visit .planner-main > h2 {
-        font-size: 1.6rem;
     }
 }
 
@@ -2954,4 +2939,403 @@ body.first-visit .combo-btn {
     border-color: #2563eb;
     background: #2563eb;
     color: #ffffff;
+}
+
+/* ── Planner card: plain and well set ────────────────────────────────────── */
+
+.planner-main {
+    background: #ffffff;
+    padding: 2.5rem 2.75rem;
+}
+
+.planner-title {
+    margin: 0 0 1.75rem;
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #0f172a;
+}
+
+.program-panel {
+    gap: 1.25rem 2rem;
+}
+
+.program-label {
+    margin-bottom: 0.45rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.program-optional {
+    margin-left: 0.15rem;
+    font-weight: 400;
+    color: #64748b;
+}
+
+.combo-input.form-control {
+    min-height: 3rem;
+    padding-left: 1rem;
+    border-color: #cbd5e1;
+    border-radius: 10px;
+    font-size: 1rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.combo-input.form-control::placeholder {
+    color: #94a3b8;
+}
+
+.combo-input.form-control:hover {
+    border-color: #94a3b8;
+}
+
+.combo-input.form-control:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.combo-btn {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 10px;
+}
+
+.program-info {
+    margin-top: 0.5rem;
+}
+
+@media (max-width: 760px) {
+    .planner-main {
+        padding: 1.75rem 1.25rem;
+    }
+    .planner-title {
+        font-size: 1.45rem;
+        margin-bottom: 1.25rem;
+    }
+}
+
+.dw-card {
+    background: #ffffff;
+}
+
+/* ── Plan page: one consistent look ─────────────────────────────────────────
+   Plain section headings, one divider between sections, one button style,
+   neutral cards. */
+
+.plan-card {
+    background: #ffffff;
+    padding: 2.5rem 2.75rem;
+}
+
+.plan-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin-bottom: 1.75rem;
+}
+
+.plan-header-text {
+    min-width: 0;
+}
+
+.plan-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #0f172a;
+}
+
+.plan-subtitle {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    color: #475569;
+}
+
+.plan-actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+}
+
+/* One button style for the page; the main action is filled */
+.plan-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 1rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: none;
+    color: #1e293b;
+    font-size: 0.92rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.plan-btn:hover,
+.plan-btn:focus-visible {
+    border-color: #94a3b8;
+    background: #f8fafc;
+    color: #0f172a;
+}
+
+.plan-btn-primary {
+    border-color: #2563eb;
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.plan-btn-primary:hover,
+.plan-btn-primary:focus-visible {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff;
+}
+
+/* Progress summary: no tinted box, just the ring and bars */
+.progress-summary {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 1.5rem 1.75rem;
+    margin-bottom: 0 !important;
+}
+
+.progress-summary-detail h4 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+/* Sections: same heading, same spacing, one thin line between them */
+.plan-section {
+    margin: 0 !important;
+    padding: 2rem 0 0;
+    margin-top: 2rem !important;
+    border-top: 1px solid #e2e8f0;
+}
+
+.plan-section-title {
+    margin: 0 0 1rem;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.plan-subsection-title {
+    margin-top: 1.75rem;
+    margin-bottom: 0.35rem;
+    font-size: 1.05rem;
+}
+
+.plan-section > .text-muted:first-of-type {
+    margin-top: -0.5rem;
+}
+
+/* Next step: a plain card, buttons side by side */
+.next-step-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+    margin-top: 1.5rem;
+    padding: 1.25rem 1.5rem;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #2563eb;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #1e293b;
+}
+
+.next-step-title {
+    margin: 0 0 0.25rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.next-step-sub {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    color: #475569;
+}
+
+.next-step-courses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.next-course-badge {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #0f172a;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.next-step-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Plan overview */
+.plan-tag-legend {
+    gap: 0.4rem 1.1rem;
+    margin-bottom: 1rem;
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.plan-tag-hint {
+    color: #94a3b8;
+}
+
+.term-grid-single {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.term-card {
+    border-radius: 12px;
+}
+
+.term-card-header {
+    background: #f8fafc;
+}
+
+.term-card-header .badge {
+    padding: 0.25rem 0.55rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #ffffff !important;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Completed courses: one folded, tidy list */
+.plan-fold > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    cursor: pointer;
+    list-style: none;
+}
+
+.plan-fold > summary::-webkit-details-marker {
+    display: none;
+}
+
+.plan-fold > summary::after {
+    content: "";
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-left: 0.35rem;
+    border-right: 2px solid #64748b;
+    border-bottom: 2px solid #64748b;
+    transform: rotate(45deg) translateY(-2px);
+    transition: transform 0.15s;
+}
+
+.plan-fold[open] > summary::after {
+    transform: rotate(-135deg) translateY(-2px);
+}
+
+.plan-count {
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.completed-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 0 2rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.completed-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.9rem;
+}
+
+.completed-code {
+    flex: 0 0 5.2rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.completed-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #334155;
+}
+
+.completed-hours {
+    flex: 0 0 auto;
+    color: #94a3b8;
+    font-size: 0.82rem;
+}
+
+@media (max-width: 860px) {
+    .plan-card {
+        padding: 1.75rem 1.25rem;
+    }
+    .plan-header {
+        flex-direction: column;
+    }
+    .plan-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    .plan-actions .plan-btn {
+        flex: 1 1 auto;
+    }
+}
+
+@media print {
+    .plan-section {
+        border-top: none;
+        padding-top: 0.5rem;
+    }
+    .plan-fold > summary::after {
+        display: none;
+    }
+}
+
+/* Requirement details: quiet hour counts, green when met */
+#auditAccordion .accordion-button .badge {
+    padding: 0.25rem 0.55rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #ffffff !important;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+#auditAccordion .accordion-button .badge.bg-success {
+    border-color: #bbf7d0;
+    background: #f0fdf4 !important;
+    color: #15803d;
 }

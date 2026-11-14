@@ -270,6 +270,7 @@ export function planPayload(result, majorKey, countInProgress) {
     percent: result.percent,
     catalog_year: result.catalogYear,
     blocks: result.blocks.map(b => ({ title: b.title, status: b.status, still_needed: b.stillNeeded })),
+    in_progress: result.inProgress.map(c => ({ code: c.code, term: c.term })),
     rows: result.requirements.map(r => ({ block: r.block, label: r.label, context: r.context, codes: r.codes })),
   };
 }

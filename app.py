@@ -1098,8 +1098,20 @@ def _plan():
         equivalencies=equivalencies,
     )
 
+    # Not counting the classes in progress as finished: the headline is
+    # Degree Works' own percentage until they're done
+    dw_pending = degreeworks.pending_classes(dw) if dw_all_done else None
     if dw_all_done:
+        # Degree Works' Bachelor's Degree block is met too (it has nothing
+        # "Still needed"); checking its rules against an empty plan would
+        # only contradict it
+        met_note = ("Degree Works shows this met once your "
+                    + (f"{dw_pending[0]} " if dw_pending and dw_pending[0] else "current ")
+                    + "classes finish.") if dw_pending else "Degree Works shows this met."
+        bachelors = [{**row, "status": "ok", "detail": met_note} for row in bachelors]
         audit = degreeworks.mark_degree_complete(audit)
+        if dw_pending and dw.get("percent") is not None:
+            audit["percent"] = dw["percent"]
         if second_audit:
             second_audit = degreeworks.mark_degree_complete(second_audit)
 
@@ -1381,7 +1393,10 @@ def _plan():
         uncounted_courses=[c for c in uncounted_courses if c not in unrecognized_courses],
         hide_sync=True,
         degree_works=({"percent": dw["percent"], "catalog_year": dw["catalog_year"],
-                       "all_done": degreeworks.all_complete(dw), "count_ip": dw["count_ip"]} if dw else None),
+                       "all_done": degreeworks.all_complete(dw), "count_ip": dw["count_ip"],
+                       "in_progress": [c["code"] for c in dw["in_progress"]],
+                       "pending_term": dw_pending[0] if dw_pending else None,
+                       "pending": dw_pending[1] if dw_pending else []} if dw else None),
         catalog_meta=catalog_store.meta(),
         generated_on=f"{date.today():%B} {date.today().day}, {date.today().year}",
     )

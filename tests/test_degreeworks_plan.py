@@ -118,7 +118,8 @@ def test_described_rows_fill_the_way_degree_works_applied_them():
     # The sequence also counts in the True Blue Core, as the catalog allows
     assert sequence == ["BIOL 1110", "BIOL 1120"]
     assert other == ["CHEM 1110"]
-    assert "Using your Degree Works audit (90% there, 2023-2024 catalog)" in html
+    # Degree Works' own number, labeled, beside GradPath's
+    assert "Degree Works shows 90% under the 2023-2024 catalog" in html
 
 
 def test_matching_is_by_wording_not_order():
@@ -174,10 +175,16 @@ def test_every_major_is_complete_when_degree_works_says_so():
         assert "Nothing left to plan." in html, key
 
 
-def test_in_progress_blocks_count_only_when_the_student_counts_those_classes():
+def test_in_progress_blocks_mean_done_once_those_classes_finish():
+    # IN-PROGRESS with nothing "Still needed": nothing new to plan, either way
     blocks = [block("Major - X", "IN-PROGRESS"), block("General Education")]
-    assert degreeworks.all_complete(degreeworks.read_payload(json.dumps(payload(blocks=blocks, count_ip=True))))
-    assert not degreeworks.all_complete(degreeworks.read_payload(json.dumps(payload(blocks=blocks, count_ip=False))))
+    ip = [{"code": "CSCI 4700", "term": "Fall 2026"}]
+    counted = degreeworks.read_payload(json.dumps({**payload(blocks=blocks, count_ip=True), "in_progress": ip}))
+    waiting = degreeworks.read_payload(json.dumps({**payload(blocks=blocks, count_ip=False), "in_progress": ip}))
+    assert degreeworks.all_complete(counted) and degreeworks.all_complete(waiting)
+    # Not counted as finished: those classes are what's left
+    assert degreeworks.pending_classes(counted) is None
+    assert degreeworks.pending_classes(waiting) == ("Fall 2026", ["CSCI 4700"])
     # "Still needed" anywhere means not done, whatever the status says
     blocks = [block("Major - X", "COMPLETE", still_needed=True), block("General Education")]
     assert not degreeworks.all_complete(degreeworks.read_payload(json.dumps(payload(blocks=blocks))))
@@ -235,7 +242,7 @@ def test_malformed_audit_data_is_ignored(raw):
 
 def test_payload_never_carries_more_than_it_needs():
     data = degreeworks.read_payload(json.dumps({**payload(), "name": "Raider, Test", "student_id": "M00000000"}))
-    assert set(data) == {"major", "count_ip", "percent", "catalog_year", "blocks", "rows"}
+    assert set(data) == {"major", "count_ip", "percent", "catalog_year", "blocks", "in_progress", "rows"}
 
 
 # ── Step 3's live preview ──────────────────────────────────────────────────────
@@ -262,3 +269,31 @@ def test_step_3_preview_matches_the_plan():
 def test_step_3_preview_ignores_an_audit_for_another_major():
     assert preview(payload(major="accounting-bba")) == {}
     assert app.test_client().post("/degreeworks/preview", data={"major": CS["key"]}).get_json() == {}
+
+
+
+def test_classes_in_progress_not_counted_match_degree_works():
+    """Not counting this term's classes as finished: the headline is Degree
+    Works' own percentage and the plan adds nothing (no newer-catalog course
+    the student's catalog year doesn't require)."""
+    blocks = [block("BS - Bachelor of Science", "IN-PROGRESS"), block("General Education"),
+              block(MAJOR_BLOCK, "IN-PROGRESS"), block(AUX_BLOCK)]
+    dw = {**payload(blocks=blocks, count_ip=False), "percent": 98,
+          "in_progress": [{"code": "CSCI 4700", "term": "Fall 2026"}]}
+    html = post(dw, completed=[c for c in COMPLETED if c != "CSCI 4700"])
+    assert percent(html) == 98
+    assert "Every requirement covered after Fall 2026" in html
+    assert "Nothing left to plan after your Fall 2026 classes." in html
+    assert not re.search(r'term-card-title">', html)
+
+
+def test_bachelors_rules_follow_degree_works_when_everything_is_met():
+    blocks = [block("BS - Bachelor of Science", "IN-PROGRESS"), block("General Education"),
+              block(MAJOR_BLOCK, "IN-PROGRESS"), block(AUX_BLOCK)]
+    dw = {**payload(blocks=blocks, count_ip=False), "in_progress": [{"code": "CSCI 4700", "term": "Fall 2026"}]}
+    html = post(dw, completed=[c for c in COMPLETED if c != "CSCI 4700"])
+    rows = re.findall(r'bachelors-row bachelors-(\w+)', html)
+    assert rows and set(rows) == {"ok"}
+    assert "Degree Works shows this met once your Fall 2026 classes finish." in html
+    # No tag legend over an empty plan
+    assert 'class="plan-tag-legend"' not in html

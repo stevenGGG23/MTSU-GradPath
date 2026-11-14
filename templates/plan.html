@@ -8,17 +8,17 @@
     <strong>MTSU GradPath &mdash; degree plan</strong>
     <span>Generated {{ generated_on }} &middot; An unofficial planning estimate, not a Degree Works audit.</span>
   </div>
-  <div class="d-flex justify-content-between align-items-start mb-4 flex-column flex-md-row gap-3">
-    <div>
-      <h2 class="mb-2">Your recommended plan</h2>
+  <div class="plan-header">
+    <div class="plan-header-text">
+      <h2 class="plan-title">Your recommended plan</h2>
       {% set extras = ([second_audit.label] if second_audit else []) + (minor_audits | map(attribute='label') | list) %}
-      <p class="text-muted mb-0">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %}{% if plan %} — suggested sequence for the next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}{% else %} — every requirement is covered{% endif %}.</p>
-      {% if catalog_url %}<p class="small mb-0 mt-1 no-print"><a class="program-link" href="{{ catalog_url }}" target="_blank" rel="noopener">Check the official requirements in the catalog <i class="bi bi-box-arrow-up-right"></i></a></p>{% endif %}
+      <p class="plan-subtitle">{{ degree_name }}{% if extras %} with {{ extras | join(', ') }}{% endif %}{% if plan %} &middot; next {{ semesters }} terms{% if include_summer %}, including summer{% endif %}{% else %} &middot; every requirement is covered{% endif %}</p>
+      {% if catalog_url %}<a class="program-link small no-print" href="{{ catalog_url }}" target="_blank" rel="noopener">Official requirements in the catalog <i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
     </div>
-    <div class="d-flex gap-2 plan-actions">
-      <a class="btn btn-outline-light text-nowrap" href="/"><i class="bi bi-pencil me-1"></i>Edit completed courses</a>
-      <a class="btn btn-success text-nowrap" href="{{ schedule_planner_url }}" target="_blank" rel="noopener"><i class="bi bi-calendar-week me-1"></i>Build my schedule</a>
-      <button type="button" class="btn btn-primary text-nowrap" id="download-pdf"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF</button>
+    <div class="plan-actions">
+      <a class="btn plan-btn" href="/">Edit courses</a>
+      <button type="button" class="btn plan-btn" id="download-pdf">Download PDF</button>
+      <a class="btn plan-btn plan-btn-primary" href="{{ schedule_planner_url }}" target="_blank" rel="noopener">Build my schedule</a>
     </div>
   </div>
 
@@ -80,10 +80,25 @@
       </div>
     </div>
     <div class="progress-summary-detail">
+      {% set dw = degree_works %}
+      {% if dw and dw.pending %}
+      {# Matches Degree Works: everything met once the classes in progress finish #}
+      <h4 class="mb-1">Every requirement covered after {{ dw.pending_term or 'this term' }}</h4>
+      <p class="text-muted mb-3">{{ dw.percent }}% complete in Degree Works{% if dw.catalog_year %} ({{ dw.catalog_year }} catalog){% endif %}. The rest is your classes in progress: {{ dw.pending | join(', ') }}.</p>
+      {% else %}
       <h4 class="mb-1">{{ audit.total_completed }} / {{ audit.total_required }} credit hours</h4>
       <p class="text-muted mb-3">Toward the {{ audit.total_required }}-hour {{ degree_name }} degree.</p>
-      {% if degree_works %}
-      <p class="dw-plan-note mb-3"><i class="bi bi-file-earmark-check me-1"></i>Using your Degree Works audit{% if degree_works.percent is not none %} ({{ degree_works.percent }}% there{% if degree_works.catalog_year %}, {{ degree_works.catalog_year }} catalog{% endif %}){% endif %}: requirements it shows as met count here{% if degree_works.all_done %}, and it shows every requirement met{% endif %}.</p>
+      {% endif %}
+      {% if dw and not dw.pending and dw.percent is not none %}
+      <p class="dw-plan-note mb-3">
+        {% if dw.all_done and dw.percent < 100 and dw.in_progress %}
+        Degree Works shows {{ dw.percent }}% until {{ dw.in_progress | join(', ') }} finish{{ 'es' if dw.in_progress | length == 1 }}; they're counted as finished here, as you chose.
+        {% elif dw.all_done %}
+        Degree Works shows every requirement met.
+        {% else %}
+        Degree Works shows {{ dw.percent }}%{% if dw.catalog_year %} under the {{ dw.catalog_year }} catalog{% endif %}. This plan follows the {{ (catalog_meta.name or '') | replace(' Undergraduate Catalog', '') or 'current' }} requirements, so the two can differ; requirements Degree Works shows as met count here.
+        {% endif %}
+      </p>
       {% endif %}
       <div class="category-bars">
         {% for group in audit.groups %}
@@ -105,7 +120,7 @@
   {% set extra_programs = ([second_audit] if second_audit else []) + minor_audits %}
   {% if extra_programs %}
   <div class="mb-4">
-    <h5 class="extra-progress-title">{{ 'Second major & minors' if second_audit and minor_audits else ('Second major' if second_audit else ('Minors' if minor_audits|length > 1 else 'Minor')) }}</h5>
+    <h3 class="plan-section-title plan-subsection-title">{{ 'Second major & minors' if second_audit and minor_audits else ('Second major' if second_audit else ('Minors' if minor_audits|length > 1 else 'Minor')) }}</h3>
     <p class="text-muted small mb-3">Tracked on their own, separate from the {{ audit.total_required }}-hour degree above. Courses that also meet a major requirement count toward both.</p>
     <div class="extra-progress-grid">
       {% for prog in extra_programs %}
@@ -125,65 +140,27 @@
     </div>
   </div>
   {% endif %}
-  {% if bachelors %}
-  <div class="mb-4 plan-section plan-bachelors">
-    <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-mortarboard text-primary"></i>Bachelor's degree requirements</h4>
-    <p class="text-muted small mb-2">MTSU's rules for every bachelor's degree &mdash; the &ldquo;Bachelor's Degree&rdquo; block in Degree Works. Even with every course done, you don't graduate without these. GradPath can't see where earlier credit was earned, so confirm the rest in Degree Works.</p>
-    <div class="bachelors-list">
-      {% for row in bachelors %}
-      <div class="bachelors-row bachelors-{{ row.status }}">
-        {% set status_help = {'ok': 'Met: this plan covers it.', 'warn': 'Not met yet: see the note next to it.', 'info': "GradPath can't confirm this from your plan alone: read the note next to it, then check Degree Works."}[row.status] %}
-        <span class="bachelors-icon" tabindex="0" role="img" aria-label="{{ status_help }}" data-bs-toggle="tooltip" data-bs-placement="right" title="{{ status_help }}">{% if row.status == 'ok' %}<i class="bi bi-check-circle-fill"></i>{% elif row.status == 'warn' %}<i class="bi bi-exclamation-triangle-fill"></i>{% else %}<i class="bi bi-info-circle"></i>{% endif %}</span>
-        <div>
-          <div class="bachelors-title">{{ row.title }}<span class="visually-hidden"> &mdash; {{ {'ok': 'met in this plan', 'warn': 'not met yet', 'info': 'check in Degree Works'}[row.status] }}</span></div>
-          <div class="bachelors-detail">{{ row.detail }}</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
   {% endif %}
-  <div class="mb-4 plan-section plan-requirements">
-    <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-clipboard-check text-primary"></i>Requirement details</h4>
-    <div class="accordion" id="auditAccordion">
-      {% for group in audit.groups + (second_audit.groups if second_audit else []) + minor_audits %}
-      <div class="accordion-item">
-        <h2 class="accordion-header" id="auditHeading{{ loop.index }}">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#auditCollapse{{ loop.index }}" aria-expanded="false" aria-controls="auditCollapse{{ loop.index }}">
-            {{ group.label }}
-            <span class="badge {{ 'bg-success' if group.completed_hours >= group.required_hours else 'bg-secondary' }} ms-3">{{ group.completed_hours }} / {{ group.required_hours }} cr hrs</span>
-          </button>
-        </h2>
-        <div id="auditCollapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="auditHeading{{ loop.index }}" data-bs-parent="#auditAccordion">
-          <div class="accordion-body">
-            {% for item in group.entries %}
-            <div class="audit-item {{ 'audit-item-done' if item.done }}">
-              <div class="audit-item-top">
-                <span class="audit-item-status">{{ '✓' if item.done else '○' }}</span>
-                <span class="audit-item-label">{{ item.label }}</span>
-                <span class="audit-item-hours">
-                  {% if item.partial_hours is defined %}{{ item.partial_hours }} / {% endif %}{{ item.hours }} cr hr{{ 's' if item.hours != 1 else '' }}
-                </span>
-              </div>
-              {% if item.applied %}
-              <div class="audit-item-applied">Counted: {{ item.applied | join(', ') }}</div>
-              {% endif %}
-              {% if item.suggestions %}
-              <div class="audit-item-suggestions">e.g. {{ item.suggestions | join(', ') }}</div>
-              {% endif %}
-            </div>
-            {% endfor %}
-          </div>
-        </div>
+
+  {% if next_courses %}
+  <div class="next-step-card no-print">
+    <div class="next-step-text">
+      <h3 class="next-step-title">Next step: pick class times for {{ next_term }}</h3>
+      <p class="next-step-sub">Add these courses in MTSU's Schedule Planner to see days, times and open seats.</p>
+      <div class="next-step-courses" id="next-courses">
+        {% for code in next_courses %}<span class="next-course-badge">{{ code }}</span>{% endfor %}
       </div>
-      {% endfor %}
+    </div>
+    <div class="next-step-actions">
+      <button type="button" class="btn plan-btn" id="copy-next-courses">Copy course list</button>
+      <a class="btn plan-btn plan-btn-primary" href="{{ schedule_planner_url }}" target="_blank" rel="noopener">Open Schedule Planner <i class="bi bi-box-arrow-up-right ms-1"></i></a>
     </div>
   </div>
   {% endif %}
 
   {% if term_hours %}
   <div class="mb-4 plan-section plan-chart">
-    <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-bar-chart-line text-primary"></i>Credit hours per term</h4>
+    <h3 class="plan-section-title">Credit hours per term</h3>
     <div class="term-chart">
       {% for term, hours in term_hours.items() %}
       {% set season, year = term.split() %}
@@ -202,50 +179,23 @@
   </div>
   {% endif %}
 
-  <div class="mb-4 plan-section plan-completed">
-    <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-check2-all text-primary"></i>Completed courses</h4>
-    {% if completed %}
-    <div class="d-flex flex-wrap gap-2 completed-badges">
-      {% for course in completed %}
-      <span class="badge bg-secondary">{{ course }}</span>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="text-muted">No completed courses were added.</p>
-    {% endif %}
-  </div>
-
-  {% if next_courses %}
-  <div class="next-step-card mb-4 no-print">
-    <div>
-      <h5 class="mb-1"><i class="bi bi-calendar-week me-1"></i>Next step: pick times for {{ next_term }}</h5>
-      <p class="mb-2 small">MTSU's Schedule Planner shows every section's days, times and open seats and builds schedules that fit. Add these courses there:</p>
-      <div class="d-flex flex-wrap gap-2" id="next-courses">
-        {% for code in next_courses %}<span class="badge next-course-badge">{{ code }}</span>{% endfor %}
-      </div>
-    </div>
-    <div class="d-flex flex-column gap-2 next-step-actions">
-      <a class="btn btn-success text-nowrap" href="{{ schedule_planner_url }}" target="_blank" rel="noopener">Open Schedule Planner <i class="bi bi-box-arrow-up-right ms-1"></i></a>
-      <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="copy-next-courses"><i class="bi bi-clipboard me-1"></i>Copy course list</button>
-    </div>
-  </div>
-  {% endif %}
-
   <div class="mb-4 plan-section plan-overview">
-    <h4 class="mb-3 d-flex align-items-center gap-2"><i class="bi bi-calendar3-range text-primary"></i>Plan overview</h4>
-    {% if faster_without_mix %}<p class="small text-muted mb-2 no-print"><i class="bi bi-lightning-charge me-1"></i>With <strong>Healthy course mix</strong> off, this plan finishes by <strong>{{ faster_without_mix }}</strong>, with more major courses in some terms. <a href="/">Change it on the first page</a>.</p>{% endif %}
+    <h3 class="plan-section-title">Plan overview</h3>
+    {% if faster_without_mix %}<p class="small text-muted mb-2 no-print">With <strong>Healthy course mix</strong> off, this plan finishes by <strong>{{ faster_without_mix }}</strong>, with more major courses in some terms. <a href="/">Change it on the first page</a>.</p>{% endif %}
+    {% if plan %}
     <div class="plan-tag-legend" aria-label="What the tags mean">
       <span class="plan-item-course"><span class="plan-item-tag">MAJ</span>Required major course</span>
       <span class="plan-item-requirement"><span class="plan-item-tag">MAJ</span>Major choice: pick a course from a list</span>
       <span class="plan-item-requirement"><span class="plan-item-tag">GEN</span>Gen-ed (True Blue Core) or elective</span>
       {% if second_audit %}<span class="plan-item-second"><span class="plan-item-tag">2ND</span>Second major</span>{% endif %}
       {% if minor_audits %}<span class="plan-item-minor"><span class="plan-item-tag">MIN</span>Minor</span>{% endif %}
-      <span class="text-muted">Hover a course to see its prerequisites.</span>
+      <span class="plan-tag-hint">Hover a course for its prerequisites</span>
     </div>
-    {% if not plan %}
-    <div class="plan-done mb-3"><i class="bi bi-mortarboard-fill me-2"></i><strong>Nothing left to plan.</strong>{% if degree_works and degree_works.all_done %} Your Degree Works audit shows every requirement met{% if degree_works.count_ip %}, counting the classes you're taking now{% endif %}. Check with your advisor that your graduation application is filed.{% endif %}</div>
     {% endif %}
-    <div class="term-grid{{ ' term-grid-years' if not include_summer }}">
+    {% if not plan %}
+    <div class="plan-done mb-3"><strong>Nothing left to plan{% if degree_works and degree_works.pending %} after your {{ degree_works.pending_term or 'current' }} classes{% endif %}.</strong>{% if degree_works and degree_works.all_done %} Degree Works shows every {{ 'other ' if degree_works.pending }}requirement met{% if not degree_works.pending and degree_works.count_ip and degree_works.in_progress %}, counting the classes you're taking now{% endif %}. Check with your advisor that your graduation application is filed.{% endif %}</div>
+    {% endif %}
+    <div class="term-grid{{ ' term-grid-years' if not include_summer }}{{ ' term-grid-single' if plan | length == 1 }}">
       {% for term, items in plan.items() %}
       <div class="term-card {{ 'term-card-remaining' if term.startswith('Remaining') }}">
         <div class="term-card-header">
@@ -283,11 +233,19 @@
       copyButton.addEventListener('click', () => {
         const list = {{ next_courses | tojson }}.join(', ');
         navigator.clipboard.writeText(list).then(() => {
-          copyButton.innerHTML = '<i class="bi bi-check2 me-1"></i>Copied';
-          setTimeout(() => { copyButton.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copy course list'; }, 2000);
+          copyButton.textContent = 'Copied';
+          setTimeout(() => { copyButton.textContent = 'Copy course list'; }, 2000);
         }).catch(() => {});
       });
     }
+
+    // The completed-courses list is folded on screen; the printout shows it
+    window.addEventListener('beforeprint', () => {
+      document.querySelectorAll('details.plan-fold').forEach(d => { d.dataset.wasOpen = d.open ? '1' : ''; d.open = true; });
+    });
+    window.addEventListener('afterprint', () => {
+      document.querySelectorAll('details.plan-fold').forEach(d => { d.open = d.dataset.wasOpen === '1'; });
+    });
 
     document.getElementById('download-pdf').addEventListener('click', () => {
       const title = document.title;
@@ -300,7 +258,7 @@
 
   {% if personal_mermaid or personal_standalone %}
   <div class="mb-2 plan-section plan-prereq-path">
-    <h4 class="mb-1 d-flex align-items-center gap-2"><i class="bi bi-diagram-2 text-primary"></i>Your prerequisite path</h4>
+    <h3 class="plan-section-title">Your prerequisite path</h3>
     <p class="text-muted mb-3">How your courses unlock each other: an arrow from one course to another means the first is a prerequisite for the second. Hover a course in the plan above to read its prerequisites in words.</p>
     <div class="personal-prereq-legend mb-3">
       <span class="legend-item"><span class="legend-swatch" style="background:#16a34a;"></span>Completed</span>
@@ -311,7 +269,7 @@
     {% if personal_mermaid %}
     <div class="map-viewer">
       <div class="map-viewer-toolbar" role="toolbar" aria-label="Map controls">
-        <button type="button" class="btn btn-sm btn-primary" data-map-full aria-pressed="false"><i class="bi bi-arrows-fullscreen me-1"></i>Full screen</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-map-full aria-pressed="false"><i class="bi bi-arrows-fullscreen me-1"></i>Full screen</button>
         <div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
           <button type="button" class="btn btn-outline-secondary" data-map-out title="Zoom out" aria-label="Zoom out"><i class="bi bi-zoom-out"></i></button>
           <span class="btn btn-outline-secondary disabled map-zoom-label" data-map-zoom-label>100%</span>
@@ -348,5 +306,79 @@
   </script>
   {% endif %}
   {% endif %}
+
+  {% if audit %}
+  <div class="mb-4 plan-section plan-requirements">
+    <h3 class="plan-section-title">Requirement details</h3>
+    <div class="accordion" id="auditAccordion">
+      {% for group in audit.groups + (second_audit.groups if second_audit else []) + minor_audits %}
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="auditHeading{{ loop.index }}">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#auditCollapse{{ loop.index }}" aria-expanded="false" aria-controls="auditCollapse{{ loop.index }}">
+            {{ group.label }}
+            <span class="badge {{ 'bg-success' if group.completed_hours >= group.required_hours else 'bg-secondary' }} ms-3">{{ group.completed_hours }} / {{ group.required_hours }} cr hrs</span>
+          </button>
+        </h2>
+        <div id="auditCollapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="auditHeading{{ loop.index }}" data-bs-parent="#auditAccordion">
+          <div class="accordion-body">
+            {% for item in group.entries %}
+            <div class="audit-item {{ 'audit-item-done' if item.done }}">
+              <div class="audit-item-top">
+                <span class="audit-item-status">{{ '✓' if item.done else '○' }}</span>
+                <span class="audit-item-label">{{ item.label }}</span>
+                <span class="audit-item-hours">
+                  {% if item.partial_hours is defined %}{{ item.partial_hours }} / {% endif %}{{ item.hours }} cr hr{{ 's' if item.hours != 1 else '' }}
+                </span>
+              </div>
+              {% if item.applied %}
+              <div class="audit-item-applied">Counted: {{ item.applied | join(', ') }}</div>
+              {% endif %}
+              {% if item.suggestions %}
+              <div class="audit-item-suggestions">e.g. {{ item.suggestions | join(', ') }}</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if bachelors %}
+  <div class="mb-4 plan-section plan-bachelors">
+    <h3 class="plan-section-title">Bachelor's degree requirements</h3>
+    <p class="text-muted small mb-2">MTSU's rules for every bachelor's degree &mdash; the &ldquo;Bachelor's Degree&rdquo; block in Degree Works. Even with every course done, you don't graduate without these. GradPath can't see where earlier credit was earned, so confirm the rest in Degree Works.</p>
+    <div class="bachelors-list">
+      {% for row in bachelors %}
+      <div class="bachelors-row bachelors-{{ row.status }}">
+        {% set status_help = {'ok': 'Met: this plan covers it.', 'warn': 'Not met yet: see the note next to it.', 'info': "GradPath can't confirm this from your plan alone: read the note next to it, then check Degree Works."}[row.status] %}
+        <span class="bachelors-icon" tabindex="0" role="img" aria-label="{{ status_help }}" data-bs-toggle="tooltip" data-bs-placement="right" title="{{ status_help }}">{% if row.status == 'ok' %}<i class="bi bi-check-circle-fill"></i>{% elif row.status == 'warn' %}<i class="bi bi-exclamation-triangle-fill"></i>{% else %}<i class="bi bi-info-circle"></i>{% endif %}</span>
+        <div>
+          <div class="bachelors-title">{{ row.title }}<span class="visually-hidden"> &mdash; {{ {'ok': 'met in this plan', 'warn': 'not met yet', 'info': 'check in Degree Works'}[row.status] }}</span></div>
+          <div class="bachelors-detail">{{ row.detail }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="plan-section plan-completed">
+    {% if completed %}
+    <details class="plan-fold">
+      <summary class="plan-section-title">Completed courses <span class="plan-count">{{ completed | length }}</span></summary>
+      <ul class="completed-list">
+        {% for course in completed %}
+        {% set code, _, rest = course.partition(' - ') %}
+        {% set title, _, hours = rest.partition(' — ') %}
+        <li><span class="completed-code">{{ code }}</span><span class="completed-title">{{ title }}</span>{% if hours %}<span class="completed-hours">{{ hours | replace(' credit hours', ' cr') | replace(' credit hour', ' cr') }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% else %}
+    <h3 class="plan-section-title">Completed courses</h3>
+    <p class="text-muted mb-0">No completed courses were added.</p>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

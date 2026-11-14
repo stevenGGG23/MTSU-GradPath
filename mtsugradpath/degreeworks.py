@@ -94,6 +94,10 @@ def read_payload(raw):
                 "context": [text(c) for c in (row.get("context") or [])[:4]],
                 "codes": codes,
             })
+    in_progress = []
+    for item in (data.get("in_progress") or [])[:40]:
+        if isinstance(item, dict) and isinstance(item.get("code"), str) and _CODE_RE.fullmatch(item["code"]):
+            in_progress.append({"code": item["code"], "term": text(item.get("term"), 20)})
     percent = data.get("percent")
     return {
         "major": data["major"][:200],
@@ -101,26 +105,44 @@ def read_payload(raw):
         "percent": percent if isinstance(percent, (int, float)) and 0 <= percent <= 100 else None,
         "catalog_year": text(data.get("catalog_year"), 20),
         "blocks": blocks,
+        "in_progress": in_progress,
         "rows": rows,
     }
 
 
-def _met(block, count_ip):
-    return not block["still_needed"] and block["status"] in (_DONE_WITH_IP if count_ip else _DONE)
+def _met(block):
+    """Done, or done once the classes in progress finish (IN-PROGRESS with
+    nothing "Still needed") -- nothing new has to be planned for it."""
+    return not block["still_needed"] and block["status"] in _DONE_WITH_IP
 
 
 def gen_ed_complete(payload):
     """Degree Works marks the General Education / True Blue Core block done."""
     return any(
-        re.search(r"general education|true blue core|\bgen(eral)? ed\b", b["title"], re.I) and _met(b, payload["count_ip"])
+        re.search(r"general education|true blue core|\bgen(eral)? ed\b", b["title"], re.I) and _met(b)
         for b in payload["blocks"]
     )
 
 
 def all_complete(payload):
-    """Every block done and nothing "Still needed" anywhere."""
+    """Every block done (or done once the classes in progress finish) and
+    nothing "Still needed" anywhere: nothing left to plan."""
     blocks = payload["blocks"]
-    return bool(blocks) and all(_met(b, payload["count_ip"]) for b in blocks)
+    return bool(blocks) and all(_met(b) for b in blocks)
+
+
+def pending_classes(payload):
+    """The classes in progress still between the student and "everything
+    met", when they chose not to count them as finished: (term, [codes])."""
+    if payload["count_ip"] or not payload["in_progress"] or not all_complete(payload):
+        return None
+    terms = sorted({c["term"] for c in payload["in_progress"] if c["term"]}, key=_term_key)
+    return (terms[-1] if terms else ""), [c["code"] for c in payload["in_progress"]]
+
+
+def _term_key(term):
+    m = re.match(r"(Spring|Summer|Fall|Winter) (\d{4})$", term or "")
+    return (int(m.group(2)), ["Spring", "Summer", "Fall", "Winter"].index(m.group(1))) if m else (0, 0)
 
 
 _GEN_ED_BLOCK = re.compile(r"general education|true blue core|\bgen(eral)? ed\b", re.I)
@@ -220,7 +242,7 @@ def minor_complete(payload, minor_name):
     want = base(minor_name)
     for block in payload["blocks"]:
         m = re.match(r"\s*minor\s*[-–:]\s*(.+)", block["title"], re.I)
-        if m and base(m.group(1)) == want and _met(block, payload["count_ip"]):
+        if m and base(m.group(1)) == want and _met(block):
             return True
     return False
 
